@@ -1,0 +1,37 @@
+import json
+from datetime import datetime, timezone
+from redis import Redis
+from redis.exceptions import RedisError
+
+from src.core.config import settings
+
+QUEUE_KEY = "deployment:jobs"
+
+
+def _redis() -> Redis:
+    return Redis.from_url(settings.redis_url, decode_responses=True)
+
+
+def enqueue_deployment(*, deployment_id: str, project_id: str, image_ref: str) -> bool:
+    job = {
+        "deployment_id": deployment_id,
+        "project_id": project_id,
+        "image_ref": image_ref,
+        "queued_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        _redis().rpush(QUEUE_KEY, json.dumps(job))
+    except RedisError:
+        return False
+    return True
+
+
+def pop_deployment_job(timeout_seconds: int = 5) -> dict | None:
+    try:
+        result = _redis().blpop(QUEUE_KEY, timeout=timeout_seconds)
+    except RedisError:
+        return None
+    if not result:
+        return None
+    _, payload = result
+    return json.loads(payload)

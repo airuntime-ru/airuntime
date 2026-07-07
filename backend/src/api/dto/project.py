@@ -1,0 +1,37 @@
+from datetime import datetime
+from enum import Enum
+from uuid import UUID
+
+from pydantic import BaseModel, Field
+
+
+class ProjectType(str, Enum):
+    telegram_bot = "telegram_bot"
+    website = "website"
+
+
+class ProjectCreateRequest(BaseModel):
+    type: ProjectType
+    name: str = Field(min_length=2, max_length=120)
+    description: str = Field(default="", max_length=2000)
+
+
+class ProjectUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=120)
+    description: str | None = Field(default=None, max_length=2000)
+    status: str | None = Field(default=None, max_length=64)
+
+
+class ProjectResponse(BaseModel):
+    id: UUID
+    type: ProjectType
+    name: str
+    description: str
+    status: str
+    logs: str
+    deployment_url: str | None
+    git_history: str
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
