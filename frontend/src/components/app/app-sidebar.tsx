@@ -19,7 +19,7 @@ export function AppSidebar({ credits, onLogout }: { credits: number; onLogout: (
   const pathname = usePathname();
 
   return (
-    <aside className="glass fixed left-4 top-4 z-20 flex h-[calc(100vh-2rem)] w-64 flex-col rounded-[var(--ar-radius-xl)] p-4">
+    <aside className="glass fixed left-4 top-4 z-20 hidden h-[calc(100vh-2rem)] w-64 flex-col rounded-[var(--ar-radius-xl)] p-4 lg:flex">
       <div className="mb-6">
         <Logo href="/app" variant="full" theme="dark" size="sm" />
         <p className="mt-2 text-lg font-semibold text-[var(--ar-cloud)]">Рабочая область</p>

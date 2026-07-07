@@ -51,8 +51,8 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-semibold text-[var(--ar-cloud)]">Настройки</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold text-[var(--ar-cloud)] sm:text-3xl">Настройки</h1>
         <Button variant="ghost" onClick={loadProviders}>
           Обновить
         </Button>

@@ -63,12 +63,12 @@ export default function ProjectSecretsPage() {
       <Card className="space-y-3" hover={false}>
         <Input placeholder="Secret key" value={key} onChange={(e) => setKey(e.target.value)} />
         <Input placeholder="Secret value" type="password" value={value} onChange={(e) => setValue(e.target.value)} />
-        <Button variant="accent" onClick={onCreate}>
-          Store secret
+        <Button variant="accent" className="w-full sm:w-auto" onClick={onCreate}>
+          Сохранить
         </Button>
       </Card>
       {secrets.map((secret) => (
-        <Card key={secret.id} className="flex items-center justify-between" hover={false}>
+        <Card key={secret.id} className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between" hover={false}>
           <div>
             <p className="font-medium text-[var(--ar-cloud)]">{secret.key}</p>
             <p className="text-xs text-[var(--ar-stone)]">Encrypted at rest</p>

@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
-import { Paperclip, Pin, PinOff, Plus, Search, X } from "lucide-react";
+import { ArrowLeft, Paperclip, Pin, PinOff, Plus, Search, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 
@@ -56,6 +56,7 @@ export default function ProjectChatPage() {
   const [pendingFiles, setPendingFiles] = useState<ChatFileType[]>([]);
   const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [mobilePanel, setMobilePanel] = useState<"list" | "chat">("list");
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -110,6 +111,7 @@ export default function ProjectChatPage() {
     setChatId(chat.id);
     setMessages([]);
     setPendingFiles([]);
+    setMobilePanel("chat");
   };
 
   const togglePin = (id: string) => {
@@ -204,11 +206,17 @@ export default function ProjectChatPage() {
   };
 
   return (
-    <div className="mx-auto flex h-[calc(100vh-14rem)] max-w-6xl gap-4">
-      <Card hover={false} className="flex w-72 shrink-0 flex-col p-3">
+    <div className="mx-auto flex min-h-[calc(100dvh-11rem)] max-w-6xl flex-col gap-3 lg:min-h-[calc(100vh-14rem)] lg:flex-row lg:gap-4">
+      <Card
+        hover={false}
+        className={cn(
+          "flex w-full flex-col p-3 lg:w-72 lg:shrink-0",
+          mobilePanel === "chat" ? "hidden lg:flex" : "flex"
+        )}
+      >
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-medium text-[var(--ar-cloud)]">Chats</h2>
-          <Button variant="ghost" size="sm" onClick={onNewChat} aria-label="New chat">
+          <h2 className="text-sm font-medium text-[var(--ar-cloud)]">Чаты</h2>
+          <Button variant="ghost" size="sm" onClick={onNewChat} aria-label="Новый чат">
             <Plus size={16} />
           </Button>
         </div>
@@ -217,11 +225,11 @@ export default function ProjectChatPage() {
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search chats"
+            placeholder="Поиск чатов"
             className="w-full rounded-[var(--ar-radius-md)] border border-white/10 bg-white/5 py-2 pl-8 pr-3 text-sm text-[var(--ar-cloud)] placeholder:text-[var(--ar-stone)] focus:outline-none focus:ring-2 focus:ring-[var(--ar-sky)]/30"
           />
         </div>
-        <div className="flex-1 space-y-1 overflow-y-auto">
+        <div className="max-h-[42dvh] flex-1 space-y-1 overflow-y-auto lg:max-h-none">
           {filteredChats.map((chat) => (
             <div
               key={chat.id}
@@ -233,7 +241,10 @@ export default function ProjectChatPage() {
               <button
                 type="button"
                 className="flex-1 truncate text-left text-sm text-[var(--ar-mist)]"
-                onClick={() => setChatId(chat.id)}
+                onClick={() => {
+                  setChatId(chat.id);
+                  setMobilePanel("chat");
+                }}
               >
                 {chat.title}
               </button>
@@ -241,7 +252,7 @@ export default function ProjectChatPage() {
                 type="button"
                 className="text-[var(--ar-stone)] hover:text-[var(--ar-sky)]"
                 onClick={() => togglePin(chat.id)}
-                aria-label={pinned.includes(chat.id) ? "Unpin chat" : "Pin chat"}
+                aria-label={pinned.includes(chat.id) ? "Открепить чат" : "Закрепить чат"}
               >
                 {pinned.includes(chat.id) ? <Pin size={14} /> : <PinOff size={14} />}
               </button>
@@ -250,10 +261,23 @@ export default function ProjectChatPage() {
         </div>
       </Card>
 
-      <div className="flex min-w-0 flex-1 flex-col gap-3">
-        <Card hover={false} className="flex-1 space-y-3 overflow-y-auto">
+      <div
+        className={cn(
+          "flex min-h-0 min-w-0 flex-1 flex-col gap-3",
+          mobilePanel === "list" ? "hidden lg:flex" : "flex"
+        )}
+      >
+        <div className="flex items-center gap-2 lg:hidden">
+          <Button variant="ghost" size="sm" onClick={() => setMobilePanel("list")} aria-label="К списку чатов">
+            <ArrowLeft size={16} />
+          </Button>
+          <p className="truncate text-sm text-[var(--ar-mist)]">
+            {filteredChats.find((chat) => chat.id === chatId)?.title ?? "Чат"}
+          </p>
+        </div>
+        <Card hover={false} className="min-h-[40dvh] flex-1 space-y-3 overflow-y-auto lg:min-h-0">
           {messages.length === 0 ? (
-            <p className="text-sm text-[var(--ar-stone)]">Start a conversation to build or deploy your project.</p>
+            <p className="text-sm text-[var(--ar-stone)]">Начните диалог — опишите, что нужно сделать.</p>
           ) : null}
           {messages.map((message, index) => (
             <div
@@ -311,7 +335,7 @@ export default function ProjectChatPage() {
             className="pr-24"
             value={input}
             onChange={(event) => setInput(event.target.value)}
-            placeholder="Ask AIRuntime to build, test, or deploy..."
+            placeholder="Опишите задачу..."
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
@@ -326,12 +350,12 @@ export default function ProjectChatPage() {
               size="sm"
               onClick={onPickFiles}
               disabled={uploading || !chatId}
-              aria-label="Attach files"
+              aria-label="Прикрепить файлы"
             >
               <Paperclip size={16} />
             </Button>
             <Button type="submit" variant="accent" size="sm" disabled={loading || uploading || !chatId}>
-              {loading ? "..." : "Send"}
+              {loading ? "..." : "Отпр."}
             </Button>
           </div>
         </form>

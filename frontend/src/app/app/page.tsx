@@ -9,14 +9,14 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-semibold text-[var(--ar-cloud)]">Обзор</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold text-[var(--ar-cloud)] sm:text-3xl">Обзор</h1>
         <Button variant="ghost" onClick={refresh}>
           Обновить
         </Button>
       </div>
       {error ? <p className="text-sm text-rose-300">{error}</p> : null}
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
         <Card>
           <p className="text-sm text-[var(--ar-stone)]">Проекты</p>
           <p className="mt-2 text-2xl font-semibold tabular-nums text-[var(--ar-cloud)]">{projects.length}</p>

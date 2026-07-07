@@ -33,16 +33,16 @@ export default function ProjectsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-semibold text-[var(--ar-cloud)]">Проекты</h1>
-        <Button variant="ghost" onClick={refresh}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold text-[var(--ar-cloud)] sm:text-3xl">Проекты</h1>
+        <Button variant="ghost" size="sm" onClick={refresh}>
           Обновить
         </Button>
       </div>
       <Card className="space-y-3" hover={false}>
         <Input placeholder="Название проекта" value={name} onChange={(event) => setName(event.target.value)} />
         <Textarea placeholder="Описание" value={description} onChange={(event) => setDescription(event.target.value)} />
-        <div className="flex gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:w-auto">
           <Button variant={type === "website" ? "default" : "ghost"} onClick={() => setType("website")}>
             Сайт
           </Button>
@@ -50,7 +50,7 @@ export default function ProjectsPage() {
             Telegram-бот
           </Button>
         </div>
-        <Button variant="accent" onClick={onCreate}>
+        <Button variant="accent" className="w-full sm:w-auto" onClick={onCreate}>
           Создать проект
         </Button>
       </Card>
@@ -59,14 +59,17 @@ export default function ProjectsPage() {
         <EmptyState title="Пока нет проектов" description="Создайте первый проект выше." />
       ) : null}
       {projects.map((project) => (
-        <Card key={project.id} className="flex items-center justify-between">
-          <div>
+        <Card key={project.id} className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
             <p className="font-medium text-[var(--ar-cloud)]">{project.name}</p>
             <p className="text-sm text-[var(--ar-stone)]">
               {project.type} • {project.status}
             </p>
           </div>
-          <Link href={`/app/projects/${project.id}`} className="text-sm text-[var(--ar-sky)] hover:underline">
+          <Link
+            href={`/app/projects/${project.id}`}
+            className="text-sm text-[var(--ar-sky)] hover:underline sm:shrink-0"
+          >
             Открыть
           </Link>
         </Card>

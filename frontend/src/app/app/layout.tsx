@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AppSidebar } from "@/components/app/app-sidebar";
+import { AppMobileHeader, AppMobileNav } from "@/components/app/app-mobile-nav";
 import { PageLoader } from "@/components/ui/loader";
 import { getAccessToken } from "@/lib/auth";
 import { getMe, logout, refreshSession } from "@/lib/api";
@@ -51,7 +52,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen atmosphere">
       <AppSidebar credits={credits} onLogout={onLogout} />
-      <main className="ml-72 min-h-screen p-8">{children}</main>
+      <AppMobileHeader credits={credits} />
+      <AppMobileNav credits={credits} onLogout={onLogout} />
+      <main className="min-h-screen px-4 pb-24 pt-16 lg:ml-72 lg:p-8 lg:pb-8 lg:pt-8">{children}</main>
     </div>
   );
 }

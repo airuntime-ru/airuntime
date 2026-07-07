@@ -44,11 +44,13 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       <div>
-        <p className="text-sm text-[var(--ar-stone)]">{project.type}</p>
-        <h1 className="text-3xl font-semibold text-[var(--ar-cloud)]">{project.name}</h1>
-        <p className="mt-2 text-[var(--ar-mist)]">{project.description || "Описание пока не добавлено."}</p>
+        <p className="text-xs text-[var(--ar-stone)] sm:text-sm">{project.type}</p>
+        <h1 className="text-2xl font-semibold text-[var(--ar-cloud)] sm:text-3xl">{project.name}</h1>
+        <p className="mt-2 text-sm text-[var(--ar-mist)] sm:text-base">
+          {project.description || "Описание пока не добавлено."}
+        </p>
       </div>
       <Tabs items={tabs} />
       {children}

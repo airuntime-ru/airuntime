@@ -27,7 +27,7 @@ export default function ProjectOverviewPage() {
   if (!project) return <PageLoader />;
 
   return (
-    <div className="grid gap-4 md:grid-cols-3">
+    <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
       <Card>
         <p className="text-sm text-[var(--ar-stone)]">Status</p>
         <div className="mt-2">
@@ -40,7 +40,9 @@ export default function ProjectOverviewPage() {
       </Card>
       <Card>
         <p className="text-sm text-[var(--ar-stone)]">Deployment URL</p>
-        <p className="mt-2 text-sm text-[var(--ar-sky)]">{project.deployment_url ?? "Deploy to generate a live URL"}</p>
+        <p className="mt-2 break-all text-sm text-[var(--ar-sky)]">
+          {project.deployment_url ?? "Запустите проект, чтобы получить ссылку"}
+        </p>
       </Card>
     </div>
   );

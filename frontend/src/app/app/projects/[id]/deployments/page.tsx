@@ -72,19 +72,19 @@ export default function ProjectDeploymentsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-end gap-2">
-        <Button variant="ghost" onClick={loadDeployments}>
-          Refresh
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <Button variant="ghost" size="sm" onClick={loadDeployments}>
+          Обновить
         </Button>
-        <Button variant="accent" onClick={onDeploy}>
-          Deploy
+        <Button variant="accent" size="sm" className="w-full sm:w-auto" onClick={onDeploy}>
+          Запустить
         </Button>
       </div>
       {error ? <p className="text-sm text-rose-300">{error}</p> : null}
       {deployments.map((item) => (
         <Card key={item.id} className="space-y-3" hover={false}>
-          <div className="flex items-center justify-between">
-            <p className="font-medium text-[var(--ar-cloud)]">{item.image_ref ?? "runtime image"}</p>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="break-all font-medium text-[var(--ar-cloud)]">{item.image_ref ?? "образ приложения"}</p>
             <Badge className={statusTone(item.status)}>{item.status}</Badge>
           </div>
           <div className="h-2 overflow-hidden rounded-full bg-[var(--ar-surface-1)]">
