@@ -27,6 +27,7 @@ jobs:
         ports:
           - 6379:6379
     env:
+      PYTHONPATH: backend
       DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/airuntime_test
       REDIS_URL: redis://localhost:6379/0
       JWT_SECRET_KEY: test-secret
