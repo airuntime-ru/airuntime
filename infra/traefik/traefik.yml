@@ -21,10 +21,9 @@ certificatesResolvers:
         entryPoint: web
 
 providers:
-  docker:
-    endpoint: unix:///var/run/docker.sock
-    exposedByDefault: false
-    network: airuntime_public
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
 
 log:
   level: INFO

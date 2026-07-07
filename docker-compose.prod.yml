@@ -20,16 +20,12 @@ services:
   traefik:
     image: traefik:v3.5
     restart: unless-stopped
-    environment:
-      DOCKER_API_VERSION: "1.44"
-    security_opt:
-      - no-new-privileges:true
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./infra/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./infra/traefik/dynamic:/etc/traefik/dynamic:ro
       - traefik_letsencrypt:/letsencrypt
     networks:
       - public
