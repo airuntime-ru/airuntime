@@ -3,7 +3,7 @@ import Link from "next/link";
 
 import { cn } from "@/lib/cn";
 
-type LogoVariant = "full" | "mark";
+type LogoVariant = "full" | "mark" | "stacked";
 type LogoTheme = "light" | "dark";
 
 const heights: Record<"sm" | "md" | "lg", number> = {
@@ -12,14 +12,24 @@ const heights: Record<"sm" | "md" | "lg", number> = {
   lg: 48,
 };
 
+const aspect: Record<LogoVariant, number> = {
+  mark: 1,
+  full: 5.05,
+  stacked: 1,
+};
+
 const sources: Record<LogoVariant, Record<LogoTheme, string>> = {
   full: {
-    light: "/brand/logo.svg",
-    dark: "/brand/logo-dark.svg",
+    light: "/brand/logo-wordmark.png",
+    dark: "/brand/logo-wordmark.png",
   },
   mark: {
-    light: "/brand/logo-mark.svg",
-    dark: "/brand/logo-mark.svg",
+    light: "/brand/logo-mark.png",
+    dark: "/brand/logo-mark.png",
+  },
+  stacked: {
+    light: "/brand/logo-full.png",
+    dark: "/brand/logo-full.png",
   },
 };
 
@@ -41,7 +51,7 @@ export function Logo({
   priority = false,
 }: LogoProps) {
   const height = heights[size];
-  const width = variant === "mark" ? height : Math.round(height * 0.89);
+  const width = Math.round(height * aspect[variant]);
   const src = sources[variant][theme];
 
   const image = (
@@ -51,7 +61,7 @@ export function Logo({
       width={width}
       height={height}
       priority={priority}
-      className={cn("h-auto w-auto", className)}
+      className={cn("h-auto w-auto object-contain", className)}
       style={{ height, width: "auto", maxWidth: width }}
     />
   );

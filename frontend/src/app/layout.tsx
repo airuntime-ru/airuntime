@@ -23,11 +23,12 @@ export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   icons: {
     icon: [
-      { url: "/icon.svg", type: "image/svg+xml" },
-      { url: "/brand/logo-mark.svg", type: "image/svg+xml" },
+      { url: "/favicon.ico", sizes: "48x48", type: "image/x-icon" },
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
     ],
-    apple: "/brand/logo-mark.svg",
-    shortcut: "/icon.svg",
+    apple: "/apple-touch-icon.png",
+    shortcut: "/favicon.ico",
   },
   manifest: "/site.webmanifest",
   openGraph: {
@@ -38,9 +39,9 @@ export const metadata: Metadata = {
     type: "website",
     images: [
       {
-        url: "/brand/logo-dark.svg",
-        width: 480,
-        height: 220,
+        url: "/brand/logo-full.png",
+        width: 1024,
+        height: 1024,
         alt: "AIRuntime",
       },
     ],
@@ -49,7 +50,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "AIRuntime",
     description: "Опишите. Мы воплотим.",
-    images: ["/brand/logo-dark.svg"],
+    images: ["/brand/logo-full.png"],
   },
 };
 
