@@ -1,6 +1,5 @@
 import mimetypes
 import re
-import uuid
 from functools import lru_cache
 
 import boto3
@@ -114,10 +113,14 @@ class ObjectStorageService:
         extension = "." + safe_name.rsplit(".", 1)[-1].lower() if "." in safe_name else ""
         resolved_type = _guess_content_type(safe_name, content_type)
         if resolved_type not in ALLOWED_CONTENT_TYPES and extension not in ALLOWED_EXTENSIONS:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported file type")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported file type"
+            )
         return resolved_type
 
-    def build_object_key(self, *, project_id: str, chat_id: str, file_id: str, filename: str) -> str:
+    def build_object_key(
+        self, *, project_id: str, chat_id: str, file_id: str, filename: str
+    ) -> str:
         safe_name = _sanitize_filename(filename)
         return f"projects/{project_id}/chats/{chat_id}/{file_id}/{safe_name}"
 

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -21,12 +21,12 @@ def process_job(job: dict) -> None:
         project = db.get(Project, job["project_id"])
         if not project:
             deployment.status = "failed"
-            deployment.finished_at = datetime.now(timezone.utc)
+            deployment.finished_at = datetime.now(UTC)
             db.commit()
             return
 
         deployment.status = "running"
-        deployment.started_at = datetime.now(timezone.utc)
+        deployment.started_at = datetime.now(UTC)
         db.commit()
 
         image_ref = job.get("image_ref") or settings.deployment_default_image
@@ -41,7 +41,7 @@ def process_job(job: dict) -> None:
         deployment.container_id = result["container_id"]
         deployment.logs_ref = result["logs_ref"]
         deployment.image_ref = result["image_ref"]
-        deployment.finished_at = datetime.now(timezone.utc)
+        deployment.finished_at = datetime.now(UTC)
         project.deployment_url = result["url"]
         project.status = "live"
         db.add(project)
@@ -50,7 +50,7 @@ def process_job(job: dict) -> None:
         if deployment := db.get(Deployment, job.get("deployment_id")):
             deployment.status = "failed"
             deployment.logs_ref = str(exc)[:2000]
-            deployment.finished_at = datetime.now(timezone.utc)
+            deployment.finished_at = datetime.now(UTC)
             db.commit()
     finally:
         db.close()

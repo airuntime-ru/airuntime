@@ -8,7 +8,9 @@ LOGO_PATH = Path(__file__).resolve().parent.parent / "assets" / "brand" / "logo-
 LOGO_CID = "airuntime-logo"
 
 
-def send_email(*, to: str, subject: str, plain: str, html: str | None = None, embed_logo: bool = True) -> bool:
+def send_email(
+    *, to: str, subject: str, plain: str, html: str | None = None, embed_logo: bool = True
+) -> bool:
     if not settings.smtp_host:
         return False
 

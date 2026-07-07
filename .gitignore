@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+env/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg
+
+# Environment
+.env
+.env.local
+.env.production
+.env.*.local
+
+# Node / Frontend
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker / infra runtime
+infra/mail/data/
+infra/mail/state/
+infra/mail/config/
+infra/traefik/letsencrypt/
+letsencrypt/
+
+# Django
+admin/staticfiles/
+admin/*.sqlite3
+
+# Logs
+*.log
+logs/

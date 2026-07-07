@@ -21,11 +21,29 @@ def _is_textual(content_type: str, filename: str) -> bool:
     if content_type in TEXTUAL_TYPES:
         return True
     return filename.lower().endswith(
-        (".md", ".markdown", ".py", ".ts", ".tsx", ".js", ".jsx", ".json", ".yaml", ".yml", ".csv", ".txt", ".html", ".css", ".xml")
+        (
+            ".md",
+            ".markdown",
+            ".py",
+            ".ts",
+            ".tsx",
+            ".js",
+            ".jsx",
+            ".json",
+            ".yaml",
+            ".yml",
+            ".csv",
+            ".txt",
+            ".html",
+            ".css",
+            ".xml",
+        )
     )
 
 
-def attach_files_to_message(db: Session, *, message_id: UUID, attachment_ids: list[UUID]) -> list[ChatFile]:
+def attach_files_to_message(
+    db: Session, *, message_id: UUID, attachment_ids: list[UUID]
+) -> list[ChatFile]:
     if not attachment_ids:
         return []
     rows = db.query(ChatFile).filter(ChatFile.id.in_(attachment_ids)).all()
@@ -56,7 +74,9 @@ def build_attachment_context(db: Session, attachment_ids: list[UUID], *, max_cha
     for row in rows:
         header = f"Attachment: {row.original_filename} ({row.content_type}, {row.size_bytes} bytes)"
         if _is_textual(row.content_type, row.original_filename):
-            preview = storage_service.read_text_preview(row.object_key, max_chars=min(remaining, 8000))
+            preview = storage_service.read_text_preview(
+                row.object_key, max_chars=min(remaining, 8000)
+            )
             if preview:
                 block = f"{header}\n```\n{preview}\n```"
             else:

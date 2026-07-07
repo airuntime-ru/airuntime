@@ -1,0 +1,151 @@
+@import "tailwindcss";
+@import "highlight.js/styles/github-dark.css";
+
+:root {
+  --ar-white: #ffffff;
+  --ar-cloud: #f4f7fb;
+  --ar-mist: #c8d0dc;
+  --ar-stone: #8b95a5;
+  --ar-graphite: #2a3140;
+  --ar-black: #0a0d12;
+
+  --ar-sky: #5eb8ff;
+  --ar-cyan: #4ee0d8;
+  --ar-indigo: #7c8cff;
+  --ar-purple: #b8a4ff;
+
+  --ar-surface-1: rgba(255, 255, 255, 0.05);
+  --ar-surface-2: rgba(255, 255, 255, 0.08);
+  --ar-surface-3: rgba(255, 255, 255, 0.12);
+  --ar-border: rgba(255, 255, 255, 0.14);
+  --ar-border-strong: rgba(94, 184, 255, 0.35);
+
+  --background: var(--ar-black);
+  --foreground: var(--ar-cloud);
+
+  --ar-radius-sm: 0.5rem;
+  --ar-radius-md: 0.75rem;
+  --ar-radius-lg: 1rem;
+  --ar-radius-xl: 1.5rem;
+
+  --ar-space-xs: 0.25rem;
+  --ar-space-sm: 0.5rem;
+  --ar-space-md: 1rem;
+  --ar-space-lg: 1.5rem;
+  --ar-space-xl: 2.5rem;
+  --ar-space-2xl: 4rem;
+
+  --ar-glass-bg: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03));
+  --ar-blur: 20px;
+  --ar-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+  --ar-transition: 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-jetbrains);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-inter), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.glass {
+  background: var(--ar-glass-bg);
+  border: 1px solid var(--ar-border);
+  backdrop-filter: blur(var(--ar-blur));
+  box-shadow: var(--ar-shadow);
+}
+
+.glass-hover {
+  transition: transform var(--ar-transition), border-color var(--ar-transition), box-shadow var(--ar-transition);
+}
+
+.glass-hover:hover {
+  transform: translateY(-2px);
+  border-color: var(--ar-border-strong);
+  box-shadow: 0 28px 90px rgba(94, 184, 255, 0.12);
+}
+
+.atmosphere {
+  background:
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(94, 184, 255, 0.18), transparent),
+    radial-gradient(ellipse 60% 40% at 100% 50%, rgba(124, 140, 255, 0.12), transparent),
+    radial-gradient(ellipse 50% 30% at 0% 80%, rgba(78, 224, 216, 0.1), transparent),
+    var(--ar-black);
+}
+
+.text-gradient {
+  background: linear-gradient(135deg, var(--ar-cloud) 0%, var(--ar-mist) 50%, var(--ar-sky) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.float {
+  animation: float 6s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+.cloud-blob {
+  aspect-ratio: 2.2 / 1;
+  border-radius: 999px;
+  background: radial-gradient(ellipse at 30% 40%, rgba(255, 255, 255, 0.14), transparent 55%),
+    radial-gradient(ellipse at 70% 60%, rgba(94, 184, 255, 0.12), transparent 60%),
+    radial-gradient(ellipse at 50% 50%, rgba(184, 164, 255, 0.1), transparent 70%);
+  filter: blur(28px);
+}
+
+.breathe {
+  animation: breathe 4s ease-in-out infinite;
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.7;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.prose-chat pre {
+  position: relative;
+  border-radius: var(--ar-radius-md);
+  background: rgba(0, 0, 0, 0.4) !important;
+  padding: 1rem;
+  overflow-x: auto;
+}
+
+.prose-chat code {
+  font-family: var(--font-jetbrains), monospace;
+  font-size: 0.875em;
+}
+
+.prose-chat p {
+  margin: 0.5rem 0;
+  line-height: 1.65;
+}

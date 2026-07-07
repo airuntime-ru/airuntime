@@ -7,8 +7,8 @@ Create Date: 2026-07-07 12:00:00
 
 from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision: str = "0003_passwordless_users"
 down_revision: str | None = "0002_chat_files"

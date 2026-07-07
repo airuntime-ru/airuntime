@@ -1,5 +1,6 @@
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 from redis import Redis
 from redis.exceptions import RedisError
 
@@ -17,7 +18,7 @@ def enqueue_deployment(*, deployment_id: str, project_id: str, image_ref: str) -
         "deployment_id": deployment_id,
         "project_id": project_id,
         "image_ref": image_ref,
-        "queued_at": datetime.now(timezone.utc).isoformat(),
+        "queued_at": datetime.now(UTC).isoformat(),
     }
     try:
         _redis().rpush(QUEUE_KEY, json.dumps(job))

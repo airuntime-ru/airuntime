@@ -1,7 +1,7 @@
 import hashlib
 import secrets
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from redis import Redis
 from redis.exceptions import RedisError
@@ -23,7 +23,7 @@ class _MemoryOtpStore:
         self._entries: dict[str, tuple[str, datetime, int]] = {}
 
     def set(self, email: str, code: str, ttl_seconds: int) -> None:
-        expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
+        expires_at = datetime.now(UTC) + timedelta(seconds=ttl_seconds)
         with self._lock:
             self._entries[email.lower()] = (_hash_code(email, code), expires_at, 0)
 
@@ -34,7 +34,7 @@ class _MemoryOtpStore:
             if not entry:
                 return False
             code_hash, expires_at, attempts = entry
-            if datetime.now(timezone.utc) > expires_at:
+            if datetime.now(UTC) > expires_at:
                 self._entries.pop(key, None)
                 return False
             if attempts >= MAX_ATTEMPTS:

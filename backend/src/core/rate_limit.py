@@ -28,7 +28,9 @@ class InMemoryRateLimiter:
 
 
 class RedisRateLimiter:
-    def __init__(self, redis_client: Redis, max_requests: int = 120, window_seconds: int = 60) -> None:
+    def __init__(
+        self, redis_client: Redis, max_requests: int = 120, window_seconds: int = 60
+    ) -> None:
         self.redis_client = redis_client
         self.max_requests = max_requests
         self.window_seconds = window_seconds

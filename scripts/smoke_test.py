@@ -14,7 +14,9 @@ import urllib.request
 BASE_URL = "http://localhost:8000/api/v1"
 
 
-def request_json(path: str, method: str = "GET", data: dict | None = None, token: str | None = None) -> dict:
+def request_json(
+    path: str, method: str = "GET", data: dict | None = None, token: str | None = None
+) -> dict:
     payload = json.dumps(data).encode("utf-8") if data is not None else None
     req = urllib.request.Request(f"{BASE_URL}{path}", data=payload, method=method)
     req.add_header("Content-Type", "application/json")
@@ -28,9 +30,13 @@ def run() -> None:
     email = "smoke@airuntime.dev"
     password = "smoke12345"
     try:
-        auth = request_json("/auth/register", method="POST", data={"email": email, "password": password})
+        auth = request_json(
+            "/auth/register", method="POST", data={"email": email, "password": password}
+        )
     except urllib.error.HTTPError:
-        auth = request_json("/auth/login", method="POST", data={"email": email, "password": password})
+        auth = request_json(
+            "/auth/login", method="POST", data={"email": email, "password": password}
+        )
 
     token = auth["access_token"]
     project = request_json(

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from jose import JWTError, jwt
@@ -32,7 +32,13 @@ from src.db.models.refresh_token import RefreshToken
 from src.db.models.user import User
 from src.db.session import get_db
 from src.services.email import send_branded_email
-from src.services.email_templates import login_code_email, password_reset_email, verify_email
+from src.services.email_templates import (
+    login_code_email,
+    password_reset_email,
+)
+from src.services.email_templates import (
+    verify_email as verify_email_template,
+)
 from src.services.otp import otp_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -42,7 +48,7 @@ def _store_refresh_token(db: Session, user_id: str, refresh_token: str) -> None:
     refresh_row = RefreshToken(
         user_id=user_id,
         token_hash=hash_password(refresh_token),
-        expires_at=datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_expire_days),
+        expires_at=datetime.now(UTC) + timedelta(days=settings.refresh_token_expire_days),
     )
     db.add(refresh_row)
     db.commit()
@@ -51,8 +57,10 @@ def _store_refresh_token(db: Session, user_id: str, refresh_token: str) -> None:
 def _issue_verify_email(db: Session, user: User) -> None:
     token = create_purpose_token(str(user.id), "email_verify", timedelta(hours=24))
     verify_url = f"{settings.resolved_frontend_url}/auth/verify?token={token}"
-    content = verify_email(verify_url=verify_url)
-    send_branded_email(to=user.email, subject=content.subject, plain=content.plain, html=content.html)
+    content = verify_email_template(verify_url=verify_url)
+    send_branded_email(
+        to=user.email, subject=content.subject, plain=content.plain, html=content.html
+    )
 
 
 def _issue_tokens(db: Session, user: User) -> TokenPairResponse:
@@ -84,7 +92,9 @@ def request_code(payload: RequestCodeRequest) -> RequestCodeResponse:
 @router.post("/verify-code", response_model=TokenPairResponse)
 def verify_code(payload: VerifyCodeRequest, db: Session = Depends(get_db)) -> TokenPairResponse:
     if not otp_service.verify(payload.email, payload.code):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверный или просроченный код")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверный или просроченный код"
+        )
 
     user = db.query(User).filter(User.email == payload.email).first()
     if not user:
@@ -140,7 +150,9 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)) -> TokenPair
             payload.refresh_token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm]
         )
     except JWTError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
+        ) from exc
     if token_data.get("type") != "refresh":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
     user_id = token_data.get("sub")
@@ -155,13 +167,17 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)) -> TokenPair
     matched: RefreshToken | None = None
     for token in active_tokens:
         if verify_password(payload.refresh_token, token.token_hash):
-            if token.expires_at < datetime.now(timezone.utc):
-                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token expired")
+            if token.expires_at < datetime.now(UTC):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token expired"
+                )
             matched = token
             break
     if not matched:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token revoked")
-    matched.revoked_at = datetime.now(timezone.utc)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token revoked"
+        )
+    matched.revoked_at = datetime.now(UTC)
     db.commit()
     new_refresh = create_refresh_token(str(user.id))
     _store_refresh_token(db, user.id, new_refresh)
@@ -178,7 +194,9 @@ def logout(payload: LogoutRequest, db: Session = Depends(get_db)) -> AuthMessage
             payload.refresh_token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm]
         )
     except JWTError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
+        ) from exc
     user_id = token_data.get("sub")
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
@@ -189,13 +207,15 @@ def logout(payload: LogoutRequest, db: Session = Depends(get_db)) -> AuthMessage
     )
     for row in rows:
         if verify_password(payload.refresh_token, row.token_hash):
-            row.revoked_at = datetime.now(timezone.utc)
+            row.revoked_at = datetime.now(UTC)
     db.commit()
     return AuthMessageResponse(message="Logged out")
 
 
 @router.post("/forgot-password", response_model=AuthMessageResponse)
-def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)) -> AuthMessageResponse:
+def forgot_password(
+    payload: ForgotPasswordRequest, db: Session = Depends(get_db)
+) -> AuthMessageResponse:
     user = db.query(User).filter(User.email == payload.email).first()
     if user:
         token = create_purpose_token(str(user.id), "password_reset", timedelta(minutes=15))
@@ -213,9 +233,13 @@ def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db
 @router.post("/verify-email", response_model=AuthMessageResponse)
 def verify_email(payload: VerifyEmailRequest, db: Session = Depends(get_db)) -> AuthMessageResponse:
     try:
-        token_data = jwt.decode(payload.token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+        token_data = jwt.decode(
+            payload.token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm]
+        )
     except JWTError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
+        ) from exc
     if token_data.get("type") != "email_verify":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
     user_id = token_data.get("sub")
@@ -228,11 +252,17 @@ def verify_email(payload: VerifyEmailRequest, db: Session = Depends(get_db)) -> 
 
 
 @router.post("/reset-password", response_model=AuthMessageResponse)
-def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)) -> AuthMessageResponse:
+def reset_password(
+    payload: ResetPasswordRequest, db: Session = Depends(get_db)
+) -> AuthMessageResponse:
     try:
-        token_data = jwt.decode(payload.token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+        token_data = jwt.decode(
+            payload.token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm]
+        )
     except JWTError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
+        ) from exc
     if token_data.get("type") != "password_reset":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
     user_id = token_data.get("sub")

@@ -33,7 +33,9 @@ def create_secret(
     )
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    secret = Secret(project_id=project.id, key=payload.key, encrypted_value=encrypt_secret(payload.value))
+    secret = Secret(
+        project_id=project.id, key=payload.key, encrypted_value=encrypt_secret(payload.value)
+    )
     db.add(secret)
     db.commit()
     return {"id": str(secret.id), "key": secret.key}

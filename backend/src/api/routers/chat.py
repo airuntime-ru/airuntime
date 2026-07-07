@@ -6,8 +6,13 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from src.api.dependencies.auth import get_current_user
+from src.api.dto.chat import (
+    ChatCreateResponse,
+    MessageCreateRequest,
+    MessageResponse,
+    StreamRequest,
+)
 from src.api.mappers.chat_files import chat_file_to_response
-from src.api.dto.chat import ChatCreateResponse, MessageCreateRequest, MessageResponse, StreamRequest
 from src.db.models.chat import Chat
 from src.db.models.chat_file import ChatFile
 from src.db.models.message import Message
@@ -64,7 +69,9 @@ def _validate_attachments(
     if len(rows) != len(attachment_ids):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid attachments")
     if any(row.message_id is not None for row in rows):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Attachment already linked")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Attachment already linked"
+        )
 
 
 def _compose_model_message(*, content: str, attachment_ids: list[UUID], db: Session) -> str:
@@ -121,7 +128,9 @@ def list_chats(
     )
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    return db.query(Chat).filter(Chat.project_id == project_id).order_by(Chat.created_at.desc()).all()
+    return (
+        db.query(Chat).filter(Chat.project_id == project_id).order_by(Chat.created_at.desc()).all()
+    )
 
 
 @router.get("/{chat_id}/messages", response_model=list[MessageResponse])
@@ -189,7 +198,9 @@ async def _stream_events(
     attachment_ids: list[UUID],
 ) -> StreamingResponse:
     if current_user.credits_balance <= 0:
-        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="Insufficient credits")
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="Insufficient credits"
+        )
 
     content = user_message.strip()
     if content:
@@ -208,10 +219,14 @@ async def _stream_events(
 
     async def event_source():
         assistant_full = ""
-        async for chunk in conversation.stream_reply(chat_id=str(chat_id), user_message=safe_message):
+        async for chunk in conversation.stream_reply(
+            chat_id=str(chat_id), user_message=safe_message
+        ):
             assistant_full += chunk
             yield f"data: {json.dumps({'chunk': chunk})}\n\n"
-        assistant_message = Message(chat_id=chat_id, role="assistant", content_markdown=assistant_full)
+        assistant_message = Message(
+            chat_id=chat_id, role="assistant", content_markdown=assistant_full
+        )
         db.add(assistant_message)
         usage_cost = max(100, len(safe_message) + len(assistant_full))
         current_user.credits_balance = max(0, current_user.credits_balance - usage_cost)

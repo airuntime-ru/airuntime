@@ -7,8 +7,8 @@ Create Date: 2026-07-07 00:00:00
 
 from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "0001_initial"
@@ -34,7 +34,9 @@ def upgrade() -> None:
     op.create_table(
         "projects",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column(
+            "user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False
+        ),
         sa.Column("type", sa.String(length=32), nullable=False),
         sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("description", sa.Text(), nullable=False, server_default=""),
@@ -49,7 +51,12 @@ def upgrade() -> None:
     op.create_table(
         "chats",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("project_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("projects.id"), nullable=False),
+        sa.Column(
+            "project_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("projects.id"),
+            nullable=False,
+        ),
         sa.Column("title", sa.String(length=255), nullable=False, server_default="New Chat"),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
@@ -58,7 +65,9 @@ def upgrade() -> None:
     op.create_table(
         "messages",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("chat_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("chats.id"), nullable=False),
+        sa.Column(
+            "chat_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("chats.id"), nullable=False
+        ),
         sa.Column("role", sa.String(length=32), nullable=False),
         sa.Column("content_markdown", sa.Text(), nullable=False),
         sa.Column("metadata_json", sa.Text(), nullable=False, server_default="{}"),
@@ -68,7 +77,12 @@ def upgrade() -> None:
     op.create_table(
         "deployments",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("project_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("projects.id"), nullable=False),
+        sa.Column(
+            "project_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("projects.id"),
+            nullable=False,
+        ),
         sa.Column("status", sa.String(length=32), nullable=False, server_default="queued"),
         sa.Column("image_ref", sa.String(length=512), nullable=True),
         sa.Column("container_id", sa.String(length=255), nullable=True),
@@ -80,7 +94,12 @@ def upgrade() -> None:
     op.create_table(
         "secrets",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("project_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("projects.id"), nullable=False),
+        sa.Column(
+            "project_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("projects.id"),
+            nullable=False,
+        ),
         sa.Column("key", sa.String(length=255), nullable=False),
         sa.Column("encrypted_value", sa.Text(), nullable=False),
         sa.Column("kms_key_id", sa.String(length=255), nullable=True),
@@ -91,7 +110,9 @@ def upgrade() -> None:
     op.create_table(
         "refresh_tokens",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column(
+            "user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False
+        ),
         sa.Column("token_hash", sa.String(length=255), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),

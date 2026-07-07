@@ -1,4 +1,9 @@
-from src.services.email_templates import LOGO_CID, login_code_email, password_reset_email, verify_email
+from src.services.email_templates import (
+    LOGO_CID,
+    login_code_email,
+    password_reset_email,
+    verify_email,
+)
 
 
 def test_login_code_email_contains_branding():

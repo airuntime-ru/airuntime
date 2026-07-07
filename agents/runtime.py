@@ -48,7 +48,9 @@ class AIRuntimeEngine:
             )
             user_message = f"{user_message}\n\n{summary}"
 
-        async for chunk in self.conversation.stream_reply(chat_id=chat_id, user_message=user_message):
+        async for chunk in self.conversation.stream_reply(
+            chat_id=chat_id, user_message=user_message
+        ):
             yield chunk
 
     @staticmethod

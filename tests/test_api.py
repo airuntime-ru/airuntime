@@ -20,7 +20,9 @@ def test_request_code_verify_and_me(client):
     assert "access_token" in tokens
     assert "refresh_token" in tokens
 
-    me = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {tokens['access_token']}"})
+    me = client.get(
+        "/api/v1/auth/me", headers={"Authorization": f"Bearer {tokens['access_token']}"}
+    )
     assert me.status_code == 200
     body = me.json()
     assert body["email"] == email
@@ -107,6 +109,8 @@ def test_chat_file_upload_and_message_with_attachment(client):
     body = message.json()
     assert body["attachments"][0]["id"] == file_id
 
-    listed = client.get(f"/api/v1/projects/{project['id']}/chats/{chat['id']}/files", headers=headers)
+    listed = client.get(
+        f"/api/v1/projects/{project['id']}/chats/{chat['id']}/files", headers=headers
+    )
     assert listed.status_code == 200
     assert len(listed.json()) == 1

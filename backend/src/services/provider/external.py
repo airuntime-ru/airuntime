@@ -66,7 +66,11 @@ class ExternalProviderClient(ProviderClient):
                     "x-api-key": settings.anthropic_api_key,
                     "anthropic-version": "2023-06-01",
                 },
-                json={"model": model, "max_tokens": 1024, "messages": [{"role": "user", "content": user_text}]},
+                json={
+                    "model": model,
+                    "max_tokens": 1024,
+                    "messages": [{"role": "user", "content": user_text}],
+                },
             )
             response.raise_for_status()
             data = response.json()

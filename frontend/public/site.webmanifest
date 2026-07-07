@@ -1,0 +1,23 @@
+{
+  "name": "AIRuntime",
+  "short_name": "AIRuntime",
+  "description": "Опишите. Мы воплотим.",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/brand/logo-mark.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "theme_color": "#0A0D12",
+  "background_color": "#0A0D12",
+  "display": "standalone",
+  "start_url": "/"
+}

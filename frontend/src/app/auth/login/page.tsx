@@ -1,0 +1,137 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+
+import { AuthShell } from "@/components/auth/auth-shell";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { requestAuthCode, verifyAuthCode } from "@/lib/api";
+
+type Step = "email" | "code";
+
+export default function LoginPage() {
+  const [step, setStep] = useState<Step>("email");
+  const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [resendIn, setResendIn] = useState(0);
+  const router = useRouter();
+
+  useEffect(() => {
+    if (resendIn <= 0) return;
+    const timer = window.setTimeout(() => setResendIn((value) => value - 1), 1000);
+    return () => window.clearTimeout(timer);
+  }, [resendIn]);
+
+  const sendCode = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      await requestAuthCode(email.trim());
+      setStep("code");
+      setResendIn(60);
+      setCode("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось отправить код");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onSubmitEmail = async () => {
+    if (!email.trim()) return;
+    await sendCode();
+  };
+
+  const onSubmitCode = async () => {
+    if (code.length !== 6) return;
+    setLoading(true);
+    setError("");
+    try {
+      await verifyAuthCode(email.trim(), code);
+      router.push("/app");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Неверный код");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <AuthShell>
+      <div className="space-y-6">
+        <div className="space-y-2 text-center">
+          <h1 className="text-2xl font-semibold text-[var(--ar-cloud)]">
+            {step === "email" ? "Вход в AIRuntime" : "Проверьте почту"}
+          </h1>
+          <p className="text-sm text-[var(--ar-mist)]">
+            {step === "email"
+              ? "Отправим одноразовый код — без пароля."
+              : `Код отправлен на ${email}`}
+          </p>
+        </div>
+
+        {step === "email" ? (
+          <div className="space-y-4">
+            <Input
+              placeholder="you@company.ru"
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") void onSubmitEmail();
+              }}
+            />
+            <Button variant="accent" className="w-full" onClick={onSubmitEmail} disabled={loading || !email.trim()}>
+              {loading ? "Отправляем…" : "Получить код"}
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <Input
+              placeholder="000000"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              value={code}
+              onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") void onSubmitCode();
+              }}
+              className="text-center text-2xl tracking-[0.45em]"
+            />
+            <Button variant="accent" className="w-full" onClick={onSubmitCode} disabled={loading || code.length !== 6}>
+              {loading ? "Входим…" : "Войти"}
+            </Button>
+            <div className="flex items-center justify-between text-sm">
+              <button
+                type="button"
+                className="text-[var(--ar-mist)] hover:text-[var(--ar-cloud)]"
+                onClick={() => {
+                  setStep("email");
+                  setCode("");
+                  setError("");
+                }}
+              >
+                Другая почта
+              </button>
+              <button
+                type="button"
+                className="text-[var(--ar-sky)] hover:underline disabled:opacity-40"
+                disabled={resendIn > 0 || loading}
+                onClick={() => void sendCode()}
+              >
+                {resendIn > 0 ? `Повтор через ${resendIn}с` : "Отправить снова"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {error ? <p className="text-center text-sm text-rose-300">{error}</p> : null}
+      </div>
+    </AuthShell>
+  );
+}

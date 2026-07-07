@@ -1,0 +1,264 @@
+# Production stack for airuntime.ru
+# Usage: docker compose -f docker-compose.prod.yml --env-file .env up -d --build
+
+name: airuntime
+
+x-common-env: &common-env
+  ENVIRONMENT: production
+  APP_DOMAIN: ${APP_DOMAIN}
+  PUBLIC_BASE_DOMAIN: ${APP_DOMAIN}
+  FRONTEND_URL: https://${APP_DOMAIN}
+  API_URL: https://api.${APP_DOMAIN}
+  ALLOWED_ORIGINS: https://${APP_DOMAIN},https://www.${APP_DOMAIN}
+  ALLOWED_HOSTS: ${APP_DOMAIN},www.${APP_DOMAIN},api.${APP_DOMAIN},backend
+
+x-traefik-labels: &traefik-labels
+  traefik.enable: "true"
+  traefik.docker.network: airuntime_public
+
+services:
+  traefik:
+    image: traefik:v3.3
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./infra/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - traefik_letsencrypt:/letsencrypt
+    networks:
+      - public
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - internal
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks:
+      - internal
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY}
+      MINIO_SERVER_URL: https://s3.${APP_DOMAIN}
+      MINIO_BROWSER_REDIRECT_URL: https://s3-console.${APP_DOMAIN}
+    volumes:
+      - minio_data:/data
+    networks:
+      - internal
+      - public
+    labels:
+      <<: *traefik-labels
+      traefik.http.routers.minio.rule: Host(`s3.${APP_DOMAIN}`)
+      traefik.http.routers.minio.entrypoints: websecure
+      traefik.http.routers.minio.tls.certresolver: letsencrypt
+      traefik.http.services.minio.loadbalancer.server.port: "9000"
+      traefik.http.routers.minio-console.rule: Host(`s3-console.${APP_DOMAIN}`)
+      traefik.http.routers.minio-console.entrypoints: websecure
+      traefik.http.routers.minio-console.tls.certresolver: letsencrypt
+      traefik.http.services.minio-console.loadbalancer.server.port: "9001"
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 ${S3_ACCESS_KEY} ${S3_SECRET_KEY}; do sleep 1; done;
+      mc mb local/${S3_BUCKET} --ignore-existing;
+      mc anonymous set none local/${S3_BUCKET};
+      exit 0;
+      "
+    networks:
+      - internal
+
+  mailserver:
+    image: ghcr.io/docker-mailserver/docker-mailserver:latest
+    hostname: mail
+    domainname: ${APP_DOMAIN}
+    restart: unless-stopped
+    ports:
+      - "25:25"
+      - "587:587"
+      - "465:465"
+      - "993:993"
+    volumes:
+      - ./infra/mail/data/:/var/mail/
+      - ./infra/mail/state/:/var/mail-state/
+      - ./infra/mail/config/:/tmp/docker-mailserver/
+      - ./infra/mail/config/postfix-accounts.cf:/tmp/docker-mailserver/postfix-accounts.cf:ro
+      - ./infra/mail/config/postfix-virtual.cf:/tmp/docker-mailserver/postfix-virtual.cf:ro
+    environment:
+      - OVERRIDE_HOSTNAME=mail.${APP_DOMAIN}
+      - POSTMASTER_ADDRESS=admin@${APP_DOMAIN}
+      - ENABLE_SPAMASSASSIN=0
+      - ENABLE_CLAMAV=0
+      - ENABLE_FAIL2BAN=1
+      - ENABLE_POSTGREY=0
+      - ONE_DIR=1
+      - SSL_TYPE=manual
+      - SSL_CERT_PATH=/tmp/docker-mailserver/ssl/cert.pem
+      - SSL_KEY_PATH=/tmp/docker-mailserver/ssl/key.pem
+      - PERMIT_DOCKER=connected-networks
+      - POSTFIX_INET_PROTOCOLS=ipv4
+    cap_add:
+      - NET_ADMIN
+    networks:
+      - internal
+      - public
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
+      PROVIDER_NAME: ${PROVIDER_NAME:-openai}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      SMTP_HOST: mailserver
+      SMTP_PORT: 587
+      SMTP_USERNAME: noreply@${APP_DOMAIN}
+      SMTP_PASSWORD: ${MAIL_NOREPLY_PASSWORD}
+      SMTP_FROM: noreply@${APP_DOMAIN}
+      SMTP_USE_TLS: "true"
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_PUBLIC_ENDPOINT_URL: https://s3.${APP_DOMAIN}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_BUCKET: ${S3_BUCKET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
+      mailserver:
+        condition: service_started
+    networks:
+      - internal
+      - public
+    labels:
+      <<: *traefik-labels
+      traefik.http.routers.api.rule: Host(`api.${APP_DOMAIN}`)
+      traefik.http.routers.api.entrypoints: websecure
+      traefik.http.routers.api.tls.certresolver: letsencrypt
+      traefik.http.services.api.loadbalancer.server.port: "8000"
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    command: ["sh", "/app/entrypoint.sh", "worker"]
+    environment:
+      <<: *common-env
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
+      PROVIDER_NAME: ${PROVIDER_NAME:-openai}
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_PUBLIC_ENDPOINT_URL: https://s3.${APP_DOMAIN}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_BUCKET: ${S3_BUCKET}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+    networks:
+      - internal
+
+  django-admin:
+    build:
+      context: .
+      dockerfile: admin/Dockerfile
+    restart: unless-stopped
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
+      DJANGO_DEBUG: "false"
+      DJANGO_ALLOWED_HOSTS: admin.${APP_DOMAIN}
+      DJANGO_CSRF_TRUSTED_ORIGINS: https://admin.${APP_DOMAIN}
+      DJANGO_SUPERUSER_EMAIL: admin@${APP_DOMAIN}
+      DJANGO_SUPERUSER_PASSWORD: ${DJANGO_SUPERUSER_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_HOST: postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - internal
+      - public
+    labels:
+      <<: *traefik-labels
+      traefik.http.routers.django-admin.rule: Host(`admin.${APP_DOMAIN}`)
+      traefik.http.routers.django-admin.entrypoints: websecure
+      traefik.http.routers.django-admin.tls.certresolver: letsencrypt
+      traefik.http.services.django-admin.loadbalancer.server.port: "8001"
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: https://api.${APP_DOMAIN}/api/v1
+      NEXT_PUBLIC_SITE_URL: https://${APP_DOMAIN}
+      NEXT_PUBLIC_BASE_DOMAIN: ${APP_DOMAIN}
+    depends_on:
+      - backend
+    networks:
+      - public
+    labels:
+      <<: *traefik-labels
+      traefik.http.routers.frontend.rule: Host(`${APP_DOMAIN}`) || Host(`www.${APP_DOMAIN}`)
+      traefik.http.routers.frontend.entrypoints: websecure
+      traefik.http.routers.frontend.tls.certresolver: letsencrypt
+      traefik.http.services.frontend.loadbalancer.server.port: "3000"
+
+networks:
+  public:
+    name: airuntime_public
+  internal:
+    name: airuntime_internal
+
+volumes:
+  postgres_data:
+  minio_data:
+  traefik_letsencrypt:

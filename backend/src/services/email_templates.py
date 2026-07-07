@@ -37,35 +37,35 @@ def _layout(*, title: str, body_html: str, footer: str) -> str:
   <meta name="color-scheme" content="dark" />
   <title>{title}</title>
 </head>
-<body style="margin:0;padding:0;background:{_COLORS['bg']};font-family:Inter,'Segoe UI',Roboto,Arial,sans-serif;color:{_COLORS['cloud']};">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:{_COLORS['bg']};">
+<body style="margin:0;padding:0;background:{_COLORS["bg"]};font-family:Inter,'Segoe UI',Roboto,Arial,sans-serif;color:{_COLORS["cloud"]};">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:{_COLORS["bg"]};">
     <tr>
       <td align="center" style="padding:40px 16px;">
-        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:{_COLORS['card']};border:1px solid {_COLORS['border']};border-radius:24px;overflow:hidden;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:{_COLORS["card"]};border:1px solid {_COLORS["border"]};border-radius:24px;overflow:hidden;">
           <tr>
             <td style="padding:36px 32px 20px;text-align:center;background:linear-gradient(180deg,rgba(94,184,255,0.08) 0%,transparent 100%);">
               <img src="cid:{LOGO_CID}" width="64" height="64" alt="AIRuntime" style="display:block;margin:0 auto;border:0;" />
-              <p style="margin:14px 0 0;font-size:11px;letter-spacing:0.34em;color:{_COLORS['sky']};font-weight:600;">AIRUNTIME</p>
+              <p style="margin:14px 0 0;font-size:11px;letter-spacing:0.34em;color:{_COLORS["sky"]};font-weight:600;">AIRUNTIME</p>
             </td>
           </tr>
           <tr>
             <td style="padding:8px 32px 12px;">
-              <h1 style="margin:0;font-size:24px;line-height:1.3;font-weight:600;color:{_COLORS['cloud']};text-align:center;">{title}</h1>
+              <h1 style="margin:0;font-size:24px;line-height:1.3;font-weight:600;color:{_COLORS["cloud"]};text-align:center;">{title}</h1>
             </td>
           </tr>
           <tr>
-            <td style="padding:8px 32px 28px;color:{_COLORS['mist']};font-size:15px;line-height:1.65;">
+            <td style="padding:8px 32px 28px;color:{_COLORS["mist"]};font-size:15px;line-height:1.65;">
               {body_html}
             </td>
           </tr>
           <tr>
             <td style="padding:0 32px 28px;">
-              <p style="margin:0;font-size:12px;line-height:1.6;color:{_COLORS['stone']};text-align:center;">{footer}</p>
+              <p style="margin:0;font-size:12px;line-height:1.6;color:{_COLORS["stone"]};text-align:center;">{footer}</p>
             </td>
           </tr>
           <tr>
-            <td style="padding:18px 32px 24px;border-top:1px solid {_COLORS['border']};text-align:center;">
-              <a href="{frontend_url}" style="font-size:12px;color:{_COLORS['sky']};text-decoration:none;">{frontend_url.replace('https://', '').replace('http://', '')}</a>
+            <td style="padding:18px 32px 24px;border-top:1px solid {_COLORS["border"]};text-align:center;">
+              <a href="{frontend_url}" style="font-size:12px;color:{_COLORS["sky"]};text-decoration:none;">{frontend_url.replace("https://", "").replace("http://", "")}</a>
             </td>
           </tr>
         </table>
@@ -91,7 +91,7 @@ def _code_block(code: str) -> str:
         f'<div style="margin:24px 0;padding:22px 16px;text-align:center;border-radius:16px;'
         f'background:{_COLORS["code_bg"]};border:1px solid {_COLORS["code_border"]};">'
         f'<span style="font-size:36px;font-weight:700;letter-spacing:0.38em;color:{_COLORS["cloud"]};'
-        f'font-family:ui-monospace,\'JetBrains Mono\',Consolas,monospace;">{code}</span>'
+        f"font-family:ui-monospace,'JetBrains Mono',Consolas,monospace;\">{code}</span>"
         f"</div>"
     )
 
