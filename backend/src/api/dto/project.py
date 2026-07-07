@@ -1,11 +1,11 @@
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
 
-class ProjectType(str, Enum):
+class ProjectType(StrEnum):
     telegram_bot = "telegram_bot"
     website = "website"
 
