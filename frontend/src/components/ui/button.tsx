@@ -6,15 +6,15 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/cn";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center rounded-[var(--ar-radius-md)] text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ar-sky)] disabled:pointer-events-none disabled:opacity-50 active:scale-[0.98] hover:scale-[1.02]",
+  "inline-flex items-center justify-center gap-2 rounded-[var(--ar-radius-sm)] text-sm font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ar-sky)]/30 disabled:pointer-events-none disabled:opacity-50 active:scale-[0.99] hover:-translate-y-0.5",
   {
     variants: {
       variant: {
-        default: "bg-[var(--ar-cloud)] text-[var(--ar-black)] hover:bg-white",
-        ghost: "text-[var(--ar-cloud)] hover:bg-white/8",
+        default: "bg-[var(--ar-black)] text-white shadow-sm shadow-slate-950/10 hover:bg-slate-800",
+        ghost: "text-[var(--ar-graphite)] hover:bg-white/75 hover:text-[var(--ar-sky)]",
         accent:
-          "bg-gradient-to-r from-[var(--ar-indigo)] via-[var(--ar-sky)] to-[var(--ar-cyan)] text-white hover:opacity-90 shadow-lg shadow-[var(--ar-sky)]/20",
-        outline: "border border-white/20 text-[var(--ar-cloud)] hover:border-[var(--ar-sky)]/50 hover:bg-white/5",
+          "bg-gradient-to-r from-[var(--ar-sky)] via-[var(--ar-cyan)] to-[var(--ar-mint)] text-white shadow-lg shadow-sky-500/20 hover:shadow-xl hover:shadow-cyan-500/20",
+        outline: "border border-[var(--ar-border)] bg-white/55 text-[var(--ar-graphite)] hover:border-[var(--ar-border-strong)] hover:bg-white",
       },
       size: {
         default: "h-10 px-4 py-2",

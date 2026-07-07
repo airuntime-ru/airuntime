@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bot, FolderKanban, Gauge, Settings, User } from "lucide-react";
+import { Bot, FolderKanban, Gauge, LogOut, Settings, User } from "lucide-react";
 
 import { Logo } from "@/components/brand/logo";
 import { cn } from "@/lib/cn";
@@ -19,14 +19,16 @@ export function AppSidebar({ credits, onLogout }: { credits: number; onLogout: (
   const pathname = usePathname();
 
   return (
-    <aside className="glass fixed left-4 top-4 z-20 hidden h-[calc(100vh-2rem)] w-64 flex-col rounded-[var(--ar-radius-xl)] p-4 lg:flex">
-      <div className="mb-6">
+    <aside className="glass fixed left-4 top-4 z-20 hidden h-[calc(100vh-2rem)] w-64 flex-col rounded-[var(--ar-radius-sm)] p-4 lg:flex">
+      <div className="mb-7">
         <Logo href="/app" variant="full" theme="dark" size="sm" />
-        <p className="mt-2 text-lg font-semibold text-[var(--ar-cloud)]">Рабочая область</p>
+        <p className="mt-5 text-xs font-semibold uppercase tracking-[0.22em] text-[var(--ar-stone)]">
+          Рабочая область
+        </p>
       </div>
-      <div className="mb-5 rounded-[var(--ar-radius-lg)] border border-white/10 bg-white/5 p-3">
-        <p className="text-xs uppercase tracking-wide text-[var(--ar-stone)]">Кредиты</p>
-        <p className="mt-1 text-xl font-semibold tabular-nums text-[var(--ar-cloud)]">
+      <div className="mb-5 rounded-[var(--ar-radius-sm)] border border-[var(--ar-border)] bg-white/70 p-4 shadow-sm shadow-sky-950/5">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ar-stone)]">Кредиты</p>
+        <p className="mt-1 text-2xl font-semibold tabular-nums text-[var(--ar-black)]">
           {credits.toLocaleString()}
         </p>
       </div>
@@ -37,14 +39,15 @@ export function AppSidebar({ credits, onLogout }: { credits: number; onLogout: (
             <Link
               key={item.href}
               href={item.href}
+              data-tour={item.href === "/app/projects" ? "nav-projects" : undefined}
               className={cn(
-                "flex items-center gap-2 rounded-[var(--ar-radius-md)] px-3 py-2 text-sm transition-colors",
+                "flex items-center gap-3 rounded-[var(--ar-radius-sm)] px-3 py-2.5 text-sm font-medium transition-colors",
                 active
-                  ? "bg-white/12 text-[var(--ar-cloud)]"
-                  : "text-[var(--ar-mist)] hover:bg-white/8 hover:text-[var(--ar-cloud)]"
+                  ? "bg-white text-[var(--ar-sky)] shadow-sm shadow-sky-950/5"
+                  : "text-[var(--ar-mist)] hover:bg-white/70 hover:text-[var(--ar-black)]"
               )}
             >
-              <item.icon size={16} />
+              <item.icon size={17} />
               {item.label}
             </Link>
           );
@@ -53,8 +56,9 @@ export function AppSidebar({ credits, onLogout }: { credits: number; onLogout: (
       <button
         type="button"
         onClick={onLogout}
-        className="mt-4 rounded-[var(--ar-radius-md)] px-3 py-2 text-left text-sm text-[var(--ar-mist)] hover:bg-white/8 hover:text-[var(--ar-cloud)]"
+        className="mt-4 flex items-center gap-3 rounded-[var(--ar-radius-sm)] px-3 py-2.5 text-left text-sm font-medium text-[var(--ar-mist)] hover:bg-white/70 hover:text-[var(--ar-black)]"
       >
+        <LogOut size={17} />
         Выйти
       </button>
     </aside>

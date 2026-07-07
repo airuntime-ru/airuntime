@@ -14,7 +14,7 @@ export function Tabs({
   const pathname = usePathname();
 
   return (
-    <nav className="glass flex gap-1 overflow-x-auto rounded-[var(--ar-radius-xl)] p-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <nav className="glass flex gap-1 overflow-x-auto rounded-[var(--ar-radius-sm)] p-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       {items.map((item) => {
         const active = pathname === item.href;
         return (
@@ -22,14 +22,14 @@ export function Tabs({
             {active ? (
               <motion.span
                 layoutId="project-tab"
-                className="absolute inset-0 rounded-[var(--ar-radius-md)] bg-[var(--ar-surface-3)]"
+                className="absolute inset-0 rounded-[var(--ar-radius-sm)] bg-white shadow-sm shadow-sky-950/10"
                 transition={{ type: "spring", stiffness: 380, damping: 30 }}
               />
             ) : null}
             <span
               className={cn(
-                "relative z-10 block whitespace-nowrap rounded-[var(--ar-radius-md)] px-3 py-2 text-sm transition-colors sm:px-4",
-                active ? "text-[var(--ar-cloud)]" : "text-[var(--ar-stone)] hover:text-[var(--ar-mist)]"
+                "relative z-10 block whitespace-nowrap rounded-[var(--ar-radius-sm)] px-3 py-2 text-sm transition-colors sm:px-4",
+                active ? "text-[var(--ar-black)]" : "text-[var(--ar-stone)] hover:text-[var(--ar-sky)]"
               )}
             >
               {item.label}

@@ -1,0 +1,231 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { ArrowLeft, ArrowRight, Check, Sparkles, X } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/cn";
+
+const STORAGE_KEY = "airuntime_onboarding_completed";
+
+type TourStep = {
+  route: string;
+  selector: string;
+  title: string;
+  text: string;
+  placement?: "bottom" | "center";
+};
+
+const steps: TourStep[] = [
+  {
+    route: "/app",
+    selector: "[data-tour='app-workspace']",
+    title: "Добро пожаловать в кабинет",
+    text: "Здесь собираются проекты, статусы запусков и быстрые действия. Сейчас покажу основные места, как короткий игровой туториал.",
+    placement: "center",
+  },
+  {
+    route: "/app",
+    selector: "[data-tour='nav-projects']",
+    title: "Навигация всегда рядом",
+    text: "Слева на больших экранах и снизу на телефоне лежат основные разделы: обзор, проекты, чат и настройки.",
+  },
+  {
+    route: "/app",
+    selector: "[data-tour='dashboard-create']",
+    title: "Начинайте с идеи",
+    text: "Эта кнопка ведет к созданию проекта. Лучше всего начинать с результата: кто пользователь, что должно случиться и где это запускать.",
+  },
+  {
+    route: "/app/projects",
+    selector: "[data-tour='project-create-form']",
+    title: "Опишите проект",
+    text: "Введите название, добавьте описание и выберите формат: сайт или Telegram-бот. После создания появится рабочий чат проекта.",
+  },
+  {
+    route: "/app/projects",
+    selector: "[data-tour='project-list']",
+    title: "Возвращайтесь к проектам",
+    text: "Все созданные проекты остаются здесь. Можно открыть карточку, перейти в чат, посмотреть деплои, секреты и историю.",
+  },
+  {
+    route: "/app/chat",
+    selector: "[data-tour='chat-screen']",
+    title: "Чат хранит контекст",
+    text: "В общем разделе можно выбрать проектный чат. Внутри проекта диалог станет главным местом для доработок и файлов.",
+  },
+  {
+    route: "/app/settings",
+    selector: "[data-tour='settings-screen']",
+    title: "Проверьте систему",
+    text: "В настройках видны домен и провайдеры. Это помогает понять, готова ли инфраструктура к сборке и запуску.",
+  },
+];
+
+type HighlightRect = {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+};
+
+export function OnboardingTour() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const [active, setActive] = useState(false);
+  const [index, setIndex] = useState(0);
+  const [rect, setRect] = useState<HighlightRect | null>(null);
+
+  const step = steps[index];
+  const isLast = index === steps.length - 1;
+
+  useEffect(() => {
+    if (window.localStorage.getItem(STORAGE_KEY) !== "true") {
+      const timer = window.setTimeout(() => setActive(true), 650);
+      return () => window.clearTimeout(timer);
+    }
+    return undefined;
+  }, []);
+
+  useEffect(() => {
+    if (!active || pathname === step.route) return;
+    router.push(step.route);
+  }, [active, pathname, router, step.route]);
+
+  const updateRect = useCallback(() => {
+    if (!active) return;
+    const element = document.querySelector(step.selector);
+    if (!element) {
+      setRect(null);
+      return;
+    }
+
+    element.scrollIntoView({ block: "center", inline: "center", behavior: "smooth" });
+    window.setTimeout(() => {
+      const box = element.getBoundingClientRect();
+      const margin = 10;
+      setRect({
+        top: Math.max(8, box.top - margin),
+        left: Math.max(8, box.left - margin),
+        width: Math.min(window.innerWidth - 16, box.width + margin * 2),
+        height: Math.min(window.innerHeight - 16, box.height + margin * 2),
+      });
+    }, 220);
+  }, [active, step.selector]);
+
+  useEffect(() => {
+    if (!active) return;
+    const timer = window.setTimeout(updateRect, 280);
+    window.addEventListener("resize", updateRect);
+    window.addEventListener("scroll", updateRect, true);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("resize", updateRect);
+      window.removeEventListener("scroll", updateRect, true);
+    };
+  }, [active, index, pathname, updateRect]);
+
+  const finish = () => {
+    window.localStorage.setItem(STORAGE_KEY, "true");
+    setActive(false);
+  };
+
+  const goTo = (nextIndex: number) => {
+    const next = Math.max(0, Math.min(steps.length - 1, nextIndex));
+    setIndex(next);
+    const nextRoute = steps[next].route;
+    if (pathname !== nextRoute) {
+      router.push(nextRoute);
+    }
+  };
+
+  const progress = useMemo(() => `${index + 1} / ${steps.length}`, [index]);
+
+  if (!active) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 pointer-events-none">
+      <div className="absolute inset-0 bg-slate-950/38 backdrop-blur-[2px]" />
+
+      {rect ? (
+        <div
+          className="absolute rounded-[var(--ar-radius-sm)] border-2 border-white shadow-[0_0_0_9999px_rgba(8,20,38,0.42),0_18px_70px_rgba(35,136,255,0.35)] transition-all duration-300"
+          style={{
+            top: rect.top,
+            left: rect.left,
+            width: rect.width,
+            height: rect.height,
+          }}
+        />
+      ) : null}
+
+      <div
+        className={cn(
+          "pointer-events-auto absolute left-1/2 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 rounded-[var(--ar-radius-sm)] border border-[var(--ar-border)] bg-white p-5 shadow-[0_28px_90px_rgba(8,20,38,0.22)]",
+          step.placement === "center" ? "top-1/2 -translate-y-1/2" : "bottom-[calc(1rem+env(safe-area-inset-bottom))] lg:bottom-8"
+        )}
+      >
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--ar-radius-sm)] bg-sky-50 text-[var(--ar-sky)]">
+              <Sparkles size={18} />
+            </span>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--ar-sky)]">Обучение</p>
+              <h2 className="mt-1 text-xl font-semibold text-[var(--ar-black)]">{step.title}</h2>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={finish}
+            className="rounded-[var(--ar-radius-sm)] p-2 text-[var(--ar-stone)] hover:bg-sky-50 hover:text-[var(--ar-black)]"
+            aria-label="Закрыть онбординг"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <p className="text-sm leading-relaxed text-[var(--ar-mist)]">{step.text}</p>
+
+        <div className="mt-5 flex items-center gap-1.5">
+          {steps.map((item, itemIndex) => (
+            <span
+              key={item.title}
+              className={cn(
+                "h-1.5 flex-1 rounded-full transition-colors",
+                itemIndex <= index ? "bg-[var(--ar-sky)]" : "bg-sky-100"
+              )}
+            />
+          ))}
+        </div>
+
+        <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs font-medium text-[var(--ar-stone)]">{progress}</p>
+          <div className="flex items-center justify-between gap-2 sm:justify-end">
+            <Button variant="ghost" size="sm" onClick={finish}>
+              Пропустить
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => goTo(index - 1)} disabled={index === 0}>
+              <ArrowLeft size={15} />
+              Назад
+            </Button>
+            <Button variant="accent" size="sm" onClick={() => (isLast ? finish() : goTo(index + 1))}>
+              {isLast ? (
+                <>
+                  Готово
+                  <Check size={15} />
+                </>
+              ) : (
+                <>
+                  Далее
+                  <ArrowRight size={15} />
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

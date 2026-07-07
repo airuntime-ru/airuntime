@@ -3,9 +3,16 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 
+import { Badge } from "@/components/ui/badge";
 import { Tabs } from "@/components/ui/tabs";
 import { PageLoader } from "@/components/ui/loader";
 import { getProject, type ProjectType } from "@/lib/api";
+
+function typeLabel(type: string) {
+  if (type === "telegram_bot") return "Telegram-бот";
+  if (type === "website") return "Сайт";
+  return type;
+}
 
 export default function ProjectLayout({ children }: { children: React.ReactNode }) {
   const params = useParams<{ id: string }>();
@@ -44,12 +51,19 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
   ];
 
   return (
-    <div className="space-y-4 sm:space-y-6">
+    <div className="mx-auto max-w-6xl space-y-5">
       <div>
-        <p className="text-xs text-[var(--ar-stone)] sm:text-sm">{project.type}</p>
-        <h1 className="text-2xl font-semibold text-[var(--ar-cloud)] sm:text-3xl">{project.name}</h1>
-        <p className="mt-2 text-sm text-[var(--ar-mist)] sm:text-base">
-          {project.description || "Описание пока не добавлено."}
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-sm font-semibold uppercase tracking-[0.22em] text-[var(--ar-sky)]">
+            {typeLabel(project.type)}
+          </p>
+          <Badge>{project.status}</Badge>
+        </div>
+        <h1 className="mt-2 text-3xl font-semibold tracking-tight text-[var(--ar-black)] sm:text-4xl">
+          {project.name}
+        </h1>
+        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-[var(--ar-mist)] sm:text-base">
+          {project.description || "Описание пока не добавлено. Его можно уточнить в чате проекта."}
         </p>
       </div>
       <Tabs items={tabs} />

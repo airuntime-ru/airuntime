@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Mail, ShieldCheck } from "lucide-react";
 
 import { AuthShell } from "@/components/auth/auth-shell";
 import { Button } from "@/components/ui/button";
@@ -63,12 +64,15 @@ export default function LoginPage() {
     <AuthShell>
       <div className="space-y-6">
         <div className="space-y-2 text-center">
-          <h1 className="text-2xl font-semibold text-[var(--ar-cloud)]">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-[var(--ar-radius-sm)] bg-sky-50 text-[var(--ar-sky)]">
+            {step === "email" ? <Mail size={22} /> : <ShieldCheck size={22} />}
+          </div>
+          <h1 className="text-2xl font-semibold text-[var(--ar-black)]">
             {step === "email" ? "Вход в AIRuntime" : "Проверьте почту"}
           </h1>
-          <p className="text-sm text-[var(--ar-mist)]">
+          <p className="text-sm leading-relaxed text-[var(--ar-mist)]">
             {step === "email"
-              ? "Отправим одноразовый код — без пароля."
+              ? "Отправим одноразовый код. Пароль не понадобится."
               : `Код отправлен на ${email}`}
           </p>
         </div>
@@ -86,7 +90,7 @@ export default function LoginPage() {
               }}
             />
             <Button variant="accent" className="w-full" onClick={onSubmitEmail} disabled={loading || !email.trim()}>
-              {loading ? "Отправляем…" : "Получить код"}
+              {loading ? "Отправляем..." : "Получить код"}
             </Button>
           </div>
         ) : (
@@ -104,12 +108,12 @@ export default function LoginPage() {
               className="text-center text-2xl tracking-[0.45em]"
             />
             <Button variant="accent" className="w-full" onClick={onSubmitCode} disabled={loading || code.length !== 6}>
-              {loading ? "Входим…" : "Войти"}
+              {loading ? "Входим..." : "Войти"}
             </Button>
-            <div className="flex items-center justify-between text-sm">
+            <div className="flex items-center justify-between gap-3 text-sm">
               <button
                 type="button"
-                className="text-[var(--ar-mist)] hover:text-[var(--ar-cloud)]"
+                className="text-[var(--ar-mist)] hover:text-[var(--ar-black)]"
                 onClick={() => {
                   setStep("email");
                   setCode("");
@@ -130,7 +134,11 @@ export default function LoginPage() {
           </div>
         )}
 
-        {error ? <p className="text-center text-sm text-rose-300">{error}</p> : null}
+        {error ? (
+          <p className="rounded-[var(--ar-radius-sm)] border border-rose-200 bg-rose-50 px-3 py-2 text-center text-sm text-rose-700">
+            {error}
+          </p>
+        ) : null}
       </div>
     </AuthShell>
   );

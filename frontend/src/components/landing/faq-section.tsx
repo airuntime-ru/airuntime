@@ -2,27 +2,32 @@ import { Accordion } from "@/components/ui/accordion";
 
 const faqs = [
   {
-    question: "Do I need infrastructure experience?",
-    answer: "No. AIRuntime owns runtime, secrets, deployment, and monitoring boundaries.",
+    question: "Нужен ли опыт разработки?",
+    answer: "Нет. Вы описываете результат, а AIRuntime помогает пройти путь от идеи до запуска.",
   },
   {
-    question: "What can I build?",
-    answer: "Telegram bots, websites, SaaS backends, landing pages, and internal tools.",
+    question: "Что можно собрать?",
+    answer: "Лендинг, Telegram-бота, MVP, внутренний инструмент, форму заявок, небольшой SaaS или backend-сервис.",
   },
   {
-    question: "How are secrets handled?",
-    answer: "Encrypted at rest and never injected into model prompts.",
+    question: "Где хранятся ключи и токены?",
+    answer: "В разделе секретов проекта. Их не нужно вставлять в сообщения и пересылать в чат.",
   },
   {
-    question: "Can I use my own domain?",
-    answer: "Yes. Configure APP_DOMAIN and reverse proxy settings for production.",
+    question: "Можно ли дорабатывать проект после запуска?",
+    answer: "Да. Вы возвращаетесь в чат проекта, описываете изменение и запускаете новую версию.",
   },
 ];
 
 export function FaqSection() {
   return (
-    <section>
-      <h2 className="mb-6 text-3xl font-semibold text-[var(--ar-cloud)]">FAQ</h2>
+    <section className="py-10 sm:py-16">
+      <div className="mb-8 max-w-2xl">
+        <p className="text-sm font-semibold uppercase tracking-[0.22em] text-[var(--ar-sky)]">FAQ</p>
+        <h2 className="mt-3 text-3xl font-semibold tracking-tight text-[var(--ar-black)] sm:text-4xl">
+          Вопросы перед первым запуском
+        </h2>
+      </div>
       <Accordion items={faqs} />
     </section>
   );

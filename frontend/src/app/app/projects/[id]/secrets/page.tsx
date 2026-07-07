@@ -2,6 +2,7 @@
 
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { KeyRound, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -60,25 +61,34 @@ export default function ProjectSecretsPage() {
 
   return (
     <div className="space-y-4">
-      <Card className="space-y-3" hover={false}>
-        <Input placeholder="Secret key" value={key} onChange={(e) => setKey(e.target.value)} />
-        <Input placeholder="Secret value" type="password" value={value} onChange={(e) => setValue(e.target.value)} />
-        <Button variant="accent" className="w-full sm:w-auto" onClick={onCreate}>
+      <Card className="grid gap-3 md:grid-cols-[1fr_1fr_auto]" hover={false}>
+        <Input placeholder="Ключ, например TELEGRAM_TOKEN" value={key} onChange={(e) => setKey(e.target.value)} />
+        <Input placeholder="Значение секрета" type="password" value={value} onChange={(e) => setValue(e.target.value)} />
+        <Button variant="accent" className="w-full md:w-auto" onClick={onCreate}>
+          <KeyRound size={16} />
           Сохранить
         </Button>
       </Card>
-      {secrets.map((secret) => (
-        <Card key={secret.id} className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between" hover={false}>
-          <div>
-            <p className="font-medium text-[var(--ar-cloud)]">{secret.key}</p>
-            <p className="text-xs text-[var(--ar-stone)]">Encrypted at rest</p>
-          </div>
-          <Button variant="ghost" size="sm" onClick={() => onDelete(secret.id)}>
-            Delete
-          </Button>
-        </Card>
-      ))}
-      {secrets.length === 0 ? <EmptyState title="No secrets" description="Store API keys and tokens securely for this project." /> : null}
+      <div className="grid gap-3">
+        {secrets.map((secret) => (
+          <Card key={secret.id} className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between" hover={false}>
+            <div>
+              <p className="font-semibold text-[var(--ar-black)]">{secret.key}</p>
+              <p className="text-xs text-[var(--ar-stone)]">Зашифровано и доступно runtime проекта</p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => onDelete(secret.id)}>
+              <Trash2 size={15} />
+              Удалить
+            </Button>
+          </Card>
+        ))}
+      </div>
+      {secrets.length === 0 ? (
+        <EmptyState
+          title="Секретов пока нет"
+          description="Сохраните API-ключи и токены здесь, чтобы не вставлять их в чат."
+        />
+      ) : null}
     </div>
   );
 }

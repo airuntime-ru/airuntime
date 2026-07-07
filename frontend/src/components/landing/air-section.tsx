@@ -1,28 +1,20 @@
-"use client";
-
-import { motion } from "framer-motion";
-
 const lines = [
-  "Опишите идею — остальное в воздухе.",
-  "Мы собираем, проверяем и запускаем.",
-  "Без серверов и сложных настроек. Только разговор — и готовый результат.",
+  "AIRuntime не просит вас разбираться в серверах, деплое и очередях задач.",
+  "Вы думаете о продукте. Система ведет проект от идеи до рабочей ссылки.",
+  "А когда нужно улучшить результат, вы продолжаете разговор там же.",
 ];
 
 export function AirSection() {
   return (
-    <section className="relative py-10 sm:py-20 md:py-32">
-      <div className="mx-auto max-w-3xl space-y-8 px-1 text-center sm:space-y-12 md:space-y-16">
-        {lines.map((line, index) => (
-          <motion.p
+    <section className="relative py-12 sm:py-16 md:py-24">
+      <div className="mx-auto max-w-4xl space-y-8 text-center sm:space-y-10">
+        {lines.map((line) => (
+          <p
             key={line}
-            initial={{ opacity: 0, y: 24 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, margin: "-80px" }}
-            transition={{ duration: 0.8, delay: index * 0.12, ease: [0.22, 1, 0.36, 1] }}
-            className="text-xl font-light leading-relaxed text-[var(--ar-mist)] sm:text-2xl md:text-4xl md:leading-snug"
+            className="text-2xl font-light leading-relaxed text-[var(--ar-graphite)] sm:text-3xl md:text-5xl md:leading-tight"
           >
             {line}
-          </motion.p>
+          </p>
         ))}
       </div>
     </section>

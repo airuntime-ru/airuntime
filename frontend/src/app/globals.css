@@ -3,30 +3,32 @@
 
 :root {
   --ar-white: #ffffff;
-  --ar-cloud: #f4f7fb;
-  --ar-mist: #c8d0dc;
-  --ar-stone: #8b95a5;
-  --ar-graphite: #2a3140;
-  --ar-black: #0a0d12;
+  --ar-cloud: #f8fbff;
+  --ar-mist: #627086;
+  --ar-stone: #8a96a8;
+  --ar-graphite: #263244;
+  --ar-black: #081426;
 
-  --ar-sky: #5eb8ff;
-  --ar-cyan: #4ee0d8;
-  --ar-indigo: #7c8cff;
-  --ar-purple: #b8a4ff;
+  --ar-sky: #2388ff;
+  --ar-cyan: #18c7ca;
+  --ar-indigo: #6366f1;
+  --ar-purple: #a78bfa;
+  --ar-mint: #6ee7b7;
+  --ar-coral: #ff8a7a;
 
-  --ar-surface-1: rgba(255, 255, 255, 0.05);
-  --ar-surface-2: rgba(255, 255, 255, 0.08);
-  --ar-surface-3: rgba(255, 255, 255, 0.12);
-  --ar-border: rgba(255, 255, 255, 0.14);
-  --ar-border-strong: rgba(94, 184, 255, 0.35);
+  --ar-surface-1: rgba(255, 255, 255, 0.76);
+  --ar-surface-2: rgba(255, 255, 255, 0.9);
+  --ar-surface-3: rgba(235, 246, 255, 0.95);
+  --ar-border: rgba(40, 91, 145, 0.12);
+  --ar-border-strong: rgba(35, 136, 255, 0.28);
 
-  --background: var(--ar-black);
-  --foreground: var(--ar-cloud);
+  --background: #f6faff;
+  --foreground: var(--ar-black);
 
   --ar-radius-sm: 0.5rem;
   --ar-radius-md: 0.75rem;
-  --ar-radius-lg: 1rem;
-  --ar-radius-xl: 1.5rem;
+  --ar-radius-lg: 0.875rem;
+  --ar-radius-xl: 1.25rem;
 
   --ar-space-xs: 0.25rem;
   --ar-space-sm: 0.5rem;
@@ -35,9 +37,9 @@
   --ar-space-xl: 2.5rem;
   --ar-space-2xl: 4rem;
 
-  --ar-glass-bg: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03));
-  --ar-blur: 20px;
-  --ar-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+  --ar-glass-bg: linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(245, 250, 255, 0.72));
+  --ar-blur: 18px;
+  --ar-shadow: 0 18px 55px rgba(56, 112, 180, 0.12);
   --ar-transition: 280ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -57,7 +59,8 @@ html {
 }
 
 body {
-  background: var(--background);
+  background:
+    linear-gradient(180deg, #ffffff 0%, #f6faff 42%, #eef8fb 100%);
   color: var(--foreground);
   font-family: var(--font-inter), system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -77,19 +80,27 @@ body {
 .glass-hover:hover {
   transform: translateY(-2px);
   border-color: var(--ar-border-strong);
-  box-shadow: 0 28px 90px rgba(94, 184, 255, 0.12);
+  box-shadow: 0 24px 70px rgba(35, 136, 255, 0.16);
 }
 
 .atmosphere {
   background:
-    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(94, 184, 255, 0.18), transparent),
-    radial-gradient(ellipse 60% 40% at 100% 50%, rgba(124, 140, 255, 0.12), transparent),
-    radial-gradient(ellipse 50% 30% at 0% 80%, rgba(78, 224, 216, 0.1), transparent),
-    var(--ar-black);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(246, 251, 255, 0.96) 45%, rgba(235, 249, 247, 0.94) 100%),
+    linear-gradient(115deg, rgba(35, 136, 255, 0.12), transparent 38%),
+    linear-gradient(245deg, rgba(24, 199, 202, 0.12), transparent 42%),
+    #f6faff;
+}
+
+.atmosphere-grid {
+  background-image:
+    linear-gradient(rgba(35, 136, 255, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(35, 136, 255, 0.055) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: linear-gradient(to bottom, transparent, black 14%, black 74%, transparent);
 }
 
 .text-gradient {
-  background: linear-gradient(135deg, var(--ar-cloud) 0%, var(--ar-mist) 50%, var(--ar-sky) 100%);
+  background: linear-gradient(120deg, var(--ar-black) 0%, var(--ar-sky) 44%, var(--ar-cyan) 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -109,15 +120,6 @@ body {
   }
 }
 
-.cloud-blob {
-  aspect-ratio: 2.2 / 1;
-  border-radius: 999px;
-  background: radial-gradient(ellipse at 30% 40%, rgba(255, 255, 255, 0.14), transparent 55%),
-    radial-gradient(ellipse at 70% 60%, rgba(94, 184, 255, 0.12), transparent 60%),
-    radial-gradient(ellipse at 50% 50%, rgba(184, 164, 255, 0.1), transparent 70%);
-  filter: blur(28px);
-}
-
 .breathe {
   animation: breathe 4s ease-in-out infinite;
 }
@@ -135,7 +137,7 @@ body {
 .prose-chat pre {
   position: relative;
   border-radius: var(--ar-radius-md);
-  background: rgba(0, 0, 0, 0.4) !important;
+  background: #0d1b2f !important;
   padding: 1rem;
   overflow-x: auto;
 }

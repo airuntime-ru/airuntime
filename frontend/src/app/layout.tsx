@@ -4,7 +4,7 @@ import "./globals.css";
 
 const inter = Inter({
   variable: "--font-inter",
-  subsets: ["latin"],
+  subsets: ["latin", "cyrillic"],
 });
 
 const jetbrains = JetBrains_Mono({
@@ -19,7 +19,7 @@ export const metadata: Metadata = {
     default: "AIRuntime",
     template: "%s · AIRuntime",
   },
-  description: "Опишите. Мы воплотим.",
+  description: "Опишите идею. AIRuntime соберет и запустит проект.",
   metadataBase: new URL(siteUrl),
   icons: {
     icon: [
@@ -33,7 +33,7 @@ export const metadata: Metadata = {
   manifest: "/site.webmanifest",
   openGraph: {
     title: "AIRuntime",
-    description: "Опишите. Мы воплотим.",
+    description: "Опишите идею. AIRuntime соберет и запустит проект.",
     url: siteUrl,
     siteName: "AIRuntime",
     type: "website",
@@ -49,7 +49,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "AIRuntime",
-    description: "Опишите. Мы воплотим.",
+    description: "Опишите идею. AIRuntime соберет и запустит проект.",
     images: ["/brand/logo-full.png"],
   },
 };
@@ -61,7 +61,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ru" className={`${inter.variable} ${jetbrains.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col bg-[var(--ar-black)] text-[var(--ar-cloud)]">{children}</body>
+      <body className="min-h-full flex flex-col bg-[var(--background)] text-[var(--foreground)]">{children}</body>
     </html>
   );
 }

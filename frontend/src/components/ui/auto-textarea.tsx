@@ -23,7 +23,7 @@ export function AutoTextarea({ className, value, onChange, ...props }: AutoTexta
       value={value}
       onChange={onChange}
       className={cn(
-        "w-full resize-none rounded-[var(--ar-radius-lg)] border border-white/15 bg-white/5 px-4 py-3 text-[var(--ar-cloud)] placeholder:text-[var(--ar-stone)] focus:border-[var(--ar-sky)]/50 focus:outline-none focus:ring-2 focus:ring-[var(--ar-sky)]/20",
+        "w-full resize-none rounded-[var(--ar-radius-sm)] border border-[var(--ar-border)] bg-white/90 px-4 py-3 text-[var(--ar-black)] shadow-sm shadow-sky-950/5 placeholder:text-[var(--ar-stone)] focus:border-[var(--ar-border-strong)] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[var(--ar-sky)]/15",
         className
       )}
       {...props}

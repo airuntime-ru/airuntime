@@ -2,13 +2,13 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
-import { ArrowLeft, Paperclip, Pin, PinOff, Plus, Search, X } from "lucide-react";
+import { ArrowLeft, Paperclip, Pin, PinOff, Plus, Search, Send, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 
+import { AutoTextarea } from "@/components/ui/auto-textarea";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { AutoTextarea } from "@/components/ui/auto-textarea";
 import {
   createChat,
   createMessage,
@@ -158,7 +158,7 @@ export default function ProjectChatPage() {
     setLoading(true);
     setMessages((prev) => [
       ...prev,
-      { role: "user", content: userMessage || "📎 Shared attachments", attachments: pendingFiles },
+      { role: "user", content: userMessage || "Прикреплены файлы", attachments: pendingFiles },
       { role: "assistant", content: "" },
     ]);
 
@@ -196,7 +196,7 @@ export default function ProjectChatPage() {
         const copy = [...prev];
         const last = copy[copy.length - 1];
         if (last?.role === "assistant") {
-          last.content = "Streaming failed. Check provider configuration and auth token.";
+          last.content = "Не удалось получить ответ. Проверьте настройки провайдера и токен авторизации.";
         }
         return copy;
       });
@@ -205,17 +205,19 @@ export default function ProjectChatPage() {
     }
   };
 
+  const currentTitle = filteredChats.find((chat) => chat.id === chatId)?.title ?? "Чат проекта";
+
   return (
-    <div className="mx-auto flex min-h-[calc(100dvh-11rem)] max-w-6xl flex-col gap-3 lg:min-h-[calc(100vh-14rem)] lg:flex-row lg:gap-4">
+    <div className="flex min-h-[calc(100dvh-15rem)] flex-col gap-3 lg:min-h-[calc(100vh-15rem)] lg:flex-row lg:gap-4">
       <Card
         hover={false}
-        className={cn(
-          "flex w-full flex-col p-3 lg:w-72 lg:shrink-0",
-          mobilePanel === "chat" ? "hidden lg:flex" : "flex"
-        )}
+        className={cn("flex w-full flex-col p-3 lg:w-72 lg:shrink-0", mobilePanel === "chat" ? "hidden lg:flex" : "flex")}
       >
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-medium text-[var(--ar-cloud)]">Чаты</h2>
+          <div>
+            <h2 className="text-sm font-semibold text-[var(--ar-black)]">Диалоги</h2>
+            <p className="text-xs text-[var(--ar-stone)]">{filteredChats.length} в проекте</p>
+          </div>
           <Button variant="ghost" size="sm" onClick={onNewChat} aria-label="Новый чат">
             <Plus size={16} />
           </Button>
@@ -226,7 +228,7 @@ export default function ProjectChatPage() {
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Поиск чатов"
-            className="w-full rounded-[var(--ar-radius-md)] border border-white/10 bg-white/5 py-2 pl-8 pr-3 text-sm text-[var(--ar-cloud)] placeholder:text-[var(--ar-stone)] focus:outline-none focus:ring-2 focus:ring-[var(--ar-sky)]/30"
+            className="w-full rounded-[var(--ar-radius-sm)] border border-[var(--ar-border)] bg-white/80 py-2 pl-8 pr-3 text-sm text-[var(--ar-black)] shadow-sm shadow-sky-950/5 placeholder:text-[var(--ar-stone)] focus:outline-none focus:ring-2 focus:ring-[var(--ar-sky)]/15"
           />
         </div>
         <div className="max-h-[42dvh] flex-1 space-y-1 overflow-y-auto lg:max-h-none">
@@ -234,13 +236,16 @@ export default function ProjectChatPage() {
             <div
               key={chat.id}
               className={cn(
-                "flex items-center gap-1 rounded-[var(--ar-radius-md)] px-2 py-1.5",
-                chatId === chat.id ? "bg-white/12" : "hover:bg-white/8"
+                "flex items-center gap-1 rounded-[var(--ar-radius-sm)] px-2 py-1.5",
+                chatId === chat.id ? "bg-white shadow-sm shadow-sky-950/5" : "hover:bg-white/70"
               )}
             >
               <button
                 type="button"
-                className="flex-1 truncate text-left text-sm text-[var(--ar-mist)]"
+                className={cn(
+                  "flex-1 truncate text-left text-sm",
+                  chatId === chat.id ? "font-medium text-[var(--ar-black)]" : "text-[var(--ar-mist)]"
+                )}
                 onClick={() => {
                   setChatId(chat.id);
                   setMobilePanel("chat");
@@ -261,35 +266,35 @@ export default function ProjectChatPage() {
         </div>
       </Card>
 
-      <div
-        className={cn(
-          "flex min-h-0 min-w-0 flex-1 flex-col gap-3",
-          mobilePanel === "list" ? "hidden lg:flex" : "flex"
-        )}
-      >
+      <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col gap-3", mobilePanel === "list" ? "hidden lg:flex" : "flex")}>
         <div className="flex items-center gap-2 lg:hidden">
           <Button variant="ghost" size="sm" onClick={() => setMobilePanel("list")} aria-label="К списку чатов">
             <ArrowLeft size={16} />
           </Button>
-          <p className="truncate text-sm text-[var(--ar-mist)]">
-            {filteredChats.find((chat) => chat.id === chatId)?.title ?? "Чат"}
-          </p>
+          <p className="truncate text-sm font-medium text-[var(--ar-black)]">{currentTitle}</p>
         </div>
-        <Card hover={false} className="min-h-[40dvh] flex-1 space-y-3 overflow-y-auto lg:min-h-0">
+        <Card hover={false} className="min-h-[42dvh] flex-1 space-y-3 overflow-y-auto bg-white/70 lg:min-h-0">
           {messages.length === 0 ? (
-            <p className="text-sm text-[var(--ar-stone)]">Начните диалог — опишите, что нужно сделать.</p>
+            <div className="rounded-[var(--ar-radius-sm)] border border-dashed border-[var(--ar-border-strong)] bg-white/70 p-5 text-center">
+              <p className="font-semibold text-[var(--ar-black)]">Начните диалог</p>
+              <p className="mt-2 text-sm leading-relaxed text-[var(--ar-mist)]">
+                Опишите, что нужно собрать, что изменить или какие файлы учитывать.
+              </p>
+            </div>
           ) : null}
           {messages.map((message, index) => (
             <div
               key={`${message.role}-${index}`}
               className={cn(
-                "rounded-[var(--ar-radius-lg)] border p-3",
+                "rounded-[var(--ar-radius-sm)] border p-3",
                 message.role === "user"
-                  ? "border-white/10 bg-white/5"
-                  : "border-[var(--ar-sky)]/20 bg-[var(--ar-sky)]/5"
+                  ? "ml-auto max-w-[92%] border-sky-100 bg-sky-50 text-[var(--ar-black)]"
+                  : "max-w-[94%] border-[var(--ar-border)] bg-white text-[var(--ar-black)] shadow-sm shadow-sky-950/5"
               )}
             >
-              <p className="mb-1 text-xs uppercase tracking-wide text-[var(--ar-stone)]">{message.role}</p>
+              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--ar-stone)]">
+                {message.role === "user" ? "Вы" : "AIRuntime"}
+              </p>
               {message.attachments?.length ? (
                 <div className="mb-2 flex flex-wrap gap-2">
                   {message.attachments.map((file) => (
@@ -298,14 +303,14 @@ export default function ProjectChatPage() {
                       href={file.download_url ?? "#"}
                       target="_blank"
                       rel="noreferrer"
-                      className="rounded-full border border-[var(--ar-border)] bg-[var(--ar-surface-1)] px-3 py-1 text-xs text-[var(--ar-sky)] hover:underline"
+                      className="rounded-full border border-[var(--ar-border)] bg-white px-3 py-1 text-xs text-[var(--ar-sky)] hover:underline"
                     >
                       {file.original_filename}
                     </a>
                   ))}
                 </div>
               ) : null}
-              <div className="prose-chat text-[var(--ar-cloud)]">
+              <div className="prose-chat text-sm leading-relaxed text-[var(--ar-black)]">
                 <ReactMarkdown rehypePlugins={[rehypeHighlight]}>{message.content}</ReactMarkdown>
               </div>
             </div>
@@ -318,10 +323,10 @@ export default function ProjectChatPage() {
             {pendingFiles.map((file) => (
               <span
                 key={file.id}
-                className="inline-flex items-center gap-2 rounded-full border border-[var(--ar-border)] bg-[var(--ar-surface-1)] px-3 py-1 text-xs text-[var(--ar-mist)]"
+                className="inline-flex items-center gap-2 rounded-full border border-[var(--ar-border)] bg-white px-3 py-1 text-xs text-[var(--ar-mist)] shadow-sm shadow-sky-950/5"
               >
                 {file.original_filename}
-                <button type="button" onClick={() => void removePendingFile(file)} aria-label="Remove file">
+                <button type="button" onClick={() => void removePendingFile(file)} aria-label="Убрать файл">
                   <X size={12} />
                 </button>
               </span>
@@ -332,7 +337,7 @@ export default function ProjectChatPage() {
         <form onSubmit={onSubmit} className="relative">
           <input ref={fileInputRef} type="file" className="hidden" multiple onChange={onFilesSelected} />
           <AutoTextarea
-            className="pr-24"
+            className="pr-28"
             value={input}
             onChange={(event) => setInput(event.target.value)}
             placeholder="Опишите задачу..."
@@ -355,7 +360,7 @@ export default function ProjectChatPage() {
               <Paperclip size={16} />
             </Button>
             <Button type="submit" variant="accent" size="sm" disabled={loading || uploading || !chatId}>
-              {loading ? "..." : "Отпр."}
+              <Send size={15} />
             </Button>
           </div>
         </form>

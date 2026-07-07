@@ -16,13 +16,13 @@ export function Accordion({ items }: { items: Item[] }) {
       {items.map((item, index) => {
         const isOpen = open === index;
         return (
-          <div key={item.question} className="glass rounded-[var(--ar-radius-lg)]">
+          <div key={item.question} className="glass rounded-[var(--ar-radius-sm)]">
             <button
               type="button"
               className="flex w-full items-center justify-between px-5 py-4 text-left"
               onClick={() => setOpen(isOpen ? null : index)}
             >
-              <span className="font-medium text-[var(--ar-cloud)]">{item.question}</span>
+              <span className="font-medium text-[var(--ar-black)]">{item.question}</span>
               <ChevronDown
                 size={16}
                 className={cn("text-[var(--ar-stone)] transition-transform", isOpen && "rotate-180")}

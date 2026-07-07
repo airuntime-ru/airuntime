@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { AppSidebar } from "@/components/app/app-sidebar";
 import { AppMobileHeader, AppMobileNav } from "@/components/app/app-mobile-nav";
+import { OnboardingTour } from "@/components/app/onboarding-tour";
 import { PageLoader } from "@/components/ui/loader";
 import { getAccessToken } from "@/lib/auth";
 import { getMe, logout, refreshSession } from "@/lib/api";
@@ -43,18 +44,22 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   if (isChecking) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center atmosphere">
         <PageLoader />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen atmosphere">
+    <div className="min-h-screen atmosphere text-[var(--ar-black)]">
+      <div className="fixed inset-0 atmosphere-grid" aria-hidden />
       <AppSidebar credits={credits} onLogout={onLogout} />
       <AppMobileHeader credits={credits} />
       <AppMobileNav credits={credits} onLogout={onLogout} />
-      <main className="min-h-screen px-4 pb-24 pt-16 lg:ml-72 lg:p-8 lg:pb-8 lg:pt-8">{children}</main>
+      <main data-tour="app-workspace" className="relative z-10 min-h-screen px-4 pb-24 pt-20 lg:ml-72 lg:p-8">
+        {children}
+      </main>
+      <OnboardingTour />
     </div>
   );
 }
