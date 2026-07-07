@@ -1,5 +1,6 @@
 import smtplib
 from email.message import EmailMessage
+from email.utils import formatdate, make_msgid
 from pathlib import Path
 
 from src.core.config import settings
@@ -15,9 +16,12 @@ def send_email(
         return False
 
     message = EmailMessage()
+    from_domain = settings.smtp_from.split("@")[-1]
     message["From"] = settings.smtp_from
     message["To"] = to
     message["Subject"] = subject
+    message["Date"] = formatdate(localtime=True)
+    message["Message-ID"] = make_msgid(domain=from_domain)
     message.set_content(plain)
 
     if html:
