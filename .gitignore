@@ -45,7 +45,9 @@ Thumbs.db
 # Docker / infra runtime
 infra/mail/data/
 infra/mail/state/
-infra/mail/config/
+infra/mail/config/ssl/
+infra/mail/config/postfix-accounts.cf
+infra/mail/config/postfix-virtual.cf
 infra/traefik/letsencrypt/
 letsencrypt/
 
