@@ -2,17 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bot, FolderKanban, Gauge, LogOut, Settings, User } from "lucide-react";
+import { FolderKanban, LogOut, User } from "lucide-react";
 
 import { Logo } from "@/components/brand/logo";
 import { cn } from "@/lib/cn";
 
 const nav = [
-  { href: "/app", label: "Обзор", icon: Gauge },
-  { href: "/app/projects", label: "Проекты", icon: FolderKanban },
-  { href: "/app/chat", label: "Чат", icon: Bot },
-  { href: "/app/profile", label: "Профиль", icon: User },
-  { href: "/app/settings", label: "Настройки", icon: Settings },
+  { href: "/app", label: "Проекты", icon: FolderKanban, match: (path: string) => path === "/app" || path.startsWith("/app/projects") },
+  { href: "/app/profile", label: "Профиль", icon: User, match: (path: string) => path === "/app/profile" },
 ];
 
 export function AppSidebar({ credits, onLogout }: { credits: number; onLogout: () => void }) {
@@ -34,12 +31,12 @@ export function AppSidebar({ credits, onLogout }: { credits: number; onLogout: (
       </div>
       <nav className="flex-1 space-y-1">
         {nav.map((item) => {
-          const active = pathname === item.href || (item.href !== "/app" && pathname.startsWith(item.href));
+          const active = item.match(pathname);
           return (
             <Link
               key={item.href}
               href={item.href}
-              data-tour={item.href === "/app/projects" ? "nav-projects" : undefined}
+              data-tour={item.href === "/app" ? "nav-projects" : undefined}
               className={cn(
                 "flex items-center gap-3 rounded-[var(--ar-radius-sm)] px-3 py-2.5 text-sm font-medium transition-colors",
                 active

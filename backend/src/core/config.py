@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     deployment_cpu_limit: str = "1.0"
     deployment_timeout_seconds: int = 120
     deployment_default_image: str = "nginx:alpine"
+    generated_projects_dir: str = "/tmp/airuntime-projects"
+    auto_deploy_websites: bool = True
+    deployment_public_network: str | None = None
+    deployment_expose_host_ports: bool = True
 
     s3_endpoint_url: str | None = "http://minio:9000"
     s3_public_endpoint_url: str | None = "http://localhost:9000"

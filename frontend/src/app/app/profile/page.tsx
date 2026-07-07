@@ -1,28 +1,21 @@
 "use client";
 
-import { CheckCircle2, RefreshCw, UserRound } from "lucide-react";
+import { CheckCircle2, UserRound } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { PageLoader } from "@/components/ui/loader";
 import { useProfile } from "@/lib/use-profile";
 
 export default function ProfilePage() {
-  const { profile, error, loading, refresh } = useProfile();
+  const { profile, error, loading } = useProfile();
 
   if (loading) return <PageLoader />;
 
   return (
     <div className="mx-auto max-w-6xl space-y-5">
-      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.22em] text-[var(--ar-sky)]">Аккаунт</p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-[var(--ar-black)] sm:text-4xl">Профиль</h1>
-        </div>
-        <Button variant="outline" onClick={refresh}>
-          <RefreshCw size={16} />
-          Обновить
-        </Button>
+      <div>
+        <p className="text-sm font-semibold uppercase tracking-[0.22em] text-[var(--ar-sky)]">Аккаунт</p>
+        <h1 className="mt-2 text-3xl font-semibold tracking-tight text-[var(--ar-black)] sm:text-4xl">Профиль</h1>
       </div>
       {error ? <p className="text-sm text-rose-600">{error}</p> : null}
       {profile ? (

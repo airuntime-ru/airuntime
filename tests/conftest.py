@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from moto import mock_aws
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 os.environ.setdefault(
     "DATABASE_URL", "postgresql+psycopg://postgres:postgres@localhost:5432/airuntime_test"
@@ -27,7 +28,15 @@ from src.services import storage as storage_module
 from src.services.storage import storage_service
 
 TEST_DATABASE_URL = os.environ["DATABASE_URL"]
-engine = create_engine(TEST_DATABASE_URL, pool_pre_ping=True)
+engine_kwargs = {"pool_pre_ping": True}
+if TEST_DATABASE_URL.startswith("sqlite"):
+    engine_kwargs.update(
+        {
+            "connect_args": {"check_same_thread": False},
+            "poolclass": StaticPool,
+        }
+    )
+engine = create_engine(TEST_DATABASE_URL, **engine_kwargs)
 TestingSessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False, class_=Session)
 
 

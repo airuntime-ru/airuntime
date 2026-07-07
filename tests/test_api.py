@@ -1,4 +1,12 @@
+import json
+
 from tests.conftest import auth_tokens
+
+
+class _FakeConversationService:
+    async def stream_reply(self, *, chat_id: str, user_message: str):
+        yield "Готово: "
+        yield user_message[:20]
 
 
 def test_health(client):
@@ -114,3 +122,52 @@ def test_chat_file_upload_and_message_with_attachment(client):
     )
     assert listed.status_code == 200
     assert len(listed.json()) == 1
+
+
+def test_stream_prompt_generates_artifact_and_queues_deployment(
+    client, monkeypatch, tmp_path
+):
+    from src.api.routers import chat as chat_router
+
+    generated = []
+    deployments = []
+
+    def fake_generate_project_artifact(db, project, prompt):
+        generated.append((project.id, prompt))
+        return tmp_path / "artifact"
+
+    def fake_create_deployment(db, project):
+        deployments.append(project.id)
+        return None
+
+    monkeypatch.setattr(chat_router, "ConversationService", _FakeConversationService)
+    monkeypatch.setattr(chat_router, "generate_project_artifact", fake_generate_project_artifact)
+    monkeypatch.setattr(chat_router, "create_deployment_for_project", fake_create_deployment)
+
+    headers = auth_tokens(client, "stream@airuntime.dev")
+    project = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={"type": "website", "name": "Prompt Site", "description": ""},
+    ).json()
+    chat = client.post(f"/api/v1/projects/{project['id']}/chats", headers=headers).json()
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/chats/{chat['id']}/stream",
+        headers=headers,
+        json={"content": "Сделай светлый лендинг для студии"},
+    )
+
+    assert response.status_code == 200
+    chunks = [
+        json.loads(line.removeprefix("data: "))["chunk"]
+        for line in response.text.splitlines()
+        if line.startswith("data: {")
+    ]
+    assert any("Сайт собран и поставлен в очередь на запуск" in chunk for chunk in chunks)
+    assert "data: [DONE]" in response.text
+    assert generated
+    assert deployments == [generated[0][0]]
+
+    updated = client.get(f"/api/v1/projects/{project['id']}", headers=headers).json()
+    assert updated["status"] == "ready"

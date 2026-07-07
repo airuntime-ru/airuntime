@@ -13,13 +13,16 @@ from src.api.dto.chat import (
     StreamRequest,
 )
 from src.api.mappers.chat_files import chat_file_to_response
+from src.core.config import settings
 from src.db.models.chat import Chat
 from src.db.models.chat_file import ChatFile
 from src.db.models.message import Message
 from src.db.models.project import Project
 from src.db.models.user import User
 from src.db.session import get_db
+from src.services.artifacts import ArtifactError, generate_project_artifact
 from src.services.conversation import ConversationService
+from src.services.deployments import create_deployment_for_project
 from src.services.file_context import (
     attach_files_to_message,
     build_attachment_context,
@@ -31,7 +34,7 @@ router = APIRouter(prefix="/projects/{project_id}/chats", tags=["chat"])
 
 
 def _authorize_chat(
-    db: Session, project_id: str, chat_id: UUID, current_user: User
+    db: Session, project_id: UUID, chat_id: UUID, current_user: User
 ) -> tuple[Project, Chat]:
     project = (
         db.query(Project)
@@ -41,7 +44,7 @@ def _authorize_chat(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     chat = db.get(Chat, chat_id)
-    if not chat or str(chat.project_id) != project_id:
+    if not chat or chat.project_id != project_id:
         raise HTTPException(status_code=404, detail="Chat not found")
     return project, chat
 
@@ -49,7 +52,7 @@ def _authorize_chat(
 def _validate_attachments(
     db: Session,
     *,
-    project_id: str,
+    project_id: UUID,
     chat_id: UUID,
     user_id: UUID,
     attachment_ids: list[UUID],
@@ -95,9 +98,13 @@ def _message_response(db: Session, message: Message) -> MessageResponse:
     )
 
 
+def _sse_chunk(chunk: str) -> str:
+    return f"data: {json.dumps({'chunk': chunk})}\n\n"
+
+
 @router.post("", response_model=ChatCreateResponse)
 def create_chat(
-    project_id: str,
+    project_id: UUID,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Chat:
@@ -117,7 +124,7 @@ def create_chat(
 
 @router.get("", response_model=list[ChatCreateResponse])
 def list_chats(
-    project_id: str,
+    project_id: UUID,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[Chat]:
@@ -135,7 +142,7 @@ def list_chats(
 
 @router.get("/{chat_id}/messages", response_model=list[MessageResponse])
 def list_messages(
-    project_id: str,
+    project_id: UUID,
     chat_id: UUID,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -152,7 +159,7 @@ def list_messages(
 
 @router.post("/{chat_id}/messages", response_model=MessageResponse)
 def create_message(
-    project_id: str,
+    project_id: UUID,
     chat_id: UUID,
     payload: MessageCreateRequest,
     current_user: User = Depends(get_current_user),
@@ -161,7 +168,7 @@ def create_message(
     project, _chat = _authorize_chat(db, project_id, chat_id, current_user)
     _validate_attachments(
         db,
-        project_id=str(project.id),
+        project_id=project.id,
         chat_id=chat_id,
         user_id=current_user.id,
         attachment_ids=payload.attachment_ids,
@@ -172,7 +179,7 @@ def create_message(
             content = sanitize_user_message(content)
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    display_content = content or "📎 Shared attachments"
+    display_content = content or "Shared attachments"
     message = Message(
         chat_id=chat_id,
         role="user",
@@ -192,6 +199,7 @@ def create_message(
 async def _stream_events(
     *,
     db: Session,
+    project: Project,
     chat_id: UUID,
     current_user: User,
     user_message: str,
@@ -223,13 +231,29 @@ async def _stream_events(
             chat_id=str(chat_id), user_message=safe_message
         ):
             assistant_full += chunk
-            yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+            yield _sse_chunk(chunk)
         assistant_message = Message(
             chat_id=chat_id, role="assistant", content_markdown=assistant_full
         )
         db.add(assistant_message)
         usage_cost = max(100, len(safe_message) + len(assistant_full))
         current_user.credits_balance = max(0, current_user.credits_balance - usage_cost)
+        try:
+            artifact_path = generate_project_artifact(db, project, safe_message)
+            project.status = "ready"
+            project.logs = f"Generated artifact: {artifact_path}"
+            db.add(project)
+            if project.type == "website" and settings.auto_deploy_websites:
+                create_deployment_for_project(db, project)
+                yield _sse_chunk("\n\nСайт собран и поставлен в очередь на запуск.")
+            elif project.type == "telegram_bot":
+                create_deployment_for_project(db, project)
+                yield _sse_chunk("\n\nБот собран и поставлен в очередь на запуск.")
+        except ArtifactError as exc:
+            project.status = "needs_configuration"
+            project.logs = str(exc)
+            db.add(project)
+            yield _sse_chunk(f"\n\nНужно действие: {exc}")
         db.add(current_user)
         db.commit()
         yield "data: [DONE]\n\n"
@@ -239,7 +263,7 @@ async def _stream_events(
 
 @router.post("/{chat_id}/stream")
 async def stream_reply_post(
-    project_id: str,
+    project_id: UUID,
     chat_id: UUID,
     payload: StreamRequest,
     current_user: User = Depends(get_current_user),
@@ -248,13 +272,14 @@ async def stream_reply_post(
     project, _chat = _authorize_chat(db, project_id, chat_id, current_user)
     _validate_attachments(
         db,
-        project_id=str(project.id),
+        project_id=project.id,
         chat_id=chat_id,
         user_id=current_user.id,
         attachment_ids=payload.attachment_ids,
     )
     return await _stream_events(
         db=db,
+        project=project,
         chat_id=chat_id,
         current_user=current_user,
         user_message=payload.content,
@@ -264,15 +289,16 @@ async def stream_reply_post(
 
 @router.get("/{chat_id}/stream")
 async def stream_reply_get(
-    project_id: str,
+    project_id: UUID,
     chat_id: UUID,
     q: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
-    _authorize_chat(db, project_id, chat_id, current_user)
+    project, _chat = _authorize_chat(db, project_id, chat_id, current_user)
     return await _stream_events(
         db=db,
+        project=project,
         chat_id=chat_id,
         current_user=current_user,
         user_message=q,

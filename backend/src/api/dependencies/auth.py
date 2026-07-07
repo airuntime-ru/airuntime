@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
@@ -22,7 +24,11 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
             raise credentials_exception
     except JWTError as exc:
         raise credentials_exception from exc
-    user = db.get(User, user_id)
+    try:
+        user_uuid = UUID(user_id)
+    except (TypeError, ValueError) as exc:
+        raise credentials_exception from exc
+    user = db.get(User, user_uuid)
     if user is None:
         raise credentials_exception
     return user

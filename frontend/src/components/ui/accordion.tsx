@@ -16,7 +16,7 @@ export function Accordion({ items }: { items: Item[] }) {
       {items.map((item, index) => {
         const isOpen = open === index;
         return (
-          <div key={item.question} className="glass rounded-[var(--ar-radius-sm)]">
+          <div key={item.question} className="overflow-hidden rounded-xl border border-black/[0.08] bg-white">
             <button
               type="button"
               className="flex w-full items-center justify-between px-5 py-4 text-left"

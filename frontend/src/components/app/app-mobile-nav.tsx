@@ -2,27 +2,23 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bot, FolderKanban, Gauge, LogOut, Menu, Settings, User, X } from "lucide-react";
+import { FolderKanban, LogOut, Menu, User, X } from "lucide-react";
 import { useState } from "react";
 
 import { Logo } from "@/components/brand/logo";
 import { cn } from "@/lib/cn";
 
 const primaryNav = [
-  { href: "/app", label: "Обзор", icon: Gauge, match: (path: string) => path === "/app" },
   {
-    href: "/app/projects",
+    href: "/app",
     label: "Проекты",
     icon: FolderKanban,
-    match: (path: string) => path.startsWith("/app/projects"),
+    match: (path: string) => path === "/app" || path.startsWith("/app/projects"),
   },
-  { href: "/app/chat", label: "Чат", icon: Bot, match: (path: string) => path === "/app/chat" },
+  { href: "/app/profile", label: "Профиль", icon: User, match: (path: string) => path === "/app/profile" },
 ];
 
-const menuNav = [
-  { href: "/app/profile", label: "Профиль", icon: User },
-  { href: "/app/settings", label: "Настройки", icon: Settings },
-];
+const menuNav: { href: string; label: string; icon: typeof User }[] = [];
 
 export function AppMobileHeader({ credits }: { credits: number }) {
   return (
@@ -52,7 +48,7 @@ export function AppMobileNav({ credits, onLogout }: { credits: number; onLogout:
               <Link
                 key={item.href}
                 href={item.href}
-                data-tour={item.href === "/app/projects" ? "nav-projects" : undefined}
+                data-tour={item.href === "/app" ? "nav-projects" : undefined}
                 className={cn(
                   "flex min-w-0 flex-1 flex-col items-center gap-1 rounded-[var(--ar-radius-sm)] px-2 py-2 text-[0.68rem] font-medium",
                   active ? "bg-sky-50 text-[var(--ar-sky)]" : "text-[var(--ar-stone)]"

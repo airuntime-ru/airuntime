@@ -7,8 +7,6 @@ import { ArrowLeft, ArrowRight, Check, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 
-const STORAGE_KEY = "airuntime_onboarding_completed";
-
 type TourStep = {
   route: string;
   selector: string;
@@ -29,37 +27,19 @@ const steps: TourStep[] = [
     route: "/app",
     selector: "[data-tour='nav-projects']",
     title: "Навигация всегда рядом",
-    text: "Слева на больших экранах и снизу на телефоне лежат основные разделы: обзор, проекты, чат и настройки.",
+    text: "Слева на больших экранах и снизу на телефоне — проекты и профиль.",
   },
   {
     route: "/app",
-    selector: "[data-tour='dashboard-create']",
-    title: "Начинайте с идеи",
-    text: "Эта кнопка ведет к созданию проекта. Лучше всего начинать с результата: кто пользователь, что должно случиться и где это запускать.",
-  },
-  {
-    route: "/app/projects",
     selector: "[data-tour='project-create-form']",
     title: "Опишите проект",
     text: "Введите название, добавьте описание и выберите формат: сайт или Telegram-бот. После создания появится рабочий чат проекта.",
   },
   {
-    route: "/app/projects",
+    route: "/app",
     selector: "[data-tour='project-list']",
     title: "Возвращайтесь к проектам",
-    text: "Все созданные проекты остаются здесь. Можно открыть карточку, перейти в чат, посмотреть деплои, секреты и историю.",
-  },
-  {
-    route: "/app/chat",
-    selector: "[data-tour='chat-screen']",
-    title: "Чат хранит контекст",
-    text: "В общем разделе можно выбрать проектный чат. Внутри проекта диалог станет главным местом для доработок и файлов.",
-  },
-  {
-    route: "/app/settings",
-    selector: "[data-tour='settings-screen']",
-    title: "Проверьте систему",
-    text: "В настройках видны домен и провайдеры. Это помогает понять, готова ли инфраструктура к сборке и запуску.",
+    text: "Все созданные проекты остаются здесь. Откройте проект — сразу попадёте в чат, а деплои, секреты и история лежат во вкладках внутри.",
   },
 ];
 
@@ -70,7 +50,13 @@ type HighlightRect = {
   height: number;
 };
 
-export function OnboardingTour() {
+export function OnboardingTour({
+  completed,
+  onComplete,
+}: {
+  completed: boolean;
+  onComplete: () => void | Promise<void>;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const [active, setActive] = useState(false);
@@ -81,12 +67,10 @@ export function OnboardingTour() {
   const isLast = index === steps.length - 1;
 
   useEffect(() => {
-    if (window.localStorage.getItem(STORAGE_KEY) !== "true") {
-      const timer = window.setTimeout(() => setActive(true), 650);
-      return () => window.clearTimeout(timer);
-    }
-    return undefined;
-  }, []);
+    if (completed) return undefined;
+    const timer = window.setTimeout(() => setActive(true), 650);
+    return () => window.clearTimeout(timer);
+  }, [completed]);
 
   useEffect(() => {
     if (!active || pathname === step.route) return;
@@ -127,8 +111,8 @@ export function OnboardingTour() {
   }, [active, index, pathname, updateRect]);
 
   const finish = () => {
-    window.localStorage.setItem(STORAGE_KEY, "true");
     setActive(false);
+    void onComplete();
   };
 
   const goTo = (nextIndex: number) => {
@@ -142,7 +126,7 @@ export function OnboardingTour() {
 
   const progress = useMemo(() => `${index + 1} / ${steps.length}`, [index]);
 
-  if (!active) return null;
+  if (completed || !active) return null;
 
   return (
     <div className="fixed inset-0 z-50 pointer-events-none">

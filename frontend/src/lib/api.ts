@@ -32,6 +32,7 @@ export type MeType = {
   email: string;
   is_verified: boolean;
   credits_balance: number;
+  onboarding_completed: boolean;
 };
 
 export type ChatType = {
@@ -255,6 +256,10 @@ export async function createDeployment(projectId: string): Promise<DeploymentTyp
 
 export async function getMe(): Promise<MeType> {
   return requestJson<MeType>("/auth/me");
+}
+
+export async function completeOnboarding(): Promise<MeType> {
+  return requestJson<MeType>("/auth/me/onboarding-complete", { method: "POST" });
 }
 
 export async function getProviders(): Promise<ProvidersType> {

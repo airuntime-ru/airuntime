@@ -61,3 +61,4 @@ class MeResponse(BaseModel):
     email: EmailStr
     is_verified: bool
     credits_balance: int
+    onboarding_completed: bool

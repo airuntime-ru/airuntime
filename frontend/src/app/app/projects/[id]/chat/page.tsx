@@ -334,10 +334,24 @@ export default function ProjectChatPage() {
           </div>
         ) : null}
 
-        <form onSubmit={onSubmit} className="relative">
+        <form
+          onSubmit={onSubmit}
+          className="flex items-end gap-2 rounded-[var(--ar-radius-md)] border border-[var(--ar-border)] bg-white/90 p-2 shadow-sm shadow-sky-950/5 focus-within:border-[var(--ar-border-strong)] focus-within:ring-2 focus-within:ring-[var(--ar-sky)]/15"
+        >
           <input ref={fileInputRef} type="file" className="hidden" multiple onChange={onFilesSelected} />
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="mb-0.5 h-9 w-9 shrink-0 p-0"
+            onClick={onPickFiles}
+            disabled={uploading || !chatId}
+            aria-label="Прикрепить файлы"
+          >
+            <Paperclip size={18} />
+          </Button>
           <AutoTextarea
-            className="pr-28"
+            className="min-h-[40px] flex-1 border-0 bg-transparent px-1 py-2 shadow-none focus:border-0 focus:bg-transparent focus:ring-0"
             value={input}
             onChange={(event) => setInput(event.target.value)}
             placeholder="Опишите задачу..."
@@ -348,21 +362,16 @@ export default function ProjectChatPage() {
               }
             }}
           />
-          <div className="absolute bottom-3 right-3 flex items-center gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={onPickFiles}
-              disabled={uploading || !chatId}
-              aria-label="Прикрепить файлы"
-            >
-              <Paperclip size={16} />
-            </Button>
-            <Button type="submit" variant="accent" size="sm" disabled={loading || uploading || !chatId}>
-              <Send size={15} />
-            </Button>
-          </div>
+          <Button
+            type="submit"
+            variant="accent"
+            size="sm"
+            className="mb-0.5 h-9 w-9 shrink-0 rounded-full p-0"
+            disabled={loading || uploading || !chatId}
+            aria-label="Отправить"
+          >
+            <Send size={16} />
+          </Button>
         </form>
       </div>
     </div>

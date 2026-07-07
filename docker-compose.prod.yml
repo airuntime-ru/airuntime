@@ -11,6 +11,8 @@ x-common-env: &common-env
   API_URL: https://api.${APP_DOMAIN}
   ALLOWED_ORIGINS: https://${APP_DOMAIN},https://www.${APP_DOMAIN}
   ALLOWED_HOSTS: ${APP_DOMAIN},www.${APP_DOMAIN},api.${APP_DOMAIN},backend
+  DEPLOYMENT_PUBLIC_NETWORK: airuntime_public
+  DEPLOYMENT_EXPOSE_HOST_PORTS: "false"
 
 x-traefik-labels: &traefik-labels
   traefik.enable: "true"
@@ -27,6 +29,7 @@ services:
       - ./infra/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
       - ./infra/traefik/dynamic:/etc/traefik/dynamic:ro
       - traefik_letsencrypt:/letsencrypt
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - public
 

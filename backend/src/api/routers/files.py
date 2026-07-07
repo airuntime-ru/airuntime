@@ -18,7 +18,7 @@ router = APIRouter(prefix="/projects/{project_id}/chats/{chat_id}/files", tags=[
 
 
 def _authorize_chat(
-    db: Session, project_id: str, chat_id: UUID, current_user: User
+    db: Session, project_id: UUID, chat_id: UUID, current_user: User
 ) -> tuple[Project, Chat]:
     project = (
         db.query(Project)
@@ -28,7 +28,7 @@ def _authorize_chat(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     chat = db.get(Chat, chat_id)
-    if not chat or str(chat.project_id) != project_id:
+    if not chat or chat.project_id != project_id:
         raise HTTPException(status_code=404, detail="Chat not found")
     return project, chat
 
@@ -39,7 +39,7 @@ def _to_response(row: ChatFile) -> ChatFileResponse:
 
 @router.get("", response_model=list[ChatFileResponse])
 def list_chat_files(
-    project_id: str,
+    project_id: UUID,
     chat_id: UUID,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -56,7 +56,7 @@ def list_chat_files(
 
 @router.post("", response_model=ChatFileResponse, status_code=status.HTTP_201_CREATED)
 async def upload_chat_file(
-    project_id: str,
+    project_id: UUID,
     chat_id: UUID,
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
@@ -88,7 +88,7 @@ async def upload_chat_file(
 
 @router.delete("/{file_id}")
 def delete_chat_file(
-    project_id: str,
+    project_id: UUID,
     chat_id: UUID,
     file_id: UUID,
     current_user: User = Depends(get_current_user),

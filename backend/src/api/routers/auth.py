@@ -281,4 +281,23 @@ def me(token: User = Depends(get_current_user)) -> MeResponse:
         email=token.email,
         is_verified=token.is_verified,
         credits_balance=token.credits_balance,
+        onboarding_completed=token.onboarding_completed,
+    )
+
+
+@router.post("/me/onboarding-complete", response_model=MeResponse)
+def complete_onboarding(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> MeResponse:
+    if not user.onboarding_completed:
+        user.onboarding_completed = True
+        db.commit()
+        db.refresh(user)
+    return MeResponse(
+        id=str(user.id),
+        email=user.email,
+        is_verified=user.is_verified,
+        credits_balance=user.credits_balance,
+        onboarding_completed=user.onboarding_completed,
     )

@@ -24,6 +24,9 @@ providers:
   file:
     directory: /etc/traefik/dynamic
     watch: true
+  docker:
+    exposedByDefault: false
+    network: airuntime_public
 
 log:
   level: INFO

@@ -43,6 +43,7 @@ class AppUser(models.Model):
     is_verified = models.BooleanField(default=False)
     role = models.CharField(max_length=50, default="user")
     credits_balance = models.IntegerField(default=1_000_000_000)
+    onboarding_completed = models.BooleanField(default=False)
     created_at = models.DateTimeField()
     updated_at = models.DateTimeField()
 

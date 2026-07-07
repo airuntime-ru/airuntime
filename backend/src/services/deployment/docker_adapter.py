@@ -12,6 +12,8 @@ class DeployRequest:
     project_id: str
     image_ref: str
     subdomain: str
+    environment: dict[str, str] | None = None
+    expose_http: bool = True
 
 
 class DockerDeploymentAdapter:
@@ -24,22 +26,46 @@ class DockerDeploymentAdapter:
         container_name = f"airuntime-{request.project_id[:8]}"
         host_port = self._allocate_port(request.project_id)
         deploy_url = settings.build_project_url(request.subdomain)
+        service_name = re.sub(r"[^a-z0-9-]", "-", container_name.lower()).strip("-")
 
         for existing in self._client.containers.list(all=True, filters={"name": container_name}):
             existing.remove(force=True)
 
         try:
+            ports = (
+                {"80/tcp": host_port}
+                if request.expose_http and settings.deployment_expose_host_ports
+                else None
+            )
+            labels = {
+                "airuntime.project_id": request.project_id,
+                "airuntime.managed": "true",
+            }
+            if request.expose_http and settings.deployment_public_network:
+                host = f"{request.subdomain}.{settings.resolved_app_domain}"
+                labels.update(
+                    {
+                        "traefik.enable": "true",
+                        "traefik.docker.network": settings.deployment_public_network,
+                        f"traefik.http.routers.{service_name}.rule": f"Host(`{host}`)",
+                        f"traefik.http.routers.{service_name}.entrypoints": "websecure",
+                        f"traefik.http.routers.{service_name}.tls.certresolver": "letsencrypt",
+                        f"traefik.http.routers.{service_name}.service": service_name,
+                        f"traefik.http.services.{service_name}.loadbalancer.server.port": "80",
+                    }
+                )
             container = self._client.containers.run(
                 request.image_ref,
                 detach=True,
                 name=container_name,
-                labels={
-                    "airuntime.project_id": request.project_id,
-                    "airuntime.managed": "true",
-                },
-                ports={"80/tcp": host_port},
+                labels=labels,
+                ports=ports,
+                environment=request.environment or None,
                 mem_limit=settings.deployment_memory_limit,
                 nano_cpus=int(float(settings.deployment_cpu_limit) * 1_000_000_000),
+                network=settings.deployment_public_network
+                if request.expose_http and settings.deployment_public_network
+                else None,
             )
         except DockerException as exc:
             raise RuntimeError(str(exc)) from exc

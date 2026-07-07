@@ -2,7 +2,7 @@
 
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { RefreshCw, Rocket } from "lucide-react";
+import { Rocket } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,40 +32,34 @@ export default function ProjectDeploymentsPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
-  const loadDeployments = async () => {
+  const loadDeployments = async (options?: { silent?: boolean }) => {
     if (!projectId) return;
-    setLoading(true);
+    if (!options?.silent) setLoading(true);
     try {
       setDeployments(await listDeployments(projectId));
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось загрузить деплои");
     } finally {
-      setLoading(false);
+      if (!options?.silent) setLoading(false);
     }
   };
 
   useEffect(() => {
-    let active = true;
-    void (async () => {
-      if (!projectId) return;
-      setLoading(true);
-      try {
-        const rows = await listDeployments(projectId);
-        if (!active) return;
-        setDeployments(rows);
-        setError("");
-      } catch (err) {
-        if (!active) return;
-        setError(err instanceof Error ? err.message : "Не удалось загрузить деплои");
-      } finally {
-        if (active) setLoading(false);
-      }
-    })();
-    return () => {
-      active = false;
-    };
+    void loadDeployments();
   }, [projectId]);
+
+  const hasActiveDeployments = deployments.some(
+    (item) => item.status === "running" || item.status === "queued"
+  );
+
+  useEffect(() => {
+    if (!hasActiveDeployments) return;
+    const timer = window.setInterval(() => {
+      void loadDeployments({ silent: true });
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [hasActiveDeployments, projectId]);
 
   const onDeploy = async () => {
     if (!projectId) return;
@@ -82,10 +76,6 @@ export default function ProjectDeploymentsPage() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-end gap-2">
-        <Button variant="outline" size="sm" onClick={loadDeployments}>
-          <RefreshCw size={15} />
-          Обновить
-        </Button>
         <Button variant="accent" size="sm" className="w-full sm:w-auto" onClick={onDeploy}>
           <Rocket size={15} />
           Запустить

@@ -13,7 +13,9 @@ def _redis() -> Redis:
     return Redis.from_url(settings.redis_url, decode_responses=True)
 
 
-def enqueue_deployment(*, deployment_id: str, project_id: str, image_ref: str) -> bool:
+def enqueue_deployment(
+    *, deployment_id: str, project_id: str, image_ref: str | None = None
+) -> bool:
     job = {
         "deployment_id": deployment_id,
         "project_id": project_id,
