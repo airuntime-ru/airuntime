@@ -14,15 +14,8 @@ raw="$(docker compose -f docker-compose.prod.yml exec -T mailserver cat "/tmp/do
 content="$(python3 - <<'PY' "$raw"
 import re, sys
 raw = sys.argv[1]
-chunks = []
-for line in raw.splitlines():
-    line = line.strip().strip('"')
-    if not line or line.startswith("mail._domainkey") or "DKIM key" in line:
-        continue
-    line = line.strip("()")
-    chunks.append(line)
-value = re.sub(r"\s+", "", "".join(chunks))
-print(value)
+parts = re.findall(r'"([^"]*)"', raw)
+print("".join(parts).replace("\n", "").replace("\t", "").strip())
 PY
 )"
 
