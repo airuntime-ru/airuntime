@@ -58,3 +58,4 @@ admin/*.sqlite3
 # Logs
 *.log
 logs/
+output/
