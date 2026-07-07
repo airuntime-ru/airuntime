@@ -14,10 +14,10 @@ import urllib.error
 import urllib.request
 
 
-SERVER_IP = "155.212.228.202"
-APP_DOMAIN = "airuntime.ru"
-ZONE_ID = "69f9a9689e8eb5bba417737c8c44a9d9"
-CF_TOKEN = "25800bd8eedf7ff3c2e2b8a9df4f0017"
+SERVER_IP = os.environ.get("SERVER_IP", "155.212.228.202")
+APP_DOMAIN = os.environ.get("APP_DOMAIN", "airuntime.ru")
+ZONE_ID = os.environ.get("CF_ZONE_ID", "")
+CF_TOKEN = os.environ.get("CF_API_TOKEN", "")
 REPO_DIR = "/home/airuntime"
 
 
