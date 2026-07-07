@@ -41,7 +41,7 @@ export function Logo({
   priority = false,
 }: LogoProps) {
   const height = heights[size];
-  const width = variant === "mark" ? height : Math.round(height * 2.18);
+  const width = variant === "mark" ? height : Math.round(height * 0.89);
   const src = sources[variant][theme];
 
   const image = (
