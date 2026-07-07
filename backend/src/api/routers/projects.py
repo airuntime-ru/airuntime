@@ -9,20 +9,26 @@ from src.db.models.chat import Chat
 from src.db.models.project import Project
 from src.db.models.user import User
 from src.db.session import get_db
+from src.services.project_subdomain import assert_subdomain_available, normalize_deploy_subdomain
 
 router = APIRouter(prefix="/projects", tags=["projects"])
+
+
+def _to_response(project: Project) -> ProjectResponse:
+    return ProjectResponse.from_project(project)
 
 
 @router.get("", response_model=list[ProjectResponse])
 def list_projects(
     current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
-) -> list[Project]:
-    return (
+) -> list[ProjectResponse]:
+    rows = (
         db.query(Project)
         .filter(Project.user_id == current_user.id)
         .order_by(Project.created_at.desc())
         .all()
     )
+    return [_to_response(project) for project in rows]
 
 
 @router.post("", response_model=ProjectResponse)
@@ -30,7 +36,7 @@ def create_project(
     payload: ProjectCreateRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> Project:
+) -> ProjectResponse:
     project = Project(
         user_id=current_user.id,
         type=payload.type,
@@ -42,7 +48,7 @@ def create_project(
     db.add(Chat(project_id=project.id, title="Первый запуск"))
     db.commit()
     db.refresh(project)
-    return project
+    return _to_response(project)
 
 
 @router.patch("/{project_id}", response_model=ProjectResponse)
@@ -51,7 +57,7 @@ def update_project(
     payload: ProjectUpdateRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> Project:
+) -> ProjectResponse:
     project = (
         db.query(Project)
         .filter(Project.id == project_id, Project.user_id == current_user.id)
@@ -65,10 +71,17 @@ def update_project(
         project.description = payload.description
     if payload.status is not None:
         project.status = payload.status
+    if "deploy_subdomain" in payload.model_fields_set:
+        if project.type != "website":
+            raise HTTPException(status_code=400, detail="Поддомен доступен только для сайтов")
+        normalized = normalize_deploy_subdomain(payload.deploy_subdomain)
+        if normalized:
+            assert_subdomain_available(db, normalized, exclude_project_id=str(project.id))
+        project.deploy_subdomain = normalized
     db.add(project)
     db.commit()
     db.refresh(project)
-    return project
+    return _to_response(project)
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)
@@ -76,7 +89,7 @@ def get_project(
     project_id: UUID,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> Project:
+) -> ProjectResponse:
     project = (
         db.query(Project)
         .filter(Project.id == project_id, Project.user_id == current_user.id)
@@ -84,4 +97,4 @@ def get_project(
     )
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    return project
+    return _to_response(project)

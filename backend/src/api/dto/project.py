@@ -20,6 +20,7 @@ class ProjectUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=120)
     description: str | None = Field(default=None, max_length=2000)
     status: str | None = Field(default=None, max_length=64)
+    deploy_subdomain: str | None = Field(default=None, max_length=63)
 
 
 class ProjectResponse(BaseModel):
@@ -30,8 +31,18 @@ class ProjectResponse(BaseModel):
     status: str
     logs: str
     deployment_url: str | None
+    deploy_subdomain: str | None
+    planned_site_url: str | None = None
     git_history: str
     created_at: datetime
     updated_at: datetime
+
+    @classmethod
+    def from_project(cls, project) -> "ProjectResponse":
+        from src.services.project_subdomain import planned_public_url
+
+        return cls.model_validate(project).model_copy(
+            update={"planned_site_url": planned_public_url(project)}
+        )
 
     model_config = {"from_attributes": True}

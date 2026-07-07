@@ -56,6 +56,7 @@ upsert_dns A "admin.${APP_DOMAIN}" "${SERVER_IP}"
 upsert_dns A "s3.${APP_DOMAIN}" "${SERVER_IP}"
 upsert_dns A "s3-console.${APP_DOMAIN}" "${SERVER_IP}"
 upsert_dns A "mail.${APP_DOMAIN}" "${SERVER_IP}"
+upsert_dns A "*.${APP_DOMAIN}" "${SERVER_IP}"
 upsert_dns MX "${APP_DOMAIN}" "mail.${APP_DOMAIN}" 10
 upsert_dns TXT "${APP_DOMAIN}" "v=spf1 mx a ip4:${SERVER_IP} -all"
 upsert_dns TXT "_dmarc.${APP_DOMAIN}" "v=DMARC1; p=quarantine; rua=mailto:admin@${APP_DOMAIN}"

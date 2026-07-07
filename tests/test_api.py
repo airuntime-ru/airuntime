@@ -62,6 +62,16 @@ def test_projects_crud(client):
     assert patch.status_code == 200
     assert patch.json()["description"] == "Updated description"
 
+    subdomain_patch = client.patch(
+        f"/api/v1/projects/{project['id']}",
+        headers=headers,
+        json={"deploy_subdomain": "my-landing"},
+    )
+    assert subdomain_patch.status_code == 200
+    body = subdomain_patch.json()
+    assert body["deploy_subdomain"] == "my-landing"
+    assert body["planned_site_url"] == "https://my-landing.airuntime.ru"
+
 
 def test_chat_messages_list(client):
     headers = auth_tokens(client, "chat@airuntime.dev")

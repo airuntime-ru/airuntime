@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     deployment_public_network: str | None = None
     deployment_expose_host_ports: bool = True
 
+    cf_zone_id: str | None = None
+    cf_api_token: str | None = None
+    server_ip: str | None = None
+
     s3_endpoint_url: str | None = "http://minio:9000"
     s3_public_endpoint_url: str | None = "http://localhost:9000"
     s3_access_key: str = "airuntime"

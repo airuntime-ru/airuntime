@@ -144,7 +144,7 @@ def upsert(record_type, name, content, priority=None):
         req("POST", "/dns_records", body)
     print("ok", record_type, name)
 
-for host in [DOMAIN, f"www.{{DOMAIN}}", f"api.{{DOMAIN}}", f"admin.{{DOMAIN}}", f"s3.{{DOMAIN}}", f"s3-console.{{DOMAIN}}", f"mail.{{DOMAIN}}"]:
+for host in [DOMAIN, f"www.{{DOMAIN}}", f"api.{{DOMAIN}}", f"admin.{{DOMAIN}}", f"s3.{{DOMAIN}}", f"s3-console.{{DOMAIN}}", f"mail.{{DOMAIN}}", f"*.{DOMAIN}"]:
     upsert("A", host, IP)
 upsert("MX", DOMAIN, f"mail.{{DOMAIN}}", 10)
 upsert("TXT", DOMAIN, f"v=spf1 mx a ip4:{{IP}} -all")

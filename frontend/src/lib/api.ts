@@ -15,6 +15,8 @@ export type ProjectType = {
   status: string;
   logs: string;
   deployment_url: string | null;
+  deploy_subdomain: string | null;
+  planned_site_url: string | null;
   git_history: string;
 };
 
@@ -169,6 +171,20 @@ export async function createProject(payload: {
 }): Promise<ProjectType> {
   return requestJson<ProjectType>("/projects", {
     method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateProject(
+  projectId: string,
+  payload: {
+    name?: string;
+    description?: string;
+    deploy_subdomain?: string | null;
+  }
+): Promise<ProjectType> {
+  return requestJson<ProjectType>(`/projects/${projectId}`, {
+    method: "PATCH",
     body: JSON.stringify(payload),
   });
 }

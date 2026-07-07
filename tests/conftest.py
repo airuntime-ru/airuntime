@@ -51,8 +51,8 @@ def auth_tokens(client: TestClient, email: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {tokens['access_token']}"}
 
 
-@pytest.fixture(scope="session", autouse=True)
-def create_tables() -> Generator[None, None, None]:
+@pytest.fixture(scope="session")
+def ensure_tables() -> Generator[None, None, None]:
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     yield
@@ -71,7 +71,7 @@ def mock_s3() -> Generator[None, None, None]:
 
 
 @pytest.fixture()
-def db() -> Generator[Session, None, None]:
+def db(ensure_tables: None) -> Generator[Session, None, None]:
     connection = engine.connect()
     transaction = connection.begin()
     session = TestingSessionLocal(bind=connection)

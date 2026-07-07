@@ -70,6 +70,10 @@ class DockerDeploymentAdapter:
         except DockerException as exc:
             raise RuntimeError(str(exc)) from exc
 
+        container.reload()
+        if container.status != "running":
+            raise RuntimeError(f"Container is not running (status: {container.status})")
+
         container_id = container.id
         logs_ref = f"docker://{container_id}"
 

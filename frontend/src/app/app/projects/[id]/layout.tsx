@@ -45,9 +45,7 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
     { href: `${base}/chat`, label: "Чат" },
     { href: `${base}/deployments`, label: "Деплои" },
     { href: `${base}/logs`, label: "Логи" },
-    { href: `${base}/secrets`, label: "Секреты" },
     { href: `${base}/settings`, label: "Настройки" },
-    { href: `${base}/history`, label: "История" },
   ];
 
   return (

@@ -66,6 +66,7 @@ class Project(models.Model):
     status = models.CharField(max_length=50)
     logs = models.TextField()
     deployment_url = models.CharField(max_length=512, null=True, blank=True)
+    deploy_subdomain = models.CharField(max_length=63, null=True, blank=True)
     git_history = models.TextField()
     created_at = models.DateTimeField()
     updated_at = models.DateTimeField()

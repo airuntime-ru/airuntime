@@ -21,6 +21,7 @@ class Project(Base):
     status: Mapped[str] = mapped_column(String(50), default="created", nullable=False)
     logs: Mapped[str] = mapped_column(Text, default="", nullable=False)
     deployment_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    deploy_subdomain: Mapped[str | None] = mapped_column(String(63), nullable=True, unique=True, index=True)
     git_history: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

@@ -56,8 +56,11 @@ export default function Home() {
             <ProductPreview />
           </motion.div>
         </section>
+      </div>
 
-        <StepsSection />
+      <StepsSection />
+
+      <div className="mx-auto flex max-w-5xl flex-col px-5 sm:px-8">
         <FaqSection />
 
         <footer className="border-t border-black/[0.06] py-10 text-center text-xs text-[var(--ar-stone)]">

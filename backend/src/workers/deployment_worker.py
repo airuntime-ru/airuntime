@@ -6,7 +6,9 @@ from src.db.models.deployment import Deployment
 from src.db.models.project import Project
 from src.db.session import SessionLocal
 from src.services.artifacts import build_project_image
-from src.services.deployment.docker_adapter import DeployRequest, DockerDeploymentAdapter, slugify
+from src.services.cloudflare_dns import CloudflareDnsError, sync_dns_for_website_deploy
+from src.services.deployment.docker_adapter import DeployRequest, DockerDeploymentAdapter
+from src.services.project_subdomain import resolve_deploy_subdomain
 from src.services.deployment_queue import pop_deployment_job
 
 
@@ -28,7 +30,7 @@ def process_job(job: dict) -> None:
         db.commit()
 
         image_ref, environment = build_project_image(db, project)
-        subdomain = f"{slugify(project.name)}-{str(project.id)[:8]}"
+        subdomain = resolve_deploy_subdomain(project)
         expose_http = project.type == "website"
         result = DockerDeploymentAdapter().deploy(
             DeployRequest(
@@ -47,6 +49,14 @@ def process_job(job: dict) -> None:
         deployment.finished_at = datetime.now(UTC)
         project.deployment_url = result["url"] if expose_http else "telegram-bot:polling"
         project.status = "live"
+        if expose_http:
+            try:
+                dns_messages = sync_dns_for_website_deploy(subdomain)
+                dns_note = "Cloudflare DNS: " + "; ".join(dns_messages)
+                project.logs = f"{project.logs}\n{dns_note}".strip() if project.logs else dns_note
+            except CloudflareDnsError as dns_exc:
+                dns_note = f"Cloudflare DNS warning: {dns_exc}"
+                project.logs = f"{project.logs}\n{dns_note}".strip() if project.logs else dns_note
         db.add(project)
         db.commit()
     except Exception as exc:

@@ -13,6 +13,9 @@ x-common-env: &common-env
   ALLOWED_HOSTS: ${APP_DOMAIN},www.${APP_DOMAIN},api.${APP_DOMAIN},backend
   DEPLOYMENT_PUBLIC_NETWORK: airuntime_public
   DEPLOYMENT_EXPOSE_HOST_PORTS: "false"
+  CF_ZONE_ID: ${CF_ZONE_ID:-}
+  CF_API_TOKEN: ${CF_API_TOKEN:-}
+  SERVER_IP: ${SERVER_IP:-}
 
 x-traefik-labels: &traefik-labels
   traefik.enable: "true"

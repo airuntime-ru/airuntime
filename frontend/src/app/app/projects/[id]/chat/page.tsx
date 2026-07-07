@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { ArrowLeft, Paperclip, Pin, PinOff, Plus, Search, Send, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
@@ -56,6 +56,8 @@ export default function ProjectChatPage() {
   const [pendingFiles, setPendingFiles] = useState<ChatFileType[]>([]);
   const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [bootstrapping, setBootstrapping] = useState(true);
+  const [bootstrapError, setBootstrapError] = useState("");
   const [mobilePanel, setMobilePanel] = useState<"list" | "chat">("list");
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -63,10 +65,21 @@ export default function ProjectChatPage() {
   useEffect(() => {
     const bootstrap = async () => {
       if (!projectId) return;
-      const rows = await listChats(projectId);
-      setChats(rows);
-      if (rows.length > 0) {
+      setBootstrapping(true);
+      setBootstrapError("");
+      try {
+        let rows = await listChats(projectId);
+        if (rows.length === 0) {
+          const chat = await createChat(projectId);
+          rows = [chat];
+        }
+        setChats(rows);
         setChatId(rows[0].id);
+        setMobilePanel("chat");
+      } catch (err) {
+        setBootstrapError(err instanceof Error ? err.message : "Не удалось открыть чат");
+      } finally {
+        setBootstrapping(false);
       }
     };
     void bootstrap();
@@ -148,8 +161,8 @@ export default function ProjectChatPage() {
     setPendingFiles((prev) => prev.filter((item) => item.id !== file.id));
   };
 
-  const onSubmit = async (event: FormEvent) => {
-    event.preventDefault();
+  const onSubmit = async (event?: { preventDefault?: () => void }) => {
+    event?.preventDefault?.();
     if ((!input.trim() && pendingFiles.length === 0) || !projectId || !chatId) return;
     const userMessage = input;
     const attachmentIds = pendingFiles.map((file) => file.id);
@@ -204,6 +217,8 @@ export default function ProjectChatPage() {
       setLoading(false);
     }
   };
+
+  const canSend = Boolean(chatId) && (input.trim().length > 0 || pendingFiles.length > 0);
 
   const currentTitle = filteredChats.find((chat) => chat.id === chatId)?.title ?? "Чат проекта";
 
@@ -334,9 +349,15 @@ export default function ProjectChatPage() {
           </div>
         ) : null}
 
+        {bootstrapError ? (
+          <p className="rounded-[var(--ar-radius-sm)] border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+            {bootstrapError}
+          </p>
+        ) : null}
+
         <form
           onSubmit={onSubmit}
-          className="flex items-end gap-2 rounded-[var(--ar-radius-md)] border border-[var(--ar-border)] bg-white/90 p-2 shadow-sm shadow-sky-950/5 focus-within:border-[var(--ar-border-strong)] focus-within:ring-2 focus-within:ring-[var(--ar-sky)]/15"
+          className="relative z-10 flex items-end gap-2 rounded-[var(--ar-radius-md)] border border-[var(--ar-border)] bg-white/90 p-2 shadow-sm shadow-sky-950/5 focus-within:border-[var(--ar-border-strong)] focus-within:ring-2 focus-within:ring-[var(--ar-sky)]/15"
         >
           <input ref={fileInputRef} type="file" className="hidden" multiple onChange={onFilesSelected} />
           <Button
@@ -354,11 +375,12 @@ export default function ProjectChatPage() {
             className="min-h-[40px] flex-1 border-0 bg-transparent px-1 py-2 shadow-none focus:border-0 focus:bg-transparent focus:ring-0"
             value={input}
             onChange={(event) => setInput(event.target.value)}
-            placeholder="Опишите задачу..."
+            placeholder={bootstrapping ? "Подготавливаем чат..." : "Опишите задачу..."}
+            disabled={bootstrapping || !chatId}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
-                void onSubmit(event);
+                if (canSend && !loading) void onSubmit(event);
               }
             }}
           />
@@ -367,7 +389,7 @@ export default function ProjectChatPage() {
             variant="accent"
             size="sm"
             className="mb-0.5 h-9 w-9 shrink-0 rounded-full p-0"
-            disabled={loading || uploading || !chatId}
+            disabled={bootstrapping || loading || uploading || !canSend}
             aria-label="Отправить"
           >
             <Send size={16} />

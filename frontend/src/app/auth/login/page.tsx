@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Mail, ShieldCheck } from "lucide-react";
 
 import { AuthShell } from "@/components/auth/auth-shell";
+import { OtpInput } from "@/components/auth/otp-input";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { requestAuthCode, verifyAuthCode } from "@/lib/api";
@@ -46,12 +47,12 @@ export default function LoginPage() {
     await sendCode();
   };
 
-  const onSubmitCode = async () => {
-    if (code.length !== 6) return;
+  const onSubmitCode = async (submittedCode = code) => {
+    if (submittedCode.length !== 6) return;
     setLoading(true);
     setError("");
     try {
-      await verifyAuthCode(email.trim(), code);
+      await verifyAuthCode(email.trim(), submittedCode);
       router.push("/app");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Неверный код");
@@ -95,19 +96,19 @@ export default function LoginPage() {
           </div>
         ) : (
           <div className="space-y-4">
-            <Input
-              placeholder="000000"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              maxLength={6}
+            <OtpInput
               value={code}
-              onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") void onSubmitCode();
-              }}
-              className="text-center text-2xl tracking-[0.45em]"
+              onChange={setCode}
+              onComplete={(value) => void onSubmitCode(value)}
+              disabled={loading}
+              autoFocus
             />
-            <Button variant="accent" className="w-full" onClick={onSubmitCode} disabled={loading || code.length !== 6}>
+            <Button
+              variant="accent"
+              className="w-full"
+              onClick={() => void onSubmitCode()}
+              disabled={loading || code.length !== 6}
+            >
               {loading ? "Входим..." : "Войти"}
             </Button>
             <div className="flex items-center justify-between gap-3 text-sm">
