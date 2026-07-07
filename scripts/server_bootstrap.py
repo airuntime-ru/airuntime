@@ -13,7 +13,6 @@ import textwrap
 import urllib.error
 import urllib.request
 
-
 SERVER_IP = os.environ.get("SERVER_IP", "155.212.228.202")
 APP_DOMAIN = os.environ.get("APP_DOMAIN", "airuntime.ru")
 ZONE_ID = os.environ.get("CF_ZONE_ID", "")
@@ -78,7 +77,9 @@ def configure_dns() -> None:
         upsert_dns("A", f"mail.{APP_DOMAIN}", SERVER_IP)
         upsert_dns("MX", APP_DOMAIN, f"mail.{APP_DOMAIN}", priority=10)
         upsert_dns("TXT", APP_DOMAIN, f"v=spf1 mx a ip4:{SERVER_IP} -all")
-        upsert_dns("TXT", f"_dmarc.{APP_DOMAIN}", f"v=DMARC1; p=quarantine; rua=mailto:admin@{APP_DOMAIN}")
+        upsert_dns(
+            "TXT", f"_dmarc.{APP_DOMAIN}", f"v=DMARC1; p=quarantine; rua=mailto:admin@{APP_DOMAIN}"
+        )
         print("Cloudflare DNS configured")
     except urllib.error.HTTPError as exc:
         body = exc.read().decode()
@@ -141,8 +142,8 @@ def main() -> None:
             "chmod a+r /etc/apt/keyrings/docker.asc"
         )
         run(
-            'bash -c \'echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] '
-            "https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo ${VERSION_CODENAME}) stable\" "
+            "bash -c 'echo \"deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] "
+            'https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo ${VERSION_CODENAME}) stable" '
             "> /etc/apt/sources.list.d/docker.list'"
         )
         run("apt-get update")

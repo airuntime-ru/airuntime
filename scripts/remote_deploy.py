@@ -50,7 +50,10 @@ def main() -> int:
         if out:
             print(out[-10000:].encode("utf-8", errors="replace").decode("utf-8", errors="replace"))
         if err:
-            print("ERR:", err[-5000:].encode("utf-8", errors="replace").decode("utf-8", errors="replace"))
+            print(
+                "ERR:",
+                err[-5000:].encode("utf-8", errors="replace").decode("utf-8", errors="replace"),
+            )
         print("exit", code)
         return code, out, err
 
@@ -150,7 +153,10 @@ PY
 """
         run(dns_script)
 
-    run(f"cd {REPO} && docker compose -f docker-compose.prod.yml --env-file .env up -d --build", timeout=3600)
+    run(
+        f"cd {REPO} && docker compose -f docker-compose.prod.yml --env-file .env up -d --build",
+        timeout=3600,
+    )
     run(
         f"cp {REPO}/infra/systemd/airuntime.service /etc/systemd/system/airuntime.service && "
         "systemctl daemon-reload && systemctl enable airuntime.service"
