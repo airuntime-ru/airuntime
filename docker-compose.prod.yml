@@ -18,8 +18,10 @@ x-traefik-labels: &traefik-labels
 
 services:
   traefik:
-    image: traefik:v3.3
+    image: traefik:v3.5
     restart: unless-stopped
+    environment:
+      DOCKER_API_VERSION: "1.44"
     security_opt:
       - no-new-privileges:true
     ports:
