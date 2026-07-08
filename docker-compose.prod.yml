@@ -171,6 +171,8 @@ services:
     networks:
       - internal
       - public
+    volumes:
+      - airruntime_projects_data:/data/airruntime-projects
     labels:
       <<: *traefik-labels
       traefik.http.routers.api.rule: Host(`api.${APP_DOMAIN}`)
@@ -198,6 +200,7 @@ services:
       S3_BUCKET: ${S3_BUCKET}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - airruntime_projects_data:/data/airruntime-projects
     depends_on:
       postgres:
         condition: service_healthy
@@ -270,3 +273,4 @@ volumes:
   postgres_data:
   minio_data:
   traefik_letsencrypt:
+  airruntime_projects_data:

@@ -35,6 +35,7 @@ from src.services.project_subdomain import (
     normalize_deploy_subdomain,
     planned_public_url,
 )
+from src.services.project_git import commit_snapshot, ProjectGitError
 
 router = APIRouter(prefix="/projects/{project_id}/chats", tags=["chat"])
 
@@ -285,8 +286,23 @@ async def _stream_events(
         current_user.credits_balance = max(0, current_user.credits_balance - usage_cost)
         try:
             artifact_path = generate_project_artifact(db, project, safe_message)
+            git_commit_hash: str | None = None
+            try:
+                git_commit_hash = commit_snapshot(
+                    artifact_path,
+                    message=f"{project.name}: {safe_message}",
+                )
+            except ProjectGitError as git_exc:
+                # Git errors shouldn't break the build/deploy pipeline.
+                project.logs = f"Generated artifact: {artifact_path}\nGit error: {git_exc}"
+
             project.status = "ready"
-            project.logs = f"Generated artifact: {artifact_path}"
+            if git_commit_hash:
+                project.logs = (
+                    f"Generated artifact: {artifact_path}\nGit commit: {git_commit_hash}"
+                )
+            elif not project.logs:
+                project.logs = f"Generated artifact: {artifact_path}"
             db.add(project)
             if project.type == "website" and settings.auto_deploy_websites:
                 planned_url = planned_public_url(project)

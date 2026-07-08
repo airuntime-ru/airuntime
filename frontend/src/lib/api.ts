@@ -283,3 +283,92 @@ export async function completeOnboarding(): Promise<MeType> {
 export async function getProviders(): Promise<ProvidersType> {
   return requestJson<ProvidersType>("/providers");
 }
+
+export type ProjectVersionType = {
+  commit_hash: string;
+  created_at: string;
+  message: string;
+};
+
+export async function listProjectVersions(projectId: string): Promise<ProjectVersionType[]> {
+  return requestJson<ProjectVersionType[]>(`/projects/${projectId}/versions`);
+}
+
+export async function rollbackProjectVersion(
+  projectId: string,
+  commitHash: string,
+): Promise<{ rollback_commit_hash: string; deployment: DeploymentType }> {
+  return requestJson<{ rollback_commit_hash: string; deployment: DeploymentType }>(
+    `/projects/${projectId}/versions/${commitHash}/rollback`,
+    { method: "POST" },
+  );
+}
+
+export async function downloadProjectVersionArchive(projectId: string, commitHash: string): Promise<Blob> {
+  const token = getAccessToken();
+  const response = await fetch(`${apiBase}/projects/${projectId}/versions/${commitHash}/archive`, {
+    method: "GET",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(detail || `Download failed: ${response.status}`);
+  }
+  return await response.blob();
+}
+
+export type ProjectVersionTreeEntryType = {
+  name: string;
+  entry_type: string;
+  size_bytes?: number | null;
+};
+
+export async function listProjectVersionTree(
+  projectId: string,
+  commitHash: string,
+  path: string,
+): Promise<ProjectVersionTreeEntryType[]> {
+  const token = getAccessToken();
+  const url = new URL(
+    `${apiBase}/projects/${projectId}/versions/${commitHash}/tree`,
+  );
+  url.searchParams.set("path", path);
+  const response = await fetch(url.toString(), {
+    method: "GET",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(detail || `Tree load failed: ${response.status}`);
+  }
+  return (await response.json()) as ProjectVersionTreeEntryType[];
+}
+
+export type ProjectVersionFileType = {
+  path: string;
+  content: string;
+  is_binary: boolean;
+  truncated: boolean;
+  size_bytes: number;
+};
+
+export async function getProjectVersionFile(
+  projectId: string,
+  commitHash: string,
+  path: string,
+): Promise<ProjectVersionFileType> {
+  const token = getAccessToken();
+  const url = new URL(
+    `${apiBase}/projects/${projectId}/versions/${commitHash}/file`,
+  );
+  url.searchParams.set("path", path);
+  const response = await fetch(url.toString(), {
+    method: "GET",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(detail || `File load failed: ${response.status}`);
+  }
+  return (await response.json()) as ProjectVersionFileType;
+}

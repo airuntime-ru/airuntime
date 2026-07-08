@@ -52,7 +52,8 @@ class Settings(BaseSettings):
     deployment_cpu_limit: str = "1.0"
     deployment_timeout_seconds: int = 120
     deployment_default_image: str = "nginx:alpine"
-    generated_projects_dir: str = "/tmp/airuntime-projects"
+    # Persist generated project sources so they survive container restarts.
+    generated_projects_dir: str = "/data/airruntime-projects"
     auto_deploy_websites: bool = True
     deployment_public_network: str | None = None
     deployment_expose_host_ports: bool = True

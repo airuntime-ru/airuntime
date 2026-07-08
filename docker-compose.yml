@@ -66,6 +66,8 @@ services:
       S3_ACCESS_KEY: airuntime
       S3_SECRET_KEY: airuntime-secret
       S3_BUCKET: airuntime-files
+    volumes:
+      - airruntime_projects_data:/data/airruntime-projects
     ports:
       - "8000:8000"
     depends_on:
@@ -99,6 +101,7 @@ services:
     command: ["sh", "/app/entrypoint.sh", "worker"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - airruntime_projects_data:/data/airruntime-projects
     depends_on:
       postgres:
         condition: service_healthy
@@ -126,3 +129,4 @@ services:
 volumes:
   postgres_data:
   minio_data:
+  airruntime_projects_data:

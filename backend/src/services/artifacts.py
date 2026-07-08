@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from src.core.config import settings
 from src.db.models.project import Project
 from src.db.models.secret import Secret
+from src.services.project_git import with_project_git_lock
 from src.services.secrets import decrypt_secret
 
 TOKEN_SECRET_KEYS = ("TELEGRAM_BOT_TOKEN", "TELEGRAM_TOKEN", "BOT_TOKEN")
@@ -447,17 +448,28 @@ def ensure_project_artifact(db: Session, project: Project, prompt: str = "") -> 
                 "Telegram bot requires TELEGRAM_BOT_TOKEN secret before deployment"
             )
         return path
-    return generate_project_artifact(db, project, prompt)
+    artifact_dir = generate_project_artifact(db, project, prompt)
+    try:
+        # Create a baseline git snapshot for deployments started without chat generation.
+        from src.services.project_git import commit_snapshot
+
+        commit_snapshot(artifact_dir, message=f"Artifact generated: {project.name}")
+    except Exception:
+        # Git is best-effort; deployment flow should not fail.
+        pass
+    return artifact_dir
 
 
 def build_project_image(db: Session, project: Project, prompt: str = "") -> tuple[str, dict[str, str]]:
-    path = ensure_project_artifact(db, project, prompt)
-    tag = _image_tag(project)
-    try:
-        client = docker.from_env()
-        client.images.build(path=str(path), tag=tag, rm=True, pull=False)
-    except DockerException as exc:
-        raise ArtifactError(f"Docker image build failed: {exc}") from exc
+    # Prevent races between git checkout/commit and docker builds.
+    with with_project_git_lock(project.id):
+        path = ensure_project_artifact(db, project, prompt)
+        tag = _image_tag(project)
+        try:
+            client = docker.from_env()
+            client.images.build(path=str(path), tag=tag, rm=True, pull=False)
+        except DockerException as exc:
+            raise ArtifactError(f"Docker image build failed: {exc}") from exc
 
     environment: dict[str, str] = {}
     if project.type == "telegram_bot":

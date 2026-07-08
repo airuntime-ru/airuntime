@@ -6,7 +6,7 @@ from fastapi.responses import Response
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from src.api.dependencies.rate_limit import enforce_rate_limit
-from src.api.routers import auth, chat, deployments, files, projects, providers, secrets, telegram
+from src.api.routers import auth, chat, deployments, files, projects, providers, secrets, telegram, project_versions
 from src.core.config import settings
 from src.services.storage import storage_service
 
@@ -48,6 +48,7 @@ async def secure_headers(request: Request, call_next) -> Response:
 app.include_router(auth.router, prefix=settings.api_prefix)
 app.include_router(projects.router, prefix=settings.api_prefix)
 app.include_router(chat.router, prefix=settings.api_prefix)
+app.include_router(project_versions.router, prefix=settings.api_prefix)
 app.include_router(files.router, prefix=settings.api_prefix)
 app.include_router(deployments.router, prefix=settings.api_prefix)
 app.include_router(providers.router, prefix=settings.api_prefix)
