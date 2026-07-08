@@ -12,4 +12,12 @@ class ConversationService:
             async for chunk in engine.stream_reply(chat_id=chat_id, user_message=safe_message):
                 yield chunk
         except Exception as exc:
-            yield f"Runtime error: {redact_secrets(str(exc))}"
+            msg = redact_secrets(str(exc))
+            lowered = msg.lower()
+            if "api key" in lowered or "key is not configured" in lowered:
+                yield (
+                    "AI-провайдер не настроен (нет API ключа). "
+                    "Но AIRuntime всё равно сгенерирует проект по вашему описанию и отправит деплой."
+                )
+            else:
+                yield f"Runtime error: {msg}"
