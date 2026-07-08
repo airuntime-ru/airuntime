@@ -82,7 +82,9 @@ STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STORAGES = {
     "staticfiles": {
-        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        # Use non-manifest storage to make collectstatic more robust
+        # during container builds (manifest generation can fail on missing/invalid sources).
+        "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage",
     },
 }
 
