@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from src.api.dependencies.auth import get_current_user
 from src.core.config import settings
 from src.db.models.user import User
+from src.services.system_settings import resolve_api_key_for_provider
 
 router = APIRouter(prefix="/providers", tags=["providers"])
 
@@ -16,13 +17,17 @@ class ProviderConfigResponse(BaseModel):
 
 @router.get("", response_model=ProviderConfigResponse)
 def list_providers(_: User = Depends(get_current_user)) -> ProviderConfigResponse:
+    openai_key = resolve_api_key_for_provider("openai") or settings.openai_api_key
+    anthropic_key = resolve_api_key_for_provider("anthropic") or settings.anthropic_api_key
+    gemini_key = resolve_api_key_for_provider("gemini") or settings.gemini_api_key
+    openrouter_key = resolve_api_key_for_provider("openrouter") or settings.openrouter_api_key
     return ProviderConfigResponse(
         active=settings.provider_name,
         supported=["openai", "anthropic", "gemini", "openrouter"],
         configured={
-            "openai": bool(settings.openai_api_key),
-            "anthropic": bool(settings.anthropic_api_key),
-            "gemini": bool(settings.gemini_api_key),
-            "openrouter": bool(settings.openrouter_api_key),
+            "openai": bool(openai_key),
+            "anthropic": bool(anthropic_key),
+            "gemini": bool(gemini_key),
+            "openrouter": bool(openrouter_key),
         },
     )
