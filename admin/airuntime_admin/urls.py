@@ -7,4 +7,4 @@ urlpatterns = [
 
 admin.site.site_header = "AIRuntime Admin"
 admin.site.site_title = "AIRuntime"
-admin.site.index_title = "Управление платформой"
+admin.site.index_title = ""

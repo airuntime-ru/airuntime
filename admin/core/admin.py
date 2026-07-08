@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
+from django.contrib.auth.models import Group, Permission
 
 from core.models import AdminUser
 
@@ -27,4 +28,14 @@ class AdminUserAdmin(UserAdmin):
         ),
     )
     search_fields = ("email",)
+
+
+@admin.register(Group)
+class GroupAdmin(admin.ModelAdmin):
+    list_display = ("name",)
+
+
+@admin.register(Permission)
+class PermissionAdmin(admin.ModelAdmin):
+    list_display = ("name", "codename")
 

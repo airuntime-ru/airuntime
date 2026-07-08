@@ -2,12 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
-import { ArrowLeft, Paperclip, Pin, PinOff, Plus, Search, Send, X } from "lucide-react";
+import { ArrowLeft, ArrowUp, ChevronDown, Paperclip, Pin, PinOff, Plus, Search, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 
 import { AutoTextarea } from "@/components/ui/auto-textarea";
-import { Button } from "@/components/ui/button";
 import {
   createChat,
   createMessage,
@@ -45,15 +44,44 @@ function writePinned(ids: string[]) {
 
 function AiTypingIndicator() {
   return (
-    <div className="flex items-center gap-2 py-0.5 text-xs text-[var(--ar-mist)]">
+    <div className="flex items-center gap-2 py-1 text-sm text-[var(--ar-stone)]">
       <span className="inline-flex items-center gap-1" aria-hidden>
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--ar-black)]/45" />
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--ar-black)]/45 [animation-delay:120ms]" />
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--ar-black)]/45 [animation-delay:220ms]" />
+        <span className="h-1 w-1 animate-pulse rounded-full bg-[var(--ar-stone)]" />
+        <span className="h-1 w-1 animate-pulse rounded-full bg-[var(--ar-stone)] [animation-delay:120ms]" />
+        <span className="h-1 w-1 animate-pulse rounded-full bg-[var(--ar-stone)] [animation-delay:220ms]" />
       </span>
-      <span>AIRuntime отвечает</span>
     </div>
   );
+}
+
+function MessageBody({
+  message,
+  isStreaming,
+}: {
+  message: ChatMessage;
+  isStreaming: boolean;
+}) {
+  if (message.role === "assistant" && isStreaming && !message.content) {
+    return <AiTypingIndicator />;
+  }
+
+  if (message.role === "assistant" && isStreaming) {
+    return (
+      <div className="cursor-chat-assistant whitespace-pre-wrap text-[15px] leading-[1.65] text-[var(--ar-black)]">
+        {message.content}
+      </div>
+    );
+  }
+
+  if (message.role === "assistant") {
+    return (
+      <div className="cursor-chat-assistant prose-chat prose-chat-cursor text-[15px] text-[var(--ar-black)]">
+        <ReactMarkdown rehypePlugins={[rehypeHighlight]}>{message.content}</ReactMarkdown>
+      </div>
+    );
+  }
+
+  return <p className="whitespace-pre-wrap text-[15px] leading-[1.55] text-[var(--ar-black)]">{message.content}</p>;
 }
 
 export default function ProjectChatPage() {
@@ -231,52 +259,52 @@ export default function ProjectChatPage() {
   };
 
   const canSend = Boolean(chatId) && (input.trim().length > 0 || pendingFiles.length > 0);
-  const currentTitle = filteredChats.find((chat) => chat.id === chatId)?.title ?? "Диалог проекта";
+  const currentTitle = filteredChats.find((chat) => chat.id === chatId)?.title ?? "Диалог";
 
   return (
-    <div className="grid min-h-[calc(100dvh-16rem)] gap-3 lg:grid-cols-[19rem_1fr]">
+    <div className="grid min-h-[calc(100dvh-14rem)] gap-0 overflow-hidden rounded-xl border border-black/10 bg-white lg:grid-cols-[240px_1fr]">
       <aside
         className={cn(
-          "flex w-full flex-col rounded-2xl border border-[#d7e3f7] bg-[linear-gradient(160deg,#ffffff_0%,#f6f9ff_100%)] p-3 shadow-[0_14px_36px_rgba(70,112,180,0.12)] lg:flex",
+          "flex flex-col border-black/10 bg-[#fafafa] lg:border-r",
           mobilePanel === "chat" ? "hidden lg:flex" : "flex"
         )}
       >
-        <div className="mb-3 flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--ar-stone)]">Чаты</p>
-            <p className="mt-1 text-sm text-[var(--ar-stone)]">{filteredChats.length} в проекте</p>
-          </div>
-          <Button variant="outline" size="sm" onClick={onNewChat} aria-label="Новый чат" className="h-9 w-9 p-0">
+        <div className="flex items-center justify-between border-b border-black/8 px-3 py-3">
+          <p className="text-sm font-medium text-[var(--ar-black)]">Чаты</p>
+          <button
+            type="button"
+            onClick={onNewChat}
+            className="rounded-lg p-1.5 text-[var(--ar-stone)] hover:bg-black/5 hover:text-[var(--ar-black)]"
+            aria-label="Новый чат"
+          >
             <Plus size={16} />
-          </Button>
+          </button>
         </div>
 
-        <div className="relative mb-3">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--ar-stone)]" />
+        <div className="relative border-b border-black/8 px-3 py-2">
+          <Search size={14} className="absolute left-6 top-1/2 -translate-y-1/2 text-[var(--ar-stone)]" />
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Найти диалог"
-            className="w-full rounded-xl border border-[#d6e0f2] bg-white py-2 pl-8 pr-3 text-sm text-[var(--ar-black)] placeholder:text-[var(--ar-stone)] outline-none focus:border-[#b8cbee] focus:ring-2 focus:ring-[#d7e4ff]"
+            placeholder="Поиск"
+            className="w-full rounded-lg border-0 bg-white py-2 pl-8 pr-3 text-sm outline-none ring-1 ring-black/10 placeholder:text-[var(--ar-stone)] focus:ring-black/20"
           />
         </div>
 
-        <div className="max-h-[42dvh] flex-1 space-y-1 overflow-y-auto pr-1 lg:max-h-none">
+        <div className="flex-1 overflow-y-auto p-2">
           {filteredChats.map((chat) => (
             <div
               key={chat.id}
               className={cn(
-                "flex items-center gap-1 rounded-xl border px-2 py-1.5 transition-colors",
-                chatId === chat.id
-                  ? "border-[#cddcf6] bg-[#edf3ff]"
-                  : "border-transparent hover:border-[#dde7f8] hover:bg-[#f5f8ff]"
+                "mb-0.5 flex items-center gap-0.5 rounded-lg px-2 py-1.5",
+                chatId === chat.id ? "bg-white shadow-sm ring-1 ring-black/8" : "hover:bg-black/[0.03]"
               )}
             >
               <button
                 type="button"
                 className={cn(
                   "flex-1 truncate text-left text-sm",
-                  chatId === chat.id ? "font-semibold text-[var(--ar-black)]" : "text-[var(--ar-mist)]"
+                  chatId === chat.id ? "font-medium text-[var(--ar-black)]" : "text-[var(--ar-mist)]"
                 )}
                 onClick={() => {
                   setChatId(chat.id);
@@ -287,146 +315,178 @@ export default function ProjectChatPage() {
               </button>
               <button
                 type="button"
-                className="text-[var(--ar-stone)] hover:text-[var(--ar-black)]"
+                className="rounded p-1 text-[var(--ar-stone)] hover:text-[var(--ar-black)]"
                 onClick={() => togglePin(chat.id)}
-                aria-label={pinned.includes(chat.id) ? "Открепить чат" : "Закрепить чат"}
+                aria-label={pinned.includes(chat.id) ? "Открепить" : "Закрепить"}
               >
-                {pinned.includes(chat.id) ? <Pin size={14} /> : <PinOff size={14} />}
+                {pinned.includes(chat.id) ? <Pin size={12} /> : <PinOff size={12} />}
               </button>
             </div>
           ))}
         </div>
       </aside>
 
-      <section className={cn("flex min-h-0 min-w-0 flex-col gap-3", mobilePanel === "list" ? "hidden lg:flex" : "flex")}>
-        <div className="flex items-center gap-2 lg:hidden">
-          <Button variant="ghost" size="sm" onClick={() => setMobilePanel("list")} aria-label="К списку чатов">
+      <section className={cn("flex min-h-0 min-w-0 flex-col", mobilePanel === "list" ? "hidden lg:flex" : "flex")}>
+        <div className="flex items-center gap-2 border-b border-black/8 px-4 py-2.5 lg:hidden">
+          <button
+            type="button"
+            onClick={() => setMobilePanel("list")}
+            className="rounded-lg p-1.5 hover:bg-black/5"
+            aria-label="К списку"
+          >
             <ArrowLeft size={16} />
-          </Button>
-          <p className="truncate text-sm font-semibold text-[var(--ar-black)]">{currentTitle}</p>
+          </button>
+          <p className="truncate text-sm font-medium">{currentTitle}</p>
         </div>
 
-        <div className="relative flex min-h-[46dvh] flex-1 flex-col overflow-hidden rounded-2xl border border-[#d7e3f7] bg-[linear-gradient(180deg,#fcfdff_0%,#f7faff_100%)] shadow-[0_16px_44px_rgba(70,112,180,0.14)]">
-          <div className="flex items-center justify-between gap-3 border-b border-[#e2ebfa] px-4 py-3">
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-[var(--ar-black)]">{currentTitle}</p>
-              <p className="text-xs text-[var(--ar-stone)]">Чат проекта</p>
-            </div>
-          </div>
-
-          <div className="relative flex-1 space-y-2.5 overflow-y-auto bg-transparent px-3 py-3 sm:px-5">
+        <div className="flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
             {messages.length === 0 ? (
-              <div className="mx-auto flex min-h-[34vh] max-w-2xl flex-col items-center justify-center text-center">
-                <p className="text-2xl font-semibold text-[var(--ar-black)]">Начните разговор</p>
-                <p className="mt-3 text-sm leading-7 text-[var(--ar-mist)]">
-                  Опишите, какой сайт или бот должен появиться. Можно говорить живым языком: стиль, аудитория, функции, ограничения, файлы.
+              <div className="flex min-h-[40vh] flex-col items-center justify-center text-center">
+                <p className="text-lg font-medium text-[var(--ar-black)]">Чем помочь?</p>
+                <p className="mt-2 max-w-sm text-sm text-[var(--ar-stone)]">
+                  Опишите сайт или бота — AIRuntime соберёт и задеплоит проект.
                 </p>
+              </div>
+            ) : (
+              <div className="space-y-8">
+                {messages.map((message, index) => {
+                  const isStreaming = loading && index === messages.length - 1 && message.role === "assistant";
+
+                  if (message.role === "user") {
+                    return (
+                      <div key={`${message.role}-${index}`} className="flex justify-end">
+                        <div className="max-w-[min(100%,42rem)] rounded-2xl bg-[#f4f4f5] px-4 py-2.5">
+                          {message.attachments?.length ? (
+                            <div className="mb-2 flex flex-wrap gap-1.5">
+                              {message.attachments.map((file) => (
+                                <a
+                                  key={file.id}
+                                  href={file.download_url ?? "#"}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="rounded-md bg-white/80 px-2 py-0.5 text-xs text-[var(--ar-mist)] hover:underline"
+                                >
+                                  {file.original_filename}
+                                </a>
+                              ))}
+                            </div>
+                          ) : null}
+                          <MessageBody message={message} isStreaming={false} />
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div key={`${message.role}-${index}`} className="w-full">
+                      <MessageBody message={message} isStreaming={isStreaming} />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <div ref={bottomRef} className="h-4" />
+          </div>
+        </div>
+
+        <div className="border-t border-black/8 bg-white/90 px-4 py-3 backdrop-blur-sm sm:px-6">
+          <div className="mx-auto w-full max-w-3xl">
+            {pendingFiles.length > 0 ? (
+              <div className="mb-2 flex items-center justify-between rounded-t-xl border border-b-0 border-black/10 bg-[#f4f4f5] px-3 py-2 text-xs text-[var(--ar-mist)]">
+                <span>
+                  {pendingFiles.length} {pendingFiles.length === 1 ? "файл" : "файла"}
+                </span>
+                <button
+                  type="button"
+                  className="text-[var(--ar-stone)] hover:text-[var(--ar-black)]"
+                  onClick={() => void Promise.all(pendingFiles.map((f) => removePendingFile(f)))}
+                >
+                  Убрать все
+                </button>
               </div>
             ) : null}
 
-            {messages.map((message, index) => (
-              <div
-                key={`${message.role}-${index}`}
-                className={cn(
-                  "w-fit rounded-xl border px-3 py-2",
-                  message.role === "user"
-                    ? "ml-auto max-w-[78%] border-[#cadaf6] bg-[linear-gradient(165deg,#edf3ff_0%,#e6eeff_100%)] text-[var(--ar-black)] shadow-[0_6px_18px_rgba(80,120,190,0.12)]"
-                    : "max-w-[82%] border-[#dde7f8] bg-white/95 text-[var(--ar-black)] shadow-[0_6px_16px_rgba(80,120,190,0.08)]"
-                )}
-              >
-                <p className="mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ar-stone)]">
-                  {message.role === "user" ? "Вы" : "AIRuntime"}
-                </p>
-                {message.attachments?.length ? (
-                  <div className="mb-3 flex flex-wrap gap-2">
-                    {message.attachments.map((file) => (
-                      <a
-                        key={file.id}
-                        href={file.download_url ?? "#"}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="rounded-full border border-black/15 bg-white px-3 py-1 text-xs text-[var(--ar-black)] hover:underline"
-                      >
-                        {file.original_filename}
-                      </a>
-                    ))}
-                  </div>
-                ) : null}
-                {message.role === "assistant" && loading && index === messages.length - 1 && !message.content ? (
-                  <AiTypingIndicator />
-                ) : (
-                  <div className="prose-chat prose-chat-compact text-sm leading-relaxed text-[var(--ar-black)]">
-                    <ReactMarkdown rehypePlugins={[rehypeHighlight]}>{message.content}</ReactMarkdown>
-                  </div>
-                )}
+            {bootstrapError ? (
+              <p className="mb-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                {bootstrapError}
+              </p>
+            ) : null}
+
+            <form
+              onSubmit={onSubmit}
+              className={cn(
+                "overflow-hidden rounded-2xl border border-black/12 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.06)] focus-within:border-black/20 focus-within:shadow-[0_2px_8px_rgba(0,0,0,0.08)]",
+                pendingFiles.length > 0 && "rounded-t-none border-t-0"
+              )}
+            >
+              <input ref={fileInputRef} type="file" className="hidden" multiple onChange={onFilesSelected} />
+
+              {pendingFiles.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5 border-b border-black/8 px-3 py-2">
+                  {pendingFiles.map((file) => (
+                    <span
+                      key={file.id}
+                      className="inline-flex items-center gap-1 rounded-md bg-[#f4f4f5] px-2 py-1 text-xs text-[var(--ar-mist)]"
+                    >
+                      {file.original_filename}
+                      <button type="button" onClick={() => void removePendingFile(file)} aria-label="Убрать">
+                        <X size={11} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+
+              <AutoTextarea
+                className="min-h-[52px] resize-none border-0 bg-transparent px-4 py-3.5 text-[15px] shadow-none ring-0 placeholder:text-[var(--ar-stone)] focus:border-0 focus:ring-0"
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                placeholder={bootstrapping ? "Загрузка..." : "Опишите задачу, @ для контекста"}
+                disabled={bootstrapping || !chatId}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    if (canSend && !loading) void onSubmit(event);
+                  }
+                }}
+              />
+
+              <div className="flex items-center justify-between px-3 pb-2.5 pt-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-black/10 bg-[#fafafa] px-2.5 py-1 text-xs font-medium text-[var(--ar-mist)]">
+                    AIRuntime
+                    <ChevronDown size={12} className="opacity-50" />
+                  </span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={onPickFiles}
+                    disabled={uploading || !chatId}
+                    className="rounded-lg p-2 text-[var(--ar-stone)] hover:bg-black/5 hover:text-[var(--ar-black)] disabled:opacity-40"
+                    aria-label="Прикрепить"
+                  >
+                    <Paperclip size={18} />
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={bootstrapping || loading || uploading || !canSend}
+                    className={cn(
+                      "flex h-8 w-8 items-center justify-center rounded-full transition-colors",
+                      canSend && !loading && !bootstrapping
+                        ? "bg-[var(--ar-black)] text-white hover:bg-black/85"
+                        : "bg-black/10 text-[var(--ar-stone)]"
+                    )}
+                    aria-label="Отправить"
+                  >
+                    <ArrowUp size={16} strokeWidth={2.5} />
+                  </button>
+                </div>
               </div>
-            ))}
-            <div ref={bottomRef} />
+            </form>
           </div>
         </div>
-
-        {pendingFiles.length > 0 ? (
-          <div className="flex flex-wrap gap-2">
-            {pendingFiles.map((file) => (
-              <span
-                key={file.id}
-                className="inline-flex items-center gap-2 rounded-full border border-black/15 bg-white px-3 py-1 text-xs text-[var(--ar-mist)]"
-              >
-                {file.original_filename}
-                <button type="button" onClick={() => void removePendingFile(file)} aria-label="Убрать файл">
-                  <X size={12} />
-                </button>
-              </span>
-            ))}
-          </div>
-        ) : null}
-
-        {bootstrapError ? (
-          <p className="rounded-[var(--ar-radius-sm)] border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-            {bootstrapError}
-          </p>
-        ) : null}
-
-        <form
-          onSubmit={onSubmit}
-          className="relative z-10 flex items-end gap-2 rounded-2xl border border-[#cfdcf4] bg-[linear-gradient(180deg,#ffffff_0%,#f8fbff_100%)] p-2 shadow-[0_12px_28px_rgba(80,120,190,0.12)] focus-within:border-[#b8cbee] focus-within:ring-2 focus-within:ring-[#d7e4ff]"
-        >
-          <input ref={fileInputRef} type="file" className="hidden" multiple onChange={onFilesSelected} />
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="mb-0.5 h-9 w-9 shrink-0 p-0"
-            onClick={onPickFiles}
-            disabled={uploading || !chatId}
-            aria-label="Прикрепить файлы"
-          >
-            <Paperclip size={18} />
-          </Button>
-          <AutoTextarea
-            className="min-h-[38px] flex-1 border-0 bg-transparent px-1 py-1.5 shadow-none focus:border-0 focus:bg-transparent focus:ring-0"
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            placeholder={bootstrapping ? "Подготавливаем чат..." : "Опишите задачу, которую нужно воплотить..."}
-            disabled={bootstrapping || !chatId}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                if (canSend && !loading) void onSubmit(event);
-              }
-            }}
-          />
-          <Button
-            type="submit"
-            variant="default"
-            size="sm"
-            className="mb-0.5 h-9 w-9 shrink-0 rounded-xl p-0"
-            disabled={bootstrapping || loading || uploading || !canSend}
-            aria-label="Отправить"
-          >
-            <Send size={16} />
-          </Button>
-        </form>
       </section>
     </div>
   );

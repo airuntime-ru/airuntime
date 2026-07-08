@@ -18,6 +18,12 @@
     }
   })();
 </script>
+<style>
+  /* Keep default admin layout but remove "recent actions" module */
+  #recent-actions, .module#recent-actions {
+    display: none !important;
+  }
+</style>
 {% endblock %}
 
 {% block branding %}

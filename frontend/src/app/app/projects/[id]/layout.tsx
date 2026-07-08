@@ -65,9 +65,6 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
             <h1 className="mt-4 text-3xl font-semibold tracking-normal text-[var(--ar-black)] sm:text-5xl">
               {project.name}
             </h1>
-            <p className="mt-3 max-w-3xl text-sm leading-7 text-[var(--ar-mist)] sm:text-base">
-              {project.description || "Описание пока не добавлено. Уточните идею в чате проекта, и AIRuntime соберет ее в рабочий запуск."}
-            </p>
           </div>
         </div>
       </header>

@@ -326,7 +326,8 @@ textarea {
 .prose-chat pre {
   position: relative;
   border-radius: var(--ar-radius-sm);
-  background: #0b1527 !important;
+  background: rgba(7, 20, 38, 0.06) !important;
+  border: 1px solid rgba(7, 20, 38, 0.12) !important;
   padding: 1rem;
   overflow-x: auto;
 }
@@ -344,6 +345,45 @@ textarea {
 .prose-chat-compact p {
   margin: 0.28rem 0;
   line-height: 1.5;
+}
+
+.prose-chat-cursor p {
+  margin: 0.35rem 0;
+  line-height: 1.65;
+}
+
+.prose-chat-cursor p:first-child {
+  margin-top: 0;
+}
+
+.prose-chat-cursor p:last-child {
+  margin-bottom: 0;
+}
+
+.prose-chat-cursor h1,
+.prose-chat-cursor h2,
+.prose-chat-cursor h3 {
+  margin: 1rem 0 0.5rem;
+  font-size: 1em;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.prose-chat-cursor ul,
+.prose-chat-cursor ol {
+  margin: 0.35rem 0;
+  padding-left: 1.25rem;
+}
+
+.prose-chat-cursor li {
+  margin: 0.15rem 0;
+}
+
+.prose-chat-cursor code:not(pre code) {
+  border-radius: 0.25rem;
+  background: rgba(0, 0, 0, 0.06);
+  padding: 0.1em 0.35em;
+  font-size: 0.9em;
 }
 
 .prose-chat a {
