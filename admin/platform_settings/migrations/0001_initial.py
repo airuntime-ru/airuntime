@@ -8,4 +8,17 @@ class Migration(migrations.Migration):
         ("core", "0002_systemsetting"),
     ]
 
-    operations = []
+    operations = [
+        migrations.CreateModel(
+            name="PlatformSystemSetting",
+            fields=[],
+            options={
+                "verbose_name": "Системная настройка",
+                "verbose_name_plural": "Системные настройки",
+                "proxy": True,
+                "indexes": [],
+                "constraints": [],
+            },
+            bases=("core.systemsetting",),
+        ),
+    ]
