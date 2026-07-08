@@ -8,7 +8,7 @@ import { AppMobileHeader, AppMobileNav } from "@/components/app/app-mobile-nav";
 import { OnboardingTour } from "@/components/app/onboarding-tour";
 import { PageLoader } from "@/components/ui/loader";
 import { getAccessToken } from "@/lib/auth";
-import { getMe, logout, refreshSession, completeOnboarding } from "@/lib/api";
+import { completeOnboarding, getMe, logout, refreshSession } from "@/lib/api";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -46,20 +46,22 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   if (isChecking) {
     return (
-      <div className="flex min-h-screen items-center justify-center atmosphere">
+      <div className="bg-[#f8fcff] flex min-h-screen items-center justify-center">
         <PageLoader />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen atmosphere text-[var(--ar-black)]">
-      <div className="fixed inset-0 atmosphere-grid" aria-hidden />
+    <div className="runtime-sky isolate min-h-screen text-[var(--ar-black)]">
       <AppSidebar credits={credits} onLogout={onLogout} />
       <AppMobileHeader credits={credits} />
       <AppMobileNav credits={credits} onLogout={onLogout} />
-      <main data-tour="app-workspace" className="relative z-10 min-h-screen px-4 pb-24 pt-20 lg:ml-72 lg:p-8">
-        {children}
+      <main
+        data-tour="app-workspace"
+        className="relative z-10 min-h-screen px-4 pb-28 pt-20 sm:px-5 lg:ml-72 lg:px-8 lg:py-6"
+      >
+        <div className="mx-auto w-full max-w-7xl">{children}</div>
       </main>
       <OnboardingTour
         completed={onboardingCompleted}

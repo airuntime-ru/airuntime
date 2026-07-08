@@ -70,7 +70,7 @@ export default function ProjectSettingsPage() {
     <div className="grid gap-4 md:grid-cols-2">
       <Card hover={false}>
         <div className="flex items-start gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-[var(--ar-radius-sm)] bg-sky-50 text-[var(--ar-sky)]">
+          <span className="flex h-10 w-10 items-center justify-center rounded-[var(--ar-radius-sm)] bg-white/80 text-[var(--ar-sky)] shadow-sm shadow-sky-950/5">
             <Settings2 size={18} />
           </span>
           <div>
@@ -83,14 +83,14 @@ export default function ProjectSettingsPage() {
       {project.type === "website" ? (
         <Card hover={false} className="md:col-span-2">
           <div className="flex items-start gap-3">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--ar-radius-sm)] bg-emerald-50 text-emerald-600">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--ar-radius-sm)] bg-white/80 text-emerald-600 shadow-sm shadow-sky-950/5">
               <Globe2 size={18} />
             </span>
             <div className="min-w-0 flex-1 space-y-4">
               <div>
                 <p className="text-sm font-semibold text-[var(--ar-black)]">Поддомен сайта</p>
-                <p className="mt-1 text-sm text-[var(--ar-mist)]">
-                  Адрес, на котором откроется проект после деплоя.
+                <p className="mt-1 text-sm leading-7 text-[var(--ar-mist)]">
+                  Адрес, на котором откроется проект после следующего деплоя.
                 </p>
               </div>
 
@@ -99,7 +99,7 @@ export default function ProjectSettingsPage() {
                   <label htmlFor="deploy-subdomain" className="text-xs font-medium text-[var(--ar-stone)]">
                     Поддомен
                   </label>
-                  <div className="flex overflow-hidden rounded-[var(--ar-radius-sm)] border border-[var(--ar-border)] bg-white shadow-sm shadow-sky-950/5">
+                  <div className="flex overflow-hidden rounded-[var(--ar-radius-sm)] border border-white/70 bg-white/72 shadow-sm shadow-sky-950/5">
                     <Input
                       id="deploy-subdomain"
                       value={subdomain}
@@ -108,11 +108,11 @@ export default function ProjectSettingsPage() {
                         setSaved(false);
                       }}
                       placeholder="my-landing"
-                      className="border-0 shadow-none focus:ring-0"
+                      className="border-0 bg-transparent shadow-none focus:ring-0"
                       autoComplete="off"
                       spellCheck={false}
                     />
-                    <span className="flex items-center border-l border-[var(--ar-border)] bg-[#f5f5f7] px-3 text-sm text-[var(--ar-mist)]">
+                    <span className="flex items-center border-l border-white/70 bg-white/58 px-3 text-sm text-[var(--ar-mist)]">
                       .{baseDomain}
                     </span>
                   </div>
@@ -123,28 +123,27 @@ export default function ProjectSettingsPage() {
               </div>
 
               <p className="text-sm text-[var(--ar-mist)]">
-                Будет доступен по адресу:{" "}
-                <span className="font-medium text-[var(--ar-black)]">{previewUrl}</span>
+                Будет доступен по адресу: <span className="font-medium text-[var(--ar-black)]">{previewUrl}</span>
               </p>
               {project.deployment_url ? (
-                <p className="text-xs text-[var(--ar-stone)]">
+                <p className="text-xs leading-6 text-[var(--ar-stone)]">
                   Текущий деплой: {project.deployment_url}. Новый поддомен применится при следующем запуске.
                 </p>
               ) : null}
               {error ? <p className="text-sm text-rose-600">{error}</p> : null}
-              {saved ? <p className="text-sm text-emerald-600">Поддомен сохранён</p> : null}
+              {saved ? <p className="text-sm text-emerald-600">Поддомен сохранен</p> : null}
             </div>
           </div>
         </Card>
       ) : (
         <Card hover={false}>
           <div className="flex items-start gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-[var(--ar-radius-sm)] bg-emerald-50 text-emerald-600">
+            <span className="flex h-10 w-10 items-center justify-center rounded-[var(--ar-radius-sm)] bg-white/80 text-emerald-600 shadow-sm shadow-sky-950/5">
               <Globe2 size={18} />
             </span>
             <div>
               <p className="text-sm text-[var(--ar-stone)]">Публикация</p>
-              <p className="mt-1 text-sm leading-relaxed text-[var(--ar-mist)]">
+              <p className="mt-1 text-sm leading-7 text-[var(--ar-mist)]">
                 Для Telegram-бота отдельный поддомен не нужен.
               </p>
             </div>

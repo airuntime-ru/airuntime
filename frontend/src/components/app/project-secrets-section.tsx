@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { KeyRound, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { KeyRound, ShieldCheck, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -19,7 +19,7 @@ export function ProjectSecretsSection({ projectId }: { projectId: string }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     setLoading(true);
     try {
       setSecrets(await listSecrets(projectId));
@@ -29,11 +29,14 @@ export function ProjectSecretsSection({ projectId }: { projectId: string }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [projectId]);
 
   useEffect(() => {
-    void refresh();
-  }, [projectId]);
+    const timer = window.setTimeout(() => {
+      void refresh();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [refresh]);
 
   const onCreate = async () => {
     if (!key.trim() || !value.trim()) return;
@@ -64,11 +67,16 @@ export function ProjectSecretsSection({ projectId }: { projectId: string }) {
   return (
     <Card hover={false} className="md:col-span-2" id="secrets">
       <div className="space-y-4">
-        <div>
-          <p className="text-sm font-semibold text-[var(--ar-black)]">Секреты</p>
-          <p className="mt-1 text-sm text-[var(--ar-mist)]">
-            API-ключи и токены для проекта. Хранятся зашифрованно и не попадают в чат.
-          </p>
+        <div className="flex items-start gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--ar-radius-sm)] bg-white/80 text-[var(--ar-sky)] shadow-sm shadow-sky-950/5">
+            <ShieldCheck size={18} />
+          </span>
+          <div>
+            <p className="text-sm font-semibold text-[var(--ar-black)]">Защищенный контур</p>
+            <p className="mt-1 text-sm leading-7 text-[var(--ar-mist)]">
+              API-ключи и токены хранятся зашифрованно и доступны только при сборке и запуске проекта.
+            </p>
+          </div>
         </div>
 
         <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
@@ -98,7 +106,7 @@ export function ProjectSecretsSection({ projectId }: { projectId: string }) {
               key={item}
               type="button"
               onClick={() => setKey(item)}
-              className="rounded-full border border-[var(--ar-border)] bg-white px-3 py-1 text-xs text-[var(--ar-mist)] hover:border-[var(--ar-border-strong)] hover:text-[var(--ar-black)]"
+              className="rounded-full border border-white/70 bg-white/64 px-3 py-1 text-xs font-medium text-[var(--ar-mist)] hover:border-[var(--ar-border-strong)] hover:text-[var(--ar-black)]"
             >
               {item}
             </button>
@@ -112,14 +120,14 @@ export function ProjectSecretsSection({ projectId }: { projectId: string }) {
         ) : secrets.length === 0 ? (
           <EmptyState
             title="Секретов пока нет"
-            description="Добавьте токены и ключи — они будут доступны при сборке и запуске проекта."
+            description="Добавьте токены и ключи, если проекту нужен внешний сервис, Telegram или платежи."
           />
         ) : (
           <div className="grid gap-2">
             {secrets.map((secret) => (
               <div
                 key={secret.id}
-                className="flex flex-col gap-3 rounded-[var(--ar-radius-sm)] border border-[var(--ar-border)] bg-white/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                className="flex flex-col gap-3 rounded-[var(--ar-radius-sm)] border border-white/70 bg-white/64 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
               >
                 <div>
                   <p className="font-medium text-[var(--ar-black)]">{secret.key}</p>

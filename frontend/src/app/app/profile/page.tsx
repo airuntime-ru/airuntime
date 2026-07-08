@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, UserRound } from "lucide-react";
+import { CheckCircle2, Sparkles, UserRound } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
 import { PageLoader } from "@/components/ui/loader";
@@ -12,16 +12,19 @@ export default function ProfilePage() {
   if (loading) return <PageLoader />;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
+    <div className="space-y-5">
       <div>
-        <p className="text-sm font-semibold uppercase tracking-[0.22em] text-[var(--ar-sky)]">Аккаунт</p>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight text-[var(--ar-black)] sm:text-4xl">Профиль</h1>
+        <p className="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.22em] text-[var(--ar-sky)]">
+          <Sparkles size={15} />
+          Аккаунт
+        </p>
+        <h1 className="mt-2 text-3xl font-semibold tracking-normal text-[var(--ar-black)] sm:text-5xl">Профиль</h1>
       </div>
       {error ? <p className="text-sm text-rose-600">{error}</p> : null}
       {profile ? (
         <Card className="grid gap-4 sm:grid-cols-3" hover={false}>
-          <div className="sm:col-span-3 flex items-center gap-3 border-b border-[var(--ar-border)] pb-4">
-            <span className="flex h-11 w-11 items-center justify-center rounded-[var(--ar-radius-sm)] bg-sky-50 text-[var(--ar-sky)]">
+          <div className="flex items-center gap-3 border-b border-white/60 pb-4 sm:col-span-3">
+            <span className="flex h-11 w-11 items-center justify-center rounded-[var(--ar-radius-sm)] bg-white/80 text-[var(--ar-sky)] shadow-sm shadow-sky-950/5">
               <UserRound size={20} />
             </span>
             <div className="min-w-0">
@@ -41,7 +44,7 @@ export default function ProfilePage() {
             </p>
           </div>
           <div>
-            <p className="text-sm text-[var(--ar-stone)]">Кредиты</p>
+            <p className="text-sm text-[var(--ar-stone)]">Энергия запуска</p>
             <p className="mt-1 font-semibold tabular-nums text-[var(--ar-black)]">
               {profile.credits_balance.toLocaleString()}
             </p>

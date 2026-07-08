@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ExternalLink, MessageSquare, Rocket } from "lucide-react";
+import { ExternalLink, MessageSquare, Rocket, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -51,20 +51,23 @@ export default function ProjectOverviewPage() {
         <Card hover={false}>
           <p className="text-sm text-[var(--ar-stone)]">Публикация</p>
           <p className="mt-2 break-all text-sm font-medium text-[var(--ar-sky)]">
-            {project.deployment_url ?? "Ссылка появится после первого деплоя"}
+            {project.deployment_url ?? "Ссылка появится после первого запуска"}
           </p>
         </Card>
       </div>
 
-      <Card hover={false} className="grid gap-4 md:grid-cols-[1fr_0.8fr]">
+      <Card hover={false} className="grid gap-5 md:grid-cols-[1fr_0.72fr]">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--ar-cyan)]">Следующее действие</p>
-          <h2 className="mt-3 text-2xl font-semibold text-[var(--ar-black)]">Доработайте или запустите проект</h2>
-          <p className="mt-3 text-sm leading-relaxed text-[var(--ar-mist)]">
-            В чате можно уточнить задачу, приложить файлы и попросить внести изменения. В деплоях видно состояние запусков.
+          <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--ar-cyan)]">
+            <Sparkles size={14} />
+            Следующее действие
+          </p>
+          <h2 className="mt-3 text-2xl font-semibold text-[var(--ar-black)]">Доведите идею до запуска через чат</h2>
+          <p className="mt-3 text-sm leading-7 text-[var(--ar-mist)]">
+            Уточните сценарий, приложите материалы и попросите AIRuntime собрать проект. Деплои покажут, где сейчас находится запуск.
           </p>
         </div>
-        <div className="flex flex-col justify-center gap-2 sm:flex-row md:flex-col">
+        <div className="flex flex-col justify-center gap-2">
           <Link href={`/app/projects/${project.id}/chat`} className="w-full">
             <Button variant="accent" className="w-full">
               <MessageSquare size={16} />

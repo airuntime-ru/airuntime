@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import { Bot, Globe2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Tabs } from "@/components/ui/tabs";
@@ -47,23 +48,29 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
     { href: `${base}/logs`, label: "Логи" },
     { href: `${base}/settings`, label: "Настройки" },
   ];
+  const Icon = project.type === "telegram_bot" ? Bot : Globe2;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
-      <div>
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="text-sm font-semibold uppercase tracking-[0.22em] text-[var(--ar-sky)]">
-            {typeLabel(project.type)}
-          </p>
-          <Badge>{project.status}</Badge>
+    <div className="space-y-5">
+      <header className="rounded-[var(--ar-radius-sm)] border border-black/10 bg-white p-5">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-black/5 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--ar-mist)]">
+                <Icon size={14} />
+                {typeLabel(project.type)}
+              </span>
+              <Badge>{project.status}</Badge>
+            </div>
+            <h1 className="mt-4 text-3xl font-semibold tracking-normal text-[var(--ar-black)] sm:text-5xl">
+              {project.name}
+            </h1>
+            <p className="mt-3 max-w-3xl text-sm leading-7 text-[var(--ar-mist)] sm:text-base">
+              {project.description || "Описание пока не добавлено. Уточните идею в чате проекта, и AIRuntime соберет ее в рабочий запуск."}
+            </p>
+          </div>
         </div>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight text-[var(--ar-black)] sm:text-4xl">
-          {project.name}
-        </h1>
-        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-[var(--ar-mist)] sm:text-base">
-          {project.description || "Описание пока не добавлено. Его можно уточнить в чате проекта."}
-        </p>
-      </div>
+      </header>
       <Tabs items={tabs} />
       {children}
     </div>

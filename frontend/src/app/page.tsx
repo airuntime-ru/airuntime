@@ -11,8 +11,9 @@ import { Logo } from "@/components/brand/logo";
 
 export default function Home() {
   return (
-    <main className="min-h-screen bg-[#fbfbfd] text-[var(--ar-black)]">
-      <div className="mx-auto flex max-w-5xl flex-col px-5 sm:px-8">
+    <main className="runtime-sky min-h-screen text-[var(--ar-black)]">
+      <div className="runtime-wind" aria-hidden />
+      <div className="relative z-10 mx-auto flex max-w-5xl flex-col px-5 sm:px-8">
         <header className="flex items-center justify-between py-5 sm:py-6">
           <Logo href="/" variant="full" theme="dark" size="sm" priority />
           <Link
@@ -23,7 +24,7 @@ export default function Home() {
           </Link>
         </header>
 
-        <section className="flex flex-col items-center pb-16 pt-10 text-center sm:pb-24 sm:pt-16">
+        <section className="flex min-h-[calc(88svh-5rem)] flex-col items-center justify-center pb-12 pt-10 text-center sm:pb-16 sm:pt-14">
           <motion.div
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
@@ -60,8 +61,24 @@ export default function Home() {
 
       <StepsSection />
 
-      <div className="mx-auto flex max-w-5xl flex-col px-5 sm:px-8">
+      <div className="relative z-10 mx-auto flex max-w-5xl flex-col px-5 sm:px-8">
         <FaqSection />
+
+        <section className="flex min-h-[88svh] flex-col items-center justify-center py-16 text-center">
+          <h2 className="max-w-3xl text-4xl font-semibold tracking-[-0.03em] text-[var(--ar-black)] sm:text-6xl sm:leading-[1.04]">
+            Запусти MVP своего стартапа уже сегодня
+          </h2>
+          <p className="mx-auto mt-5 max-w-xl text-base text-[var(--ar-mist)] sm:text-lg">
+            Опиши идею, получи готовый проект и ссылку для первых пользователей.
+          </p>
+          <Link
+            href="/auth/login"
+            className="mt-8 inline-flex h-12 items-center justify-center gap-2 rounded-full bg-[var(--ar-black)] px-7 text-sm font-medium text-white transition-transform hover:scale-[1.02] active:scale-[0.98]"
+          >
+            Запустить
+            <ArrowRight size={16} />
+          </Link>
+        </section>
 
         <footer className="border-t border-black/[0.06] py-10 text-center text-xs text-[var(--ar-stone)]">
           AIRuntime

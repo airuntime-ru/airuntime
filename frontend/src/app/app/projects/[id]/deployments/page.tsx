@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Rocket } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -32,7 +32,7 @@ export default function ProjectDeploymentsPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
-  const loadDeployments = async (options?: { silent?: boolean }) => {
+  const loadDeployments = useCallback(async (options?: { silent?: boolean }) => {
     if (!projectId) return;
     if (!options?.silent) setLoading(true);
     try {
@@ -43,11 +43,14 @@ export default function ProjectDeploymentsPage() {
     } finally {
       if (!options?.silent) setLoading(false);
     }
-  };
+  }, [projectId]);
 
   useEffect(() => {
-    void loadDeployments();
-  }, [projectId]);
+    const timer = window.setTimeout(() => {
+      void loadDeployments();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadDeployments]);
 
   const hasActiveDeployments = deployments.some(
     (item) => item.status === "running" || item.status === "queued"
@@ -59,7 +62,7 @@ export default function ProjectDeploymentsPage() {
       void loadDeployments({ silent: true });
     }, 5000);
     return () => window.clearInterval(timer);
-  }, [hasActiveDeployments, projectId]);
+  }, [hasActiveDeployments, loadDeployments]);
 
   const onDeploy = async () => {
     if (!projectId) return;
@@ -75,7 +78,8 @@ export default function ProjectDeploymentsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-end gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm leading-7 text-[var(--ar-mist)]">История запусков и состояние runtime-контейнеров.</p>
         <Button variant="accent" size="sm" className="w-full sm:w-auto" onClick={onDeploy}>
           <Rocket size={15} />
           Запустить
@@ -91,7 +95,7 @@ export default function ProjectDeploymentsPage() {
             </div>
             <Badge className={statusTone(item.status)}>{statusLabel(item.status)}</Badge>
           </div>
-          <div className="h-2 overflow-hidden rounded-full bg-sky-50">
+          <div className="h-2 overflow-hidden rounded-full bg-white/70">
             <div
               className={`h-full rounded-full transition-all ${
                 item.status === "completed"

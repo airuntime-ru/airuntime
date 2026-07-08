@@ -1,0 +1,25 @@
+{% extends "admin/base.html" %}
+{% load i18n static %}
+
+{% block title %}
+{{ title }} | {{ site_title|default:_("Django site admin") }}
+{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<script>
+  (function () {
+    try {
+      if (!localStorage.getItem("theme")) {
+        localStorage.setItem("theme", "light");
+      }
+    } catch (error) {
+      // Ignore localStorage access issues.
+    }
+  })();
+</script>
+{% endblock %}
+
+{% block branding %}
+<div id="site-name"><a href="{% url 'admin:index' %}">AIRuntime Admin</a></div>
+{% endblock %}

@@ -179,3 +179,97 @@ class ChatFile(models.Model):
         db_table = "chat_files"
         verbose_name = "Файл чата"
         verbose_name_plural = "Файлы чата"
+
+
+class DomainAppUser(AppUser):
+    class Meta:
+        proxy = True
+        app_label = "domain"
+        verbose_name = "Пользователь платформы"
+        verbose_name_plural = "Пользователи платформы"
+
+
+class DomainProject(Project):
+    class Meta:
+        proxy = True
+        app_label = "domain"
+        verbose_name = "Проект"
+        verbose_name_plural = "Проекты"
+
+
+class DomainSecret(Secret):
+    class Meta:
+        proxy = True
+        app_label = "domain"
+        verbose_name = "Секрет"
+        verbose_name_plural = "Секреты"
+
+
+class DomainDeployment(Deployment):
+    class Meta:
+        proxy = True
+        app_label = "domain"
+        verbose_name = "Деплой"
+        verbose_name_plural = "Деплои"
+
+
+class ChatSectionChat(Chat):
+    class Meta:
+        proxy = True
+        app_label = "chats_section"
+        verbose_name = "Чат"
+        verbose_name_plural = "Чаты"
+
+
+class ChatSectionFile(ChatFile):
+    class Meta:
+        proxy = True
+        app_label = "chats_section"
+        verbose_name = "Файл чата"
+        verbose_name_plural = "Файлы чата"
+
+
+class ChatSectionMessage(Message):
+    class Meta:
+        proxy = True
+        app_label = "chats_section"
+        verbose_name = "Сообщение"
+        verbose_name_plural = "Сообщения"
+
+
+class SystemAdminUser(AdminUser):
+    class Meta:
+        proxy = True
+        app_label = "auth"
+        verbose_name = "Системный пользователь"
+        verbose_name_plural = "Системные пользователи"
+
+
+class SystemSetting(models.Model):
+    SETTING_TYPES = [
+        ("api_key", "API ключ"),
+        ("limit", "Лимит"),
+        ("feature_toggle", "Фича-тогл"),
+        ("periodic_task", "Периодическая задача"),
+        ("other", "Прочее"),
+    ]
+
+    id = models.BigAutoField(primary_key=True)
+    key = models.CharField(max_length=120, unique=True)
+    title = models.CharField(max_length=255)
+    setting_type = models.CharField(max_length=32, choices=SETTING_TYPES, default="other")
+    value_text = models.TextField(blank=True, default="")
+    value_json = models.JSONField(blank=True, null=True)
+    value_number = models.IntegerField(blank=True, null=True)
+    is_enabled = models.BooleanField(default=True)
+    cron_expression = models.CharField(max_length=120, blank=True, default="")
+    description = models.TextField(blank=True, default="")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "admin_system_settings"
+        verbose_name = "Системная настройка"
+        verbose_name_plural = "Системные настройки"
+
+    def __str__(self) -> str:
+        return self.title

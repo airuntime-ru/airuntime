@@ -2,13 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
-import { ArrowLeft, Paperclip, Pin, PinOff, Plus, Search, Send, X } from "lucide-react";
+import { ArrowLeft, Paperclip, Pin, PinOff, Plus, Search, Send, Sparkles, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 
 import { AutoTextarea } from "@/components/ui/auto-textarea";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import {
   createChat,
   createMessage,
@@ -42,6 +41,19 @@ function readPinned(): string[] {
 
 function writePinned(ids: string[]) {
   localStorage.setItem(PINNED_KEY, JSON.stringify(ids));
+}
+
+function AiTypingIndicator() {
+  return (
+    <div className="flex items-center gap-3 py-1 text-sm font-medium text-[var(--ar-mist)]">
+      <span className="ai-typing" aria-hidden>
+        <span />
+        <span />
+        <span />
+      </span>
+      <span>AIRuntime отвечает</span>
+    </div>
+  );
 }
 
 export default function ProjectChatPage() {
@@ -219,47 +231,52 @@ export default function ProjectChatPage() {
   };
 
   const canSend = Boolean(chatId) && (input.trim().length > 0 || pendingFiles.length > 0);
-
-  const currentTitle = filteredChats.find((chat) => chat.id === chatId)?.title ?? "Чат проекта";
+  const currentTitle = filteredChats.find((chat) => chat.id === chatId)?.title ?? "Диалог проекта";
 
   return (
-    <div className="flex min-h-[calc(100dvh-15rem)] flex-col gap-3 lg:min-h-[calc(100vh-15rem)] lg:flex-row lg:gap-4">
-      <Card
-        hover={false}
-        className={cn("flex w-full flex-col p-3 lg:w-72 lg:shrink-0", mobilePanel === "chat" ? "hidden lg:flex" : "flex")}
+    <div className="grid min-h-[calc(100dvh-16rem)] gap-4 lg:grid-cols-[18rem_1fr]">
+      <aside
+        className={cn(
+          "celestial-panel flex w-full flex-col rounded-[var(--ar-radius-sm)] p-3 lg:flex",
+          mobilePanel === "chat" ? "hidden lg:flex" : "flex"
+        )}
       >
         <div className="mb-3 flex items-center justify-between">
           <div>
-            <h2 className="text-sm font-semibold text-[var(--ar-black)]">Диалоги</h2>
-            <p className="text-xs text-[var(--ar-stone)]">{filteredChats.length} в проекте</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ar-sky)]">Свитки диалога</p>
+            <p className="mt-1 text-sm text-[var(--ar-stone)]">{filteredChats.length} в проекте</p>
           </div>
-          <Button variant="ghost" size="sm" onClick={onNewChat} aria-label="Новый чат">
+          <Button variant="outline" size="sm" onClick={onNewChat} aria-label="Новый чат" className="h-9 w-9 p-0">
             <Plus size={16} />
           </Button>
         </div>
+
         <div className="relative mb-3">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--ar-stone)]" />
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Поиск чатов"
-            className="w-full rounded-[var(--ar-radius-sm)] border border-[var(--ar-border)] bg-white/80 py-2 pl-8 pr-3 text-sm text-[var(--ar-black)] shadow-sm shadow-sky-950/5 placeholder:text-[var(--ar-stone)] focus:outline-none focus:ring-2 focus:ring-[var(--ar-sky)]/15"
+            placeholder="Найти диалог"
+            className="w-full rounded-[var(--ar-radius-sm)] border border-white/70 bg-white/70 py-2 pl-8 pr-3 text-sm text-[var(--ar-black)] shadow-sm shadow-sky-950/5 placeholder:text-[var(--ar-stone)] focus:outline-none focus:ring-2 focus:ring-[var(--ar-sky)]/15"
           />
         </div>
-        <div className="max-h-[42dvh] flex-1 space-y-1 overflow-y-auto lg:max-h-none">
+
+        <div className="max-h-[42dvh] flex-1 space-y-1 overflow-y-auto pr-1 lg:max-h-none">
           {filteredChats.map((chat) => (
             <div
               key={chat.id}
               className={cn(
-                "flex items-center gap-1 rounded-[var(--ar-radius-sm)] px-2 py-1.5",
-                chatId === chat.id ? "bg-white shadow-sm shadow-sky-950/5" : "hover:bg-white/70"
+                "flex items-center gap-1 rounded-[var(--ar-radius-sm)] border px-2 py-2",
+                chatId === chat.id
+                  ? "border-white/80 bg-white/78 shadow-sm shadow-sky-950/5"
+                  : "border-transparent hover:border-white/70 hover:bg-white/54"
               )}
             >
               <button
                 type="button"
                 className={cn(
                   "flex-1 truncate text-left text-sm",
-                  chatId === chat.id ? "font-medium text-[var(--ar-black)]" : "text-[var(--ar-mist)]"
+                  chatId === chat.id ? "font-semibold text-[var(--ar-black)]" : "text-[var(--ar-mist)]"
                 )}
                 onClick={() => {
                   setChatId(chat.id);
@@ -279,66 +296,89 @@ export default function ProjectChatPage() {
             </div>
           ))}
         </div>
-      </Card>
+      </aside>
 
-      <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col gap-3", mobilePanel === "list" ? "hidden lg:flex" : "flex")}>
+      <section className={cn("flex min-h-0 min-w-0 flex-col gap-3", mobilePanel === "list" ? "hidden lg:flex" : "flex")}>
         <div className="flex items-center gap-2 lg:hidden">
           <Button variant="ghost" size="sm" onClick={() => setMobilePanel("list")} aria-label="К списку чатов">
             <ArrowLeft size={16} />
           </Button>
-          <p className="truncate text-sm font-medium text-[var(--ar-black)]">{currentTitle}</p>
+          <p className="truncate text-sm font-semibold text-[var(--ar-black)]">{currentTitle}</p>
         </div>
-        <Card hover={false} className="min-h-[42dvh] flex-1 space-y-3 overflow-y-auto bg-white/70 lg:min-h-0">
-          {messages.length === 0 ? (
-            <div className="rounded-[var(--ar-radius-sm)] border border-dashed border-[var(--ar-border-strong)] bg-white/70 p-5 text-center">
-              <p className="font-semibold text-[var(--ar-black)]">Начните диалог</p>
-              <p className="mt-2 text-sm leading-relaxed text-[var(--ar-mist)]">
-                Опишите, что нужно собрать, что изменить или какие файлы учитывать.
-              </p>
+
+        <div className="celestial-panel relative flex min-h-[46dvh] flex-1 flex-col overflow-hidden rounded-[var(--ar-radius-sm)]">
+          <div className="runtime-wind opacity-60" aria-hidden />
+          <div className="flex items-center justify-between gap-3 border-b border-white/60 px-4 py-3">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-[var(--ar-black)]">{currentTitle}</p>
+              <p className="text-xs text-[var(--ar-stone)]">Пишите как есть. AIRuntime превратит мысль в runtime.</p>
             </div>
-          ) : null}
-          {messages.map((message, index) => (
-            <div
-              key={`${message.role}-${index}`}
-              className={cn(
-                "rounded-[var(--ar-radius-sm)] border p-3",
-                message.role === "user"
-                  ? "ml-auto max-w-[92%] border-sky-100 bg-sky-50 text-[var(--ar-black)]"
-                  : "max-w-[94%] border-[var(--ar-border)] bg-white text-[var(--ar-black)] shadow-sm shadow-sky-950/5"
-              )}
-            >
-              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--ar-stone)]">
-                {message.role === "user" ? "Вы" : "AIRuntime"}
-              </p>
-              {message.attachments?.length ? (
-                <div className="mb-2 flex flex-wrap gap-2">
-                  {message.attachments.map((file) => (
-                    <a
-                      key={file.id}
-                      href={file.download_url ?? "#"}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="rounded-full border border-[var(--ar-border)] bg-white px-3 py-1 text-xs text-[var(--ar-sky)] hover:underline"
-                    >
-                      {file.original_filename}
-                    </a>
-                  ))}
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--ar-radius-sm)] bg-white/70 text-[var(--ar-sky)] shadow-sm shadow-sky-950/5">
+              <Sparkles size={17} />
+            </span>
+          </div>
+
+          <div className="relative flex-1 space-y-4 overflow-y-auto bg-white/18 px-3 py-4 sm:px-5">
+            {messages.length === 0 ? (
+              <div className="mx-auto flex min-h-[34vh] max-w-2xl flex-col items-center justify-center text-center">
+                <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-[var(--ar-radius-sm)] border border-white/80 bg-white/70 text-[var(--ar-sky)] shadow-[0_20px_60px_rgba(35,136,255,0.16)]">
+                  <Sparkles size={24} />
                 </div>
-              ) : null}
-              <div className="prose-chat text-sm leading-relaxed text-[var(--ar-black)]">
-                <ReactMarkdown rehypePlugins={[rehypeHighlight]}>{message.content}</ReactMarkdown>
+                <p className="text-2xl font-semibold text-[var(--ar-black)]">Начните разговор</p>
+                <p className="mt-3 text-sm leading-7 text-[var(--ar-mist)]">
+                  Опишите, какой сайт или бот должен появиться. Можно говорить живым языком: стиль, аудитория, функции, ограничения, файлы.
+                </p>
               </div>
-            </div>
-          ))}
-          <div ref={bottomRef} />
-        </Card>
+            ) : null}
+
+            {messages.map((message, index) => (
+              <div
+                key={`${message.role}-${index}`}
+                className={cn(
+                  "rounded-[var(--ar-radius-sm)] border p-4",
+                  message.role === "user"
+                    ? "ml-auto max-w-[88%] border-white/70 bg-[linear-gradient(145deg,rgba(255,255,255,0.88),rgba(235,247,255,0.72))] text-[var(--ar-black)] shadow-sm shadow-sky-950/5"
+                    : "max-w-[92%] border-white/80 bg-[linear-gradient(145deg,rgba(255,255,255,0.96),rgba(246,252,255,0.76))] text-[var(--ar-black)] shadow-[0_18px_58px_rgba(35,136,255,0.12)]"
+                )}
+              >
+                <p className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--ar-stone)]">
+                  {message.role === "assistant" ? <Sparkles size={13} className="text-[var(--ar-sky)]" /> : null}
+                  {message.role === "user" ? "Вы" : "AIRuntime"}
+                </p>
+                {message.attachments?.length ? (
+                  <div className="mb-3 flex flex-wrap gap-2">
+                    {message.attachments.map((file) => (
+                      <a
+                        key={file.id}
+                        href={file.download_url ?? "#"}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded-full border border-white/70 bg-white/80 px-3 py-1 text-xs text-[var(--ar-sky)] hover:underline"
+                      >
+                        {file.original_filename}
+                      </a>
+                    ))}
+                  </div>
+                ) : null}
+                {message.role === "assistant" && loading && index === messages.length - 1 && !message.content ? (
+                  <AiTypingIndicator />
+                ) : (
+                  <div className="prose-chat text-sm leading-relaxed text-[var(--ar-black)]">
+                    <ReactMarkdown rehypePlugins={[rehypeHighlight]}>{message.content}</ReactMarkdown>
+                  </div>
+                )}
+              </div>
+            ))}
+            <div ref={bottomRef} />
+          </div>
+        </div>
 
         {pendingFiles.length > 0 ? (
           <div className="flex flex-wrap gap-2">
             {pendingFiles.map((file) => (
               <span
                 key={file.id}
-                className="inline-flex items-center gap-2 rounded-full border border-[var(--ar-border)] bg-white px-3 py-1 text-xs text-[var(--ar-mist)] shadow-sm shadow-sky-950/5"
+                className="inline-flex items-center gap-2 rounded-full border border-white/70 bg-white/72 px-3 py-1 text-xs text-[var(--ar-mist)] shadow-sm shadow-sky-950/5"
               >
                 {file.original_filename}
                 <button type="button" onClick={() => void removePendingFile(file)} aria-label="Убрать файл">
@@ -357,12 +397,12 @@ export default function ProjectChatPage() {
 
         <form
           onSubmit={onSubmit}
-          className="relative z-10 flex items-end gap-2 rounded-[var(--ar-radius-md)] border border-[var(--ar-border)] bg-white/90 p-2 shadow-sm shadow-sky-950/5 focus-within:border-[var(--ar-border-strong)] focus-within:ring-2 focus-within:ring-[var(--ar-sky)]/15"
+          className="relative z-10 flex items-end gap-2 rounded-[var(--ar-radius-sm)] border border-white/70 bg-white/78 p-2 shadow-[0_18px_58px_rgba(84,123,176,0.14)] backdrop-blur-2xl focus-within:border-[var(--ar-border-strong)] focus-within:ring-2 focus-within:ring-[var(--ar-sky)]/15"
         >
           <input ref={fileInputRef} type="file" className="hidden" multiple onChange={onFilesSelected} />
           <Button
             type="button"
-            variant="ghost"
+            variant="outline"
             size="sm"
             className="mb-0.5 h-9 w-9 shrink-0 p-0"
             onClick={onPickFiles}
@@ -375,7 +415,7 @@ export default function ProjectChatPage() {
             className="min-h-[40px] flex-1 border-0 bg-transparent px-1 py-2 shadow-none focus:border-0 focus:bg-transparent focus:ring-0"
             value={input}
             onChange={(event) => setInput(event.target.value)}
-            placeholder={bootstrapping ? "Подготавливаем чат..." : "Опишите задачу..."}
+            placeholder={bootstrapping ? "Подготавливаем чат..." : "Опишите задачу, которую нужно воплотить..."}
             disabled={bootstrapping || !chatId}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
@@ -395,7 +435,7 @@ export default function ProjectChatPage() {
             <Send size={16} />
           </Button>
         </form>
-      </div>
+      </section>
     </div>
   );
 }

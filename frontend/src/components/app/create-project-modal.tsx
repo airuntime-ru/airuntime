@@ -12,8 +12,18 @@ import { createProject } from "@/lib/api";
 import { cn } from "@/lib/cn";
 
 const projectTypes = [
-  { value: "website" as const, label: "Сайт", icon: Globe2, description: "Лендинг, MVP или веб-инструмент" },
-  { value: "telegram_bot" as const, label: "Telegram-бот", icon: Bot, description: "Сценарии, заявки, уведомления" },
+  {
+    value: "website" as const,
+    label: "Сайт",
+    icon: Globe2,
+    description: "Лендинг, MVP или веб-инструмент, который можно запустить",
+  },
+  {
+    value: "telegram_bot" as const,
+    label: "Telegram-бот",
+    icon: Bot,
+    description: "Сценарии, заявки, ответы, уведомления и рабочие процессы",
+  },
 ];
 
 type CreateProjectModalProps = {
@@ -66,7 +76,7 @@ export function CreateProjectModal({ open, onClose, onCreated }: CreateProjectMo
       open={open}
       onClose={handleClose}
       title="Новый проект"
-      description="Сайт или Telegram-бот — выберите формат и опишите задачу"
+      description="Выберите формат и опишите задачу. После создания откроется чат, где можно сразу дать первый промпт."
     >
       <div data-tour="project-create-form" className="space-y-5">
         <div className="grid gap-2 sm:grid-cols-2">
@@ -80,8 +90,8 @@ export function CreateProjectModal({ open, onClose, onCreated }: CreateProjectMo
                 className={cn(
                   "flex items-start gap-3 rounded-[var(--ar-radius-sm)] border p-3 text-left transition-all",
                   active
-                    ? "border-[var(--ar-sky)] bg-sky-50/80 ring-2 ring-[var(--ar-sky)]/15"
-                    : "border-[var(--ar-border)] bg-white hover:border-[var(--ar-border-strong)]"
+                    ? "border-[var(--ar-sky)] bg-white/82 ring-2 ring-[var(--ar-sky)]/15"
+                    : "border-white/70 bg-white/52 hover:border-[var(--ar-border-strong)] hover:bg-white/76"
                 )}
               >
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--ar-radius-sm)] bg-white text-[var(--ar-sky)] shadow-sm shadow-sky-950/5">
@@ -117,9 +127,9 @@ export function CreateProjectModal({ open, onClose, onCreated }: CreateProjectMo
             </label>
             <Textarea
               id="project-description"
-              className="min-h-[96px] resize-none"
-              rows={3}
-              placeholder="Кто пользователь, что должно произойти и какие детали важны"
+              className="min-h-[112px] resize-none"
+              rows={4}
+              placeholder="Кто пользователь, что должно произойти, какой стиль и какие детали важны"
               value={description}
               onChange={(event) => setDescription(event.target.value)}
               disabled={creating}
@@ -135,7 +145,7 @@ export function CreateProjectModal({ open, onClose, onCreated }: CreateProjectMo
           </Button>
           <Button variant="accent" onClick={() => void onCreate()} disabled={creating || !name.trim()}>
             <Sparkles size={16} />
-            {creating ? "Создаём..." : "Создать проект"}
+            {creating ? "Открываем портал..." : "Создать и перейти в чат"}
           </Button>
         </div>
       </div>
