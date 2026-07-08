@@ -2,7 +2,7 @@
 
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { Globe2, Settings2 } from "lucide-react";
+import { Globe2 } from "lucide-react";
 
 import { ProjectSecretsSection } from "@/components/app/project-secrets-section";
 import { Button } from "@/components/ui/button";
@@ -68,18 +68,6 @@ export default function ProjectSettingsPage() {
 
   return (
     <div className="grid gap-4 md:grid-cols-2">
-      <Card hover={false}>
-        <div className="flex items-start gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-[var(--ar-radius-sm)] bg-white/80 text-[var(--ar-sky)] shadow-sm shadow-sky-950/5">
-            <Settings2 size={18} />
-          </span>
-          <div>
-            <p className="text-sm text-[var(--ar-stone)]">Название проекта</p>
-            <p className="mt-1 text-xl font-semibold text-[var(--ar-black)]">{project.name}</p>
-          </div>
-        </div>
-      </Card>
-
       {project.type === "website" ? (
         <Card hover={false} className="md:col-span-2">
           <div className="flex items-start gap-3">
@@ -125,6 +113,7 @@ export default function ProjectSettingsPage() {
               <p className="text-sm text-[var(--ar-mist)]">
                 Будет доступен по адресу: <span className="font-medium text-[var(--ar-black)]">{previewUrl}</span>
               </p>
+              <p className="text-xs text-[var(--ar-stone)]">Поддомен проверяется на уникальность по всей системе.</p>
               {project.deployment_url ? (
                 <p className="text-xs leading-6 text-[var(--ar-stone)]">
                   Текущий деплой: {project.deployment_url}. Новый поддомен применится при следующем запуске.

@@ -105,11 +105,6 @@ export default function ProjectsPage() {
                 {project.type === "telegram_bot" ? <Bot size={14} /> : <ExternalLink size={14} />}
                 {typeLabel(project.type)}
               </p>
-              {project.description ? (
-                <p className="mt-3 line-clamp-2 max-w-3xl text-sm leading-7 text-[var(--ar-stone)]">{project.description}</p>
-              ) : (
-                <p className="mt-3 text-sm leading-7 text-[var(--ar-stone)]">Откройте чат и уточните задачу для AIRuntime.</p>
-              )}
             </div>
             <div className="flex flex-col gap-2 sm:w-44">
               <Link href={`/app/projects/${project.id}/chat`}>

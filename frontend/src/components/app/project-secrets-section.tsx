@@ -9,8 +9,6 @@ import { EmptyState } from "@/components/ui/loader";
 import { Input } from "@/components/ui/input";
 import { createSecret, deleteSecret, listSecrets, type SecretType } from "@/lib/api";
 
-const commonKeys = ["TELEGRAM_BOT_TOKEN", "OPENAI_API_KEY", "STRIPE_SECRET_KEY", "DATABASE_URL"];
-
 export function ProjectSecretsSection({ projectId }: { projectId: string }) {
   const [secrets, setSecrets] = useState<SecretType[]>([]);
   const [key, setKey] = useState("");
@@ -98,19 +96,6 @@ export function ProjectSecretsSection({ projectId }: { projectId: string }) {
             <KeyRound size={16} />
             {saving ? "Сохраняем..." : "Добавить"}
           </Button>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          {commonKeys.map((item) => (
-            <button
-              key={item}
-              type="button"
-              onClick={() => setKey(item)}
-              className="rounded-full border border-white/70 bg-white/64 px-3 py-1 text-xs font-medium text-[var(--ar-mist)] hover:border-[var(--ar-border-strong)] hover:text-[var(--ar-black)]"
-            >
-              {item}
-            </button>
-          ))}
         </div>
 
         {error ? <p className="text-sm text-rose-600">{error}</p> : null}

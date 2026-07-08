@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
-import { ArrowLeft, Paperclip, Pin, PinOff, Plus, Search, Send, Sparkles, X } from "lucide-react";
+import { ArrowLeft, Paperclip, Pin, PinOff, Plus, Search, Send, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 
@@ -45,7 +45,7 @@ function writePinned(ids: string[]) {
 
 function AiTypingIndicator() {
   return (
-    <div className="flex items-center gap-3 py-1 text-sm font-medium text-[var(--ar-mist)]">
+    <div className="flex items-center gap-3 py-1 text-sm text-[var(--ar-mist)]">
       <span className="ai-typing" aria-hidden>
         <span />
         <span />
@@ -114,8 +114,8 @@ export default function ProjectChatPage() {
   }, [projectId, chatId]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    bottomRef.current?.scrollIntoView({ behavior: "auto" });
+  }, [messages.length]);
 
   const filteredChats = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -237,13 +237,13 @@ export default function ProjectChatPage() {
     <div className="grid min-h-[calc(100dvh-16rem)] gap-4 lg:grid-cols-[18rem_1fr]">
       <aside
         className={cn(
-          "celestial-panel flex w-full flex-col rounded-[var(--ar-radius-sm)] p-3 lg:flex",
+          "flex w-full flex-col rounded-[var(--ar-radius-sm)] border border-black/10 bg-white p-3 lg:flex",
           mobilePanel === "chat" ? "hidden lg:flex" : "flex"
         )}
       >
         <div className="mb-3 flex items-center justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ar-sky)]">Свитки диалога</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ar-stone)]">Чаты</p>
             <p className="mt-1 text-sm text-[var(--ar-stone)]">{filteredChats.length} в проекте</p>
           </div>
           <Button variant="outline" size="sm" onClick={onNewChat} aria-label="Новый чат" className="h-9 w-9 p-0">
@@ -257,7 +257,7 @@ export default function ProjectChatPage() {
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Найти диалог"
-            className="w-full rounded-[var(--ar-radius-sm)] border border-white/70 bg-white/70 py-2 pl-8 pr-3 text-sm text-[var(--ar-black)] shadow-sm shadow-sky-950/5 placeholder:text-[var(--ar-stone)] focus:outline-none focus:ring-2 focus:ring-[var(--ar-sky)]/15"
+            className="w-full rounded-[var(--ar-radius-sm)] border border-black/15 bg-white py-2 pl-8 pr-3 text-sm text-[var(--ar-black)] placeholder:text-[var(--ar-stone)] focus:outline-none focus:ring-2 focus:ring-black/10"
           />
         </div>
 
@@ -268,8 +268,8 @@ export default function ProjectChatPage() {
               className={cn(
                 "flex items-center gap-1 rounded-[var(--ar-radius-sm)] border px-2 py-2",
                 chatId === chat.id
-                  ? "border-white/80 bg-white/78 shadow-sm shadow-sky-950/5"
-                  : "border-transparent hover:border-white/70 hover:bg-white/54"
+                  ? "border-black/15 bg-black/5"
+                  : "border-transparent hover:border-black/10 hover:bg-black/5"
               )}
             >
               <button
@@ -287,7 +287,7 @@ export default function ProjectChatPage() {
               </button>
               <button
                 type="button"
-                className="text-[var(--ar-stone)] hover:text-[var(--ar-sky)]"
+                className="text-[var(--ar-stone)] hover:text-[var(--ar-black)]"
                 onClick={() => togglePin(chat.id)}
                 aria-label={pinned.includes(chat.id) ? "Открепить чат" : "Закрепить чат"}
               >
@@ -306,24 +306,17 @@ export default function ProjectChatPage() {
           <p className="truncate text-sm font-semibold text-[var(--ar-black)]">{currentTitle}</p>
         </div>
 
-        <div className="celestial-panel relative flex min-h-[46dvh] flex-1 flex-col overflow-hidden rounded-[var(--ar-radius-sm)]">
-          <div className="runtime-wind opacity-60" aria-hidden />
-          <div className="flex items-center justify-between gap-3 border-b border-white/60 px-4 py-3">
+        <div className="relative flex min-h-[46dvh] flex-1 flex-col overflow-hidden rounded-[var(--ar-radius-sm)] border border-black/10 bg-white">
+          <div className="flex items-center justify-between gap-3 border-b border-black/10 px-4 py-3">
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-[var(--ar-black)]">{currentTitle}</p>
-              <p className="text-xs text-[var(--ar-stone)]">Пишите как есть. AIRuntime превратит мысль в runtime.</p>
+              <p className="text-xs text-[var(--ar-stone)]">Чат проекта</p>
             </div>
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--ar-radius-sm)] bg-white/70 text-[var(--ar-sky)] shadow-sm shadow-sky-950/5">
-              <Sparkles size={17} />
-            </span>
           </div>
 
-          <div className="relative flex-1 space-y-4 overflow-y-auto bg-white/18 px-3 py-4 sm:px-5">
+          <div className="relative flex-1 space-y-4 overflow-y-auto bg-white px-3 py-4 sm:px-5">
             {messages.length === 0 ? (
               <div className="mx-auto flex min-h-[34vh] max-w-2xl flex-col items-center justify-center text-center">
-                <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-[var(--ar-radius-sm)] border border-white/80 bg-white/70 text-[var(--ar-sky)] shadow-[0_20px_60px_rgba(35,136,255,0.16)]">
-                  <Sparkles size={24} />
-                </div>
                 <p className="text-2xl font-semibold text-[var(--ar-black)]">Начните разговор</p>
                 <p className="mt-3 text-sm leading-7 text-[var(--ar-mist)]">
                   Опишите, какой сайт или бот должен появиться. Можно говорить живым языком: стиль, аудитория, функции, ограничения, файлы.
@@ -337,12 +330,11 @@ export default function ProjectChatPage() {
                 className={cn(
                   "rounded-[var(--ar-radius-sm)] border p-4",
                   message.role === "user"
-                    ? "ml-auto max-w-[88%] border-white/70 bg-[linear-gradient(145deg,rgba(255,255,255,0.88),rgba(235,247,255,0.72))] text-[var(--ar-black)] shadow-sm shadow-sky-950/5"
-                    : "max-w-[92%] border-white/80 bg-[linear-gradient(145deg,rgba(255,255,255,0.96),rgba(246,252,255,0.76))] text-[var(--ar-black)] shadow-[0_18px_58px_rgba(35,136,255,0.12)]"
+                    ? "ml-auto max-w-[86%] border-black/10 bg-black/5 text-[var(--ar-black)]"
+                    : "max-w-[96%] border-transparent bg-transparent p-0 text-[var(--ar-black)]"
                 )}
               >
                 <p className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--ar-stone)]">
-                  {message.role === "assistant" ? <Sparkles size={13} className="text-[var(--ar-sky)]" /> : null}
                   {message.role === "user" ? "Вы" : "AIRuntime"}
                 </p>
                 {message.attachments?.length ? (
@@ -353,7 +345,7 @@ export default function ProjectChatPage() {
                         href={file.download_url ?? "#"}
                         target="_blank"
                         rel="noreferrer"
-                        className="rounded-full border border-white/70 bg-white/80 px-3 py-1 text-xs text-[var(--ar-sky)] hover:underline"
+                        className="rounded-full border border-black/15 bg-white px-3 py-1 text-xs text-[var(--ar-black)] hover:underline"
                       >
                         {file.original_filename}
                       </a>
@@ -378,7 +370,7 @@ export default function ProjectChatPage() {
             {pendingFiles.map((file) => (
               <span
                 key={file.id}
-                className="inline-flex items-center gap-2 rounded-full border border-white/70 bg-white/72 px-3 py-1 text-xs text-[var(--ar-mist)] shadow-sm shadow-sky-950/5"
+                className="inline-flex items-center gap-2 rounded-full border border-black/15 bg-white px-3 py-1 text-xs text-[var(--ar-mist)]"
               >
                 {file.original_filename}
                 <button type="button" onClick={() => void removePendingFile(file)} aria-label="Убрать файл">
@@ -397,7 +389,7 @@ export default function ProjectChatPage() {
 
         <form
           onSubmit={onSubmit}
-          className="relative z-10 flex items-end gap-2 rounded-[var(--ar-radius-sm)] border border-white/70 bg-white/78 p-2 shadow-[0_18px_58px_rgba(84,123,176,0.14)] backdrop-blur-2xl focus-within:border-[var(--ar-border-strong)] focus-within:ring-2 focus-within:ring-[var(--ar-sky)]/15"
+          className="relative z-10 flex items-end gap-2 rounded-[var(--ar-radius-sm)] border border-black/15 bg-white p-2 focus-within:border-black/30 focus-within:ring-2 focus-within:ring-black/10"
         >
           <input ref={fileInputRef} type="file" className="hidden" multiple onChange={onFilesSelected} />
           <Button
@@ -426,7 +418,7 @@ export default function ProjectChatPage() {
           />
           <Button
             type="submit"
-            variant="accent"
+            variant="default"
             size="sm"
             className="mb-0.5 h-9 w-9 shrink-0 rounded-full p-0"
             disabled={bootstrapping || loading || uploading || !canSend}

@@ -27,6 +27,8 @@ export type DeploymentType = {
   image_ref: string | null;
   container_id: string | null;
   logs_ref: string | null;
+  started_at: string | null;
+  finished_at: string | null;
 };
 
 export type MeType = {

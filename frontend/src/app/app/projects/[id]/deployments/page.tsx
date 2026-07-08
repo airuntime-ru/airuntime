@@ -25,6 +25,19 @@ function statusLabel(status: string) {
   return status;
 }
 
+function formatDateTime(value: string | null) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export default function ProjectDeploymentsPage() {
   const params = useParams<{ id: string }>();
   const projectId = params.id;
@@ -107,6 +120,10 @@ export default function ProjectDeploymentsPage() {
                       : "w-1/3 bg-[var(--ar-stone)]"
               }`}
             />
+          </div>
+          <div className="grid gap-1 text-xs text-[var(--ar-stone)] sm:grid-cols-2">
+            <p>Старт: {formatDateTime(item.started_at)}</p>
+            <p>Финиш: {formatDateTime(item.finished_at)}</p>
           </div>
           <p className="text-xs text-[var(--ar-stone)]">{item.logs_ref ?? "Логи появятся после запуска"}</p>
         </Card>
