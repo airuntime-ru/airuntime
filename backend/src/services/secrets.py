@@ -9,7 +9,14 @@ from src.core.config import settings
 def _get_fernet() -> Fernet:
     if settings.app_encryption_key:
         key_bytes = settings.app_encryption_key.encode("utf-8")
-        return Fernet(key_bytes)
+        try:
+            return Fernet(key_bytes)
+        except ValueError:
+            # Keep existing deployments working even when APP_ENCRYPTION_KEY
+            # was provided in a non-Fernet format.
+            derived = hashlib.sha256(key_bytes).digest()
+            fallback_key = base64.urlsafe_b64encode(derived)
+            return Fernet(fallback_key)
     derived = hashlib.sha256(settings.jwt_secret_key.encode("utf-8")).digest()
     fallback_key = base64.urlsafe_b64encode(derived)
     return Fernet(fallback_key)

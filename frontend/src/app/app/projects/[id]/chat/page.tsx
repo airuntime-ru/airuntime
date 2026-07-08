@@ -328,10 +328,10 @@ export default function ProjectChatPage() {
               <div
                 key={`${message.role}-${index}`}
                 className={cn(
-                  "rounded-[var(--ar-radius-sm)] border p-4",
+                  "w-fit rounded-[var(--ar-radius-sm)] border p-4",
                   message.role === "user"
-                    ? "ml-auto max-w-[86%] border-black/10 bg-black/5 text-[var(--ar-black)]"
-                    : "max-w-[96%] border-transparent bg-transparent p-0 text-[var(--ar-black)]"
+                    ? "ml-auto max-w-[72%] border-black/10 bg-black/5 text-[var(--ar-black)]"
+                    : "max-w-[78%] border-transparent bg-transparent p-0 text-[var(--ar-black)]"
                 )}
               >
                 <p className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--ar-stone)]">
