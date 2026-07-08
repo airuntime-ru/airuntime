@@ -20,7 +20,11 @@
 </script>
 <style>
   /* Keep default admin layout but remove "recent actions" module */
-  #recent-actions, .module#recent-actions {
+  #recent-actions,
+  div#recent-actions,
+  .module#recent-actions,
+  .module#recent-actions *,
+  #recent-actions * {
     display: none !important;
   }
 </style>

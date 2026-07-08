@@ -34,6 +34,7 @@ class AdminUser(AbstractBaseUser, PermissionsMixin):
 
     class Meta:
         db_table = "django_admin_users"
+        app_label = "auth"
         verbose_name = "Системный пользователь"
         verbose_name_plural = "Системные пользователи"
 
