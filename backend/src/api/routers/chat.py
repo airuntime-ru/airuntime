@@ -1,4 +1,5 @@
 import json
+import re
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -29,6 +30,11 @@ from src.services.file_context import (
     serialize_message_metadata,
 )
 from src.services.prompt_guard import sanitize_user_message
+from src.services.project_subdomain import (
+    assert_subdomain_available,
+    normalize_deploy_subdomain,
+    planned_public_url,
+)
 
 router = APIRouter(prefix="/projects/{project_id}/chats", tags=["chat"])
 
@@ -85,6 +91,35 @@ def _compose_model_message(*, content: str, attachment_ids: list[UUID], db: Sess
     if attachment_context:
         parts.append(attachment_context)
     return "\n\n".join(parts) if parts else "Review the attached project files."
+
+
+def _extract_deploy_subdomain(text: str) -> str | None:
+    """
+    Extract requested deploy subdomain from user text.
+
+    Supported patterns:
+    - test.airuntime.ru
+    - https://test.airuntime.ru
+    - поддомен: test
+    - subdomain = test
+    """
+
+    base_domain = settings.resolved_app_domain
+    text_l = text.strip().lower()
+    if not text_l:
+        return None
+
+    base_domain_escaped = re.escape(base_domain)
+    for pattern in [
+        rf"https?://([a-z0-9-]{{3,48}})\.{base_domain_escaped}",
+        rf"\b([a-z0-9-]{{3,48}})\.{base_domain_escaped}\b",
+        r"\bподдомен\s*[:=]?\s*([a-z0-9-]{3,48})\b",
+        r"\bsubdomain\s*[:=]?\s*([a-z0-9-]{3,48})\b",
+    ]:
+        match = re.search(pattern, text_l, flags=re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return None
 
 
 def _message_response(db: Session, message: Message) -> MessageResponse:
@@ -217,6 +252,16 @@ async def _stream_events(
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
+    if project.type == "website" and content:
+        extracted_subdomain = _extract_deploy_subdomain(content)
+        if extracted_subdomain:
+            normalized = normalize_deploy_subdomain(extracted_subdomain)
+            assert_subdomain_available(db, normalized, exclude_project_id=str(project.id))
+            project.deploy_subdomain = normalized
+            db.add(project)
+            db.commit()
+            db.refresh(project)
+
     model_message = _compose_model_message(content=content, attachment_ids=attachment_ids, db=db)
     try:
         safe_message = sanitize_user_message(model_message)
@@ -244,8 +289,12 @@ async def _stream_events(
             project.logs = f"Generated artifact: {artifact_path}"
             db.add(project)
             if project.type == "website" and settings.auto_deploy_websites:
+                planned_url = planned_public_url(project)
                 create_deployment_for_project(db, project)
-                yield _sse_chunk("\n\nСайт собран и поставлен в очередь на запуск.")
+                if planned_url:
+                    yield _sse_chunk(f"\n\nСайт собран и поставлен в очередь на запуск. URL: {planned_url}")
+                else:
+                    yield _sse_chunk("\n\nСайт собран и поставлен в очередь на запуск.")
             elif project.type == "telegram_bot":
                 create_deployment_for_project(db, project)
                 yield _sse_chunk("\n\nБот собран и поставлен в очередь на запуск.")

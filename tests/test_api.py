@@ -181,3 +181,38 @@ def test_stream_prompt_generates_artifact_and_queues_deployment(
 
     updated = client.get(f"/api/v1/projects/{project['id']}", headers=headers).json()
     assert updated["status"] == "ready"
+
+
+def test_stream_subdomain_from_prompt_sets_deploy_subdomain(client, monkeypatch, tmp_path):
+    from src.api.routers import chat as chat_router
+
+    deployments: list[str | None] = []
+
+    def fake_generate_project_artifact(db, project, prompt):
+        return tmp_path / "artifact"
+
+    def fake_create_deployment(db, project):
+        deployments.append(project.deploy_subdomain)
+        return None
+
+    monkeypatch.setattr(chat_router, "ConversationService", _FakeConversationService)
+    monkeypatch.setattr(chat_router, "generate_project_artifact", fake_generate_project_artifact)
+    monkeypatch.setattr(chat_router, "create_deployment_for_project", fake_create_deployment)
+
+    headers = auth_tokens(client, "subdomain@airuntime.dev")
+    project = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={"type": "website", "name": "Subdomain Site", "description": ""},
+    ).json()
+    chat = client.post(f"/api/v1/projects/{project['id']}/chats", headers=headers).json()
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/chats/{chat['id']}/stream",
+        headers=headers,
+        json={"content": "Собери лендинг и запусти на https://test.airuntime.ru"},
+    )
+
+    assert response.status_code == 200
+    assert any("URL: https://test.airuntime.ru" in line for line in response.text.splitlines())
+    assert deployments == ["test"]

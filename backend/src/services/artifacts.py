@@ -60,12 +60,22 @@ def generate_website_artifact(project: Project, prompt: str = "") -> Path:
     public_dir.mkdir(parents=True, exist_ok=True)
 
     title = _safe_title(project)
-    lines = [html.escape(line) for line in _prompt_lines(project, prompt)]
+    prompt_lines = [html.escape(line) for line in _prompt_lines(project, prompt)]
     lead = html.escape(
         project.description.strip() or prompt.strip() or "Проект, собранный AIRuntime."
     )
+    default_features = [
+        html.escape("Понимает задачу и стиль"),
+        html.escape("Собирает лендинг с готовой структурой"),
+        html.escape("Готовит деплой под домен"),
+        html.escape("Обновляет проект по новому запросу"),
+        html.escape("Упаковывает в контейнер и запускает"),
+        html.escape("Фокус на скорости и результате"),
+    ]
+    features_list = (prompt_lines[:4] + default_features)[:6]
     features = "\n".join(
-        f"<li><span>{index:02d}</span><p>{line}</p></li>" for index, line in enumerate(lines, 1)
+        f"<li><span>{index:02d}</span><p>{line}</p></li>"
+        for index, line in enumerate(features_list, 1)
     )
 
     index_html = f"""<!doctype html>
@@ -122,6 +132,9 @@ def generate_website_artifact(project: Project, prompt: str = "") -> Path:
       font-size: 13px;
       font-weight: 700;
     }}
+    .ai-badge {{
+      background: rgba(255,255,255,.85);
+    }}
     .hero {{
       display: grid;
       grid-template-columns: 1.1fr .9fr;
@@ -146,6 +159,16 @@ def generate_website_artifact(project: Project, prompt: str = "") -> Path:
       color: var(--muted);
       font-size: clamp(17px, 2vw, 21px);
       line-height: 1.65;
+    }}
+    .muted {{
+      color: var(--muted);
+      line-height: 1.6;
+      font-size: 14px;
+    }}
+    .sublead {{
+      margin: 18px 0 0;
+      color: rgba(98, 112, 134, .98);
+      font-weight: 600;
     }}
     .panel {{
       border: 1px solid var(--line);
@@ -178,6 +201,14 @@ def generate_website_artifact(project: Project, prompt: str = "") -> Path:
       letter-spacing: .16em;
     }}
     li p {{ margin: 0; color: var(--muted); line-height: 1.5; }}
+    .panel-title {{
+      margin: 0 0 16px;
+      font-size: 14px;
+      font-weight: 800;
+      letter-spacing: .08em;
+      color: rgba(35, 136, 255, .95);
+      text-transform: uppercase;
+    }}
     .cta {{
       display: inline-flex;
       margin-top: 34px;
@@ -189,14 +220,71 @@ def generate_website_artifact(project: Project, prompt: str = "") -> Path:
       text-decoration: none;
       box-shadow: 0 16px 35px rgba(35,136,255,.22);
     }}
+    .section {{
+      margin-top: 64px;
+      padding-top: 26px;
+    }}
+    h2 {{
+      margin: 0 0 18px;
+      font-size: 20px;
+      letter-spacing: -.01em;
+    }}
+    .grid-3 {{
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+    }}
+    .card {{
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.78);
+      border-radius: 16px;
+      padding: 18px;
+    }}
+    .card strong {{
+      display: block;
+      font-size: 14px;
+      margin-bottom: 10px;
+    }}
+    .pill-row {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }}
+    .pill {{
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      padding: 10px 14px;
+      background: rgba(255,255,255,.78);
+      color: rgba(8, 20, 38, .9);
+      font-weight: 700;
+      font-size: 13px;
+    }}
+    details {{
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(255,255,255,.78);
+      padding: 14px 16px;
+      margin-bottom: 10px;
+    }}
+    summary {{
+      cursor: pointer;
+      font-weight: 800;
+    }}
+    details p {{
+      margin: 10px 0 0;
+      color: var(--muted);
+      line-height: 1.6;
+    }}
     footer {{
       margin-top: 92px;
       color: #8a96a8;
       font-size: 13px;
+      text-align: center;
     }}
     @media (max-width: 820px) {{
       header {{ margin-bottom: 48px; }}
       .hero {{ grid-template-columns: 1fr; }}
+      .grid-3 {{ grid-template-columns: 1fr; }}
     }}
   </style>
 </head>
@@ -204,17 +292,61 @@ def generate_website_artifact(project: Project, prompt: str = "") -> Path:
   <main>
     <header>
       <div class="brand">AIRUNTIME</div>
-      <div class="badge">запущено</div>
+      <div class="badge ai-badge">AI-лендинг</div>
     </header>
     <section class="hero">
       <div>
-        <h1>{title}<br><span class="gradient">готов к запуску</span></h1>
+        <h1>{title}<br><span class="gradient">собран AI</span></h1>
         <p class="lead">{lead}</p>
-        <a class="cta" href="mailto:hello@example.com">Связаться</a>
+        <p class="sublead">AIRuntime автоматически упакует идею и запустит ее на вашем домене.</p>
+        <a class="cta" href="mailto:hello@example.com">Попросить сборку</a>
       </div>
       <div class="panel">
+        <p class="panel-title">Что получает продукт</p>
         <ul>{features}</ul>
       </div>
+    </section>
+    <section class="section">
+      <h2>Как работает AIRuntime</h2>
+      <div class="grid-3">
+        <div class="card">
+          <strong>1. Описание в чате</strong>
+          <div class="muted">Расскажите, какой сайт нужен и какой стиль хотите.</div>
+        </div>
+        <div class="card">
+          <strong>2. Генерация структуры</strong>
+          <div class="muted">Платформа соберет контентные блоки и упакует UI.</div>
+        </div>
+        <div class="card">
+          <strong>3. Деплой на домен</strong>
+          <div class="muted">Запуск выполняется на стороне runtime и доступен по HTTPS.</div>
+        </div>
+      </div>
+    </section>
+    <section class="section">
+      <h2>Кому подойдет</h2>
+      <div class="pill-row">
+        <span class="pill">MVP за 1-2 итерации</span>
+        <span class="pill">Лендинг продукта</span>
+        <span class="pill">Студия и услуги</span>
+        <span class="pill">Сервисы и промо</span>
+        <span class="pill">Агентские проекты</span>
+      </div>
+    </section>
+    <section class="section">
+      <h2>FAQ</h2>
+      <details>
+        <summary>Можно ли менять поддомен?</summary>
+        <p>Да. Откройте настройки проекта и укажите нужный поддомен — при следующем запуске он применится.</p>
+      </details>
+      <details>
+        <summary>Нужно ли уметь верстать?</summary>
+        <p>Не обязательно. Вы задаете цель, а AIRuntime собирает шаблон и структуру сайта.</p>
+      </details>
+      <details>
+        <summary>Как быстро появится сайт?</summary>
+        <p>Обычно в пределах минут — после генерации запускается деплой в runtime.</p>
+      </details>
     </section>
     <footer>Сайт сгенерирован AIRuntime из описания проекта.</footer>
   </main>
