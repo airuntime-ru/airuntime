@@ -8,7 +8,7 @@ from pathlib import Path
 from uuid import UUID
 
 import docker
-from docker.errors import DockerException
+from docker.errors import BuildError, DockerException
 from sqlalchemy.orm import Session
 
 from src.core.config import settings
@@ -460,16 +460,48 @@ def ensure_project_artifact(db: Session, project: Project, prompt: str = "") -> 
     return artifact_dir
 
 
+def _docker_build(path: Path, tag: str) -> None:
+    client = docker.from_env()
+    client.images.build(path=str(path), tag=tag, rm=True, pull=False)
+
+
+def _build_error_message(exc: DockerException) -> str:
+    if isinstance(exc, BuildError):
+        details: list[str] = []
+        for item in exc.build_log or []:
+            if isinstance(item, dict):
+                stream = item.get("stream") or item.get("error") or ""
+                if stream:
+                    details.append(str(stream).strip())
+        if details:
+            return "\n".join(details[-20:])
+    return str(exc)
+
+
 def build_project_image(db: Session, project: Project, prompt: str = "") -> tuple[str, dict[str, str]]:
     # Prevent races between git checkout/commit and docker builds.
     with with_project_git_lock(project.id):
         path = ensure_project_artifact(db, project, prompt)
         tag = _image_tag(project)
         try:
-            client = docker.from_env()
-            client.images.build(path=str(path), tag=tag, rm=True, pull=False)
+            _docker_build(path, tag)
         except DockerException as exc:
-            raise ArtifactError(f"Docker image build failed: {exc}") from exc
+            first_error = _build_error_message(exc)
+            try:
+                from src.services.agentic_artifacts import repair_artifact_with_fallback
+
+                repaired_path = repair_artifact_with_fallback(db, project, first_error)
+                db.commit()
+                _docker_build(repaired_path, tag)
+            except DockerException as second_exc:
+                second_error = _build_error_message(second_exc)
+                raise ArtifactError(
+                    f"Docker image build failed after repair:\n{second_error}"
+                ) from second_exc
+            except Exception as repair_exc:
+                raise ArtifactError(
+                    f"Docker image build failed and repair did not complete:\n{first_error}\n{repair_exc}"
+                ) from repair_exc
 
     environment: dict[str, str] = {}
     if project.type == "telegram_bot":

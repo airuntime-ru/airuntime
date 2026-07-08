@@ -21,7 +21,8 @@ from src.db.models.message import Message
 from src.db.models.project import Project
 from src.db.models.user import User
 from src.db.session import get_db
-from src.services.artifacts import ArtifactError, generate_project_artifact
+from src.services.agentic_artifacts import generate_project_artifact_agentic
+from src.services.artifacts import ArtifactError
 from src.services.conversation import ConversationService
 from src.services.deployments import create_deployment_for_project
 from src.services.file_context import (
@@ -29,13 +30,13 @@ from src.services.file_context import (
     build_attachment_context,
     serialize_message_metadata,
 )
-from src.services.prompt_guard import sanitize_user_message
+from src.services.project_git import ProjectGitError, commit_snapshot
 from src.services.project_subdomain import (
     assert_subdomain_available,
     normalize_deploy_subdomain,
     planned_public_url,
 )
-from src.services.project_git import commit_snapshot, ProjectGitError
+from src.services.prompt_guard import sanitize_user_message
 
 router = APIRouter(prefix="/projects/{project_id}/chats", tags=["chat"])
 
@@ -285,7 +286,7 @@ async def _stream_events(
         usage_cost = max(100, len(safe_message) + len(assistant_full))
         current_user.credits_balance = max(0, current_user.credits_balance - usage_cost)
         try:
-            artifact_path = generate_project_artifact(db, project, safe_message)
+            artifact_path = await generate_project_artifact_agentic(db, project, safe_message)
             git_commit_hash: str | None = None
             try:
                 git_commit_hash = commit_snapshot(

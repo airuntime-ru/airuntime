@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, BigInteger, String, Text, DateTime, Integer, Index
+from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -26,7 +25,3 @@ class SystemSetting(Base):
     cron_expression: Mapped[str | None] = mapped_column(String(120), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-
-    # Helpful for ad-hoc admin debugging in production
-    __table_args__ = (Index("ix_admin_system_settings_key", "key"),)
-

@@ -71,7 +71,10 @@ export default function ProjectVersionsPage() {
   }, [projectId]);
 
   useEffect(() => {
-    void loadVersions();
+    const id = window.setTimeout(() => {
+      void loadVersions();
+    }, 0);
+    return () => window.clearTimeout(id);
   }, [loadVersions]);
 
   const hasVersions = useMemo(() => versions.length > 0, [versions]);
@@ -134,7 +137,10 @@ export default function ProjectVersionsPage() {
 
   useEffect(() => {
     if (!activeCommitHash) return;
-    void loadTree(true);
+    const id = window.setTimeout(() => {
+      void loadTree(true);
+    }, 0);
+    return () => window.clearTimeout(id);
   }, [activeCommitHash, treePath, loadTree]);
 
   const loadFile = useCallback(
@@ -361,4 +367,3 @@ export default function ProjectVersionsPage() {
     </div>
   );
 }
-

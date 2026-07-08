@@ -142,7 +142,7 @@ def test_stream_prompt_generates_artifact_and_queues_deployment(
     generated = []
     deployments = []
 
-    def fake_generate_project_artifact(db, project, prompt):
+    async def fake_generate_project_artifact(db, project, prompt):
         generated.append((project.id, prompt))
         return tmp_path / "artifact"
 
@@ -151,7 +151,9 @@ def test_stream_prompt_generates_artifact_and_queues_deployment(
         return None
 
     monkeypatch.setattr(chat_router, "ConversationService", _FakeConversationService)
-    monkeypatch.setattr(chat_router, "generate_project_artifact", fake_generate_project_artifact)
+    monkeypatch.setattr(
+        chat_router, "generate_project_artifact_agentic", fake_generate_project_artifact
+    )
     monkeypatch.setattr(chat_router, "create_deployment_for_project", fake_create_deployment)
 
     headers = auth_tokens(client, "stream@airuntime.dev")
@@ -188,7 +190,7 @@ def test_stream_subdomain_from_prompt_sets_deploy_subdomain(client, monkeypatch,
 
     deployments: list[str | None] = []
 
-    def fake_generate_project_artifact(db, project, prompt):
+    async def fake_generate_project_artifact(db, project, prompt):
         return tmp_path / "artifact"
 
     def fake_create_deployment(db, project):
@@ -196,7 +198,9 @@ def test_stream_subdomain_from_prompt_sets_deploy_subdomain(client, monkeypatch,
         return None
 
     monkeypatch.setattr(chat_router, "ConversationService", _FakeConversationService)
-    monkeypatch.setattr(chat_router, "generate_project_artifact", fake_generate_project_artifact)
+    monkeypatch.setattr(
+        chat_router, "generate_project_artifact_agentic", fake_generate_project_artifact
+    )
     monkeypatch.setattr(chat_router, "create_deployment_for_project", fake_create_deployment)
 
     headers = auth_tokens(client, "subdomain@airuntime.dev")
