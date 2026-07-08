@@ -34,6 +34,10 @@ def _get_app_list_with_adminuser_under_auth(request, app_label=None):
         # Never break admin index rendering
         return app_list
 
+    # Remove the whole "core" section from the index (user requested to hide "Система").
+    # `AdminUser` is already moved to `auth` above.
+    app_list = [a for a in app_list if a.get("app_label") != "core"]
+
     return app_list
 
 

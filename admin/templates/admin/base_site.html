@@ -27,6 +27,13 @@
   #recent-actions * {
     display: none !important;
   }
+
+  /* Also remove any remaining recent actions wrapper (Django versions may vary) */
+  #recent-actions + *,
+  .recent-actions,
+  .module.recent-actions {
+    display: none !important;
+  }
 </style>
 {% endblock %}
 
