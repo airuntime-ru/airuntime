@@ -45,11 +45,11 @@ function writePinned(ids: string[]) {
 
 function AiTypingIndicator() {
   return (
-    <div className="flex items-center gap-3 py-1 text-sm text-[var(--ar-mist)]">
-      <span className="ai-typing" aria-hidden>
-        <span />
-        <span />
-        <span />
+    <div className="flex items-center gap-2 py-0.5 text-xs text-[var(--ar-mist)]">
+      <span className="inline-flex items-center gap-1" aria-hidden>
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--ar-black)]/45" />
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--ar-black)]/45 [animation-delay:120ms]" />
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--ar-black)]/45 [animation-delay:220ms]" />
       </span>
       <span>AIRuntime отвечает</span>
     </div>
@@ -234,16 +234,16 @@ export default function ProjectChatPage() {
   const currentTitle = filteredChats.find((chat) => chat.id === chatId)?.title ?? "Диалог проекта";
 
   return (
-    <div className="grid min-h-[calc(100dvh-16rem)] gap-4 lg:grid-cols-[18rem_1fr]">
+    <div className="grid min-h-[calc(100dvh-16rem)] gap-3 lg:grid-cols-[19rem_1fr]">
       <aside
         className={cn(
-          "flex w-full flex-col rounded-[var(--ar-radius-sm)] border border-black/10 bg-white p-3 lg:flex",
+          "flex w-full flex-col rounded-2xl border border-[#d7e3f7] bg-[linear-gradient(160deg,#ffffff_0%,#f6f9ff_100%)] p-3 shadow-[0_14px_36px_rgba(70,112,180,0.12)] lg:flex",
           mobilePanel === "chat" ? "hidden lg:flex" : "flex"
         )}
       >
         <div className="mb-3 flex items-center justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ar-stone)]">Чаты</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--ar-stone)]">Чаты</p>
             <p className="mt-1 text-sm text-[var(--ar-stone)]">{filteredChats.length} в проекте</p>
           </div>
           <Button variant="outline" size="sm" onClick={onNewChat} aria-label="Новый чат" className="h-9 w-9 p-0">
@@ -257,7 +257,7 @@ export default function ProjectChatPage() {
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Найти диалог"
-            className="w-full rounded-[var(--ar-radius-sm)] border border-black/15 bg-white py-2 pl-8 pr-3 text-sm text-[var(--ar-black)] placeholder:text-[var(--ar-stone)] focus:outline-none focus:ring-2 focus:ring-black/10"
+            className="w-full rounded-xl border border-[#d6e0f2] bg-white py-2 pl-8 pr-3 text-sm text-[var(--ar-black)] placeholder:text-[var(--ar-stone)] outline-none focus:border-[#b8cbee] focus:ring-2 focus:ring-[#d7e4ff]"
           />
         </div>
 
@@ -266,10 +266,10 @@ export default function ProjectChatPage() {
             <div
               key={chat.id}
               className={cn(
-                "flex items-center gap-1 rounded-[var(--ar-radius-sm)] border px-2 py-2",
+                "flex items-center gap-1 rounded-xl border px-2 py-1.5 transition-colors",
                 chatId === chat.id
-                  ? "border-black/15 bg-black/5"
-                  : "border-transparent hover:border-black/10 hover:bg-black/5"
+                  ? "border-[#cddcf6] bg-[#edf3ff]"
+                  : "border-transparent hover:border-[#dde7f8] hover:bg-[#f5f8ff]"
               )}
             >
               <button
@@ -306,15 +306,15 @@ export default function ProjectChatPage() {
           <p className="truncate text-sm font-semibold text-[var(--ar-black)]">{currentTitle}</p>
         </div>
 
-        <div className="relative flex min-h-[46dvh] flex-1 flex-col overflow-hidden rounded-[var(--ar-radius-sm)] border border-black/10 bg-white">
-          <div className="flex items-center justify-between gap-3 border-b border-black/10 px-4 py-3">
+        <div className="relative flex min-h-[46dvh] flex-1 flex-col overflow-hidden rounded-2xl border border-[#d7e3f7] bg-[linear-gradient(180deg,#fcfdff_0%,#f7faff_100%)] shadow-[0_16px_44px_rgba(70,112,180,0.14)]">
+          <div className="flex items-center justify-between gap-3 border-b border-[#e2ebfa] px-4 py-3">
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-[var(--ar-black)]">{currentTitle}</p>
               <p className="text-xs text-[var(--ar-stone)]">Чат проекта</p>
             </div>
           </div>
 
-          <div className="relative flex-1 space-y-4 overflow-y-auto bg-white px-3 py-4 sm:px-5">
+          <div className="relative flex-1 space-y-2.5 overflow-y-auto bg-transparent px-3 py-3 sm:px-5">
             {messages.length === 0 ? (
               <div className="mx-auto flex min-h-[34vh] max-w-2xl flex-col items-center justify-center text-center">
                 <p className="text-2xl font-semibold text-[var(--ar-black)]">Начните разговор</p>
@@ -328,13 +328,13 @@ export default function ProjectChatPage() {
               <div
                 key={`${message.role}-${index}`}
                 className={cn(
-                  "w-fit rounded-[var(--ar-radius-sm)] border p-4",
+                  "w-fit rounded-xl border px-3 py-2",
                   message.role === "user"
-                    ? "ml-auto max-w-[72%] border-black/10 bg-black/5 text-[var(--ar-black)]"
-                    : "max-w-[78%] border-transparent bg-transparent p-0 text-[var(--ar-black)]"
+                    ? "ml-auto max-w-[78%] border-[#cadaf6] bg-[linear-gradient(165deg,#edf3ff_0%,#e6eeff_100%)] text-[var(--ar-black)] shadow-[0_6px_18px_rgba(80,120,190,0.12)]"
+                    : "max-w-[82%] border-[#dde7f8] bg-white/95 text-[var(--ar-black)] shadow-[0_6px_16px_rgba(80,120,190,0.08)]"
                 )}
               >
-                <p className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--ar-stone)]">
+                <p className="mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ar-stone)]">
                   {message.role === "user" ? "Вы" : "AIRuntime"}
                 </p>
                 {message.attachments?.length ? (
@@ -355,7 +355,7 @@ export default function ProjectChatPage() {
                 {message.role === "assistant" && loading && index === messages.length - 1 && !message.content ? (
                   <AiTypingIndicator />
                 ) : (
-                  <div className="prose-chat text-sm leading-relaxed text-[var(--ar-black)]">
+                  <div className="prose-chat prose-chat-compact text-sm leading-relaxed text-[var(--ar-black)]">
                     <ReactMarkdown rehypePlugins={[rehypeHighlight]}>{message.content}</ReactMarkdown>
                   </div>
                 )}
@@ -389,7 +389,7 @@ export default function ProjectChatPage() {
 
         <form
           onSubmit={onSubmit}
-          className="relative z-10 flex items-end gap-2 rounded-[var(--ar-radius-sm)] border border-black/15 bg-white p-2 focus-within:border-black/30 focus-within:ring-2 focus-within:ring-black/10"
+          className="relative z-10 flex items-end gap-2 rounded-2xl border border-[#cfdcf4] bg-[linear-gradient(180deg,#ffffff_0%,#f8fbff_100%)] p-2 shadow-[0_12px_28px_rgba(80,120,190,0.12)] focus-within:border-[#b8cbee] focus-within:ring-2 focus-within:ring-[#d7e4ff]"
         >
           <input ref={fileInputRef} type="file" className="hidden" multiple onChange={onFilesSelected} />
           <Button
@@ -404,7 +404,7 @@ export default function ProjectChatPage() {
             <Paperclip size={18} />
           </Button>
           <AutoTextarea
-            className="min-h-[40px] flex-1 border-0 bg-transparent px-1 py-2 shadow-none focus:border-0 focus:bg-transparent focus:ring-0"
+            className="min-h-[38px] flex-1 border-0 bg-transparent px-1 py-1.5 shadow-none focus:border-0 focus:bg-transparent focus:ring-0"
             value={input}
             onChange={(event) => setInput(event.target.value)}
             placeholder={bootstrapping ? "Подготавливаем чат..." : "Опишите задачу, которую нужно воплотить..."}
@@ -420,7 +420,7 @@ export default function ProjectChatPage() {
             type="submit"
             variant="default"
             size="sm"
-            className="mb-0.5 h-9 w-9 shrink-0 rounded-full p-0"
+            className="mb-0.5 h-9 w-9 shrink-0 rounded-xl p-0"
             disabled={bootstrapping || loading || uploading || !canSend}
             aria-label="Отправить"
           >

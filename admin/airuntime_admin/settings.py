@@ -20,6 +20,9 @@ INSTALLED_APPS = [
     "whitenoise.runserver_nostatic",
     "django.contrib.staticfiles",
     "core",
+    "domain.apps.DomainConfig",
+    "chats_section.apps.ChatsSectionConfig",
+    "platform_settings.apps.PlatformSettingsConfig",
 ]
 
 MIDDLEWARE = [

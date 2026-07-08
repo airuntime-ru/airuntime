@@ -341,6 +341,11 @@ textarea {
   line-height: 1.7;
 }
 
+.prose-chat-compact p {
+  margin: 0.28rem 0;
+  line-height: 1.5;
+}
+
 .prose-chat a {
   color: var(--ar-sky);
   text-decoration: underline;
