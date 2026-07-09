@@ -1,18 +1,26 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from src.api.dependencies.auth import get_current_user
 from src.api.dto.project import ProjectCreateRequest, ProjectResponse, ProjectUpdateRequest
 from src.api.dto.project_logs import ProjectLogsResponse
+from src.api.dto.project_runtime import ProjectRuntimeLimitsResponse
 from src.db.models.chat import Chat
 from src.db.models.project import Project
 from src.db.models.user import User
 from src.db.session import get_db
 from src.services.project_intent import infer_project_type
 from src.services.project_logs import read_project_logs
+from src.services.project_runtime import (
+    RunningProjectLimitError,
+    count_running_projects,
+    start_project_runtime,
+    stop_project_runtime,
+)
 from src.services.project_subdomain import assert_subdomain_available, normalize_deploy_subdomain
+from src.core.config import settings
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -85,6 +93,58 @@ def update_project(
     db.add(project)
     db.commit()
     db.refresh(project)
+    return _to_response(project)
+
+
+@router.get("/runtime-limits", response_model=ProjectRuntimeLimitsResponse)
+def get_runtime_limits(
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> ProjectRuntimeLimitsResponse:
+    return ProjectRuntimeLimitsResponse(
+        running=count_running_projects(db, current_user.id),
+        max_running=settings.max_running_projects_per_user,
+    )
+
+
+@router.post("/{project_id}/stop", response_model=ProjectResponse)
+def stop_project(
+    project_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ProjectResponse:
+    project = (
+        db.query(Project)
+        .filter(Project.id == project_id, Project.user_id == current_user.id)
+        .first()
+    )
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    try:
+        project = stop_project_runtime(db, project)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _to_response(project)
+
+
+@router.post("/{project_id}/start", response_model=ProjectResponse)
+def start_project(
+    project_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ProjectResponse:
+    project = (
+        db.query(Project)
+        .filter(Project.id == project_id, Project.user_id == current_user.id)
+        .first()
+    )
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    try:
+        project = start_project_runtime(db, project)
+    except RunningProjectLimitError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _to_response(project)
 
 

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FolderKanban, MessageSquare, Plus, Rocket } from "lucide-react";
 
 import { CreateProjectModal } from "@/components/app/create-project-modal";
@@ -9,14 +9,27 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/loader";
+import { getProjectRuntimeLimits, type ProjectRuntimeLimitsType } from "@/lib/api";
+import { projectStatusLabel } from "@/lib/project-status";
 import { useProjects } from "@/lib/use-projects";
 
 export default function ProjectsPage() {
   const { projects, error, loading, refresh } = useProjects();
   const [createOpen, setCreateOpen] = useState(false);
+  const [limits, setLimits] = useState<ProjectRuntimeLimitsType | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        setLimits(await getProjectRuntimeLimits());
+      } catch {
+        setLimits(null);
+      }
+    })();
+  }, [projects]);
 
   const deployed = projects.filter((project) => Boolean(project.deployment_url)).length;
-  const active = projects.filter((project) => project.status === "live" || project.status === "ready").length;
+  const running = projects.filter((project) => project.status === "live" || project.status === "deploying").length;
 
   return (
     <div className="space-y-6">
@@ -51,7 +64,11 @@ export default function ProjectsPage() {
           <div className="grid grid-cols-3 gap-2 sm:gap-3 lg:grid-cols-1">
             {[
               { label: "Проектов", value: projects.length, icon: FolderKanban },
-              { label: "Готовы к запуску", value: active, icon: Rocket },
+              {
+                label: "Запущено",
+                value: limits ? `${limits.running}/${limits.max_running}` : running,
+                icon: Rocket,
+              },
               { label: "Опубликовано", value: deployed, icon: Rocket },
             ].map((item) => (
               <div
@@ -93,7 +110,7 @@ export default function ProjectsPage() {
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <p className="truncate text-lg font-semibold text-[var(--ar-black)]">{project.name}</p>
-                <Badge>{project.status}</Badge>
+                <Badge>{projectStatusLabel(project.status)}</Badge>
               </div>
               <p className="mt-2 text-sm font-medium text-[var(--ar-mist)]">
                 {project.deployment_url ?? (project.description || "Откройте чат и опишите задачу")}

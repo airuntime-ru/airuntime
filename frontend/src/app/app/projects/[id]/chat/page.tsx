@@ -76,13 +76,16 @@ function AiTypingIndicator() {
 function AgentStatusPanel({ status }: { status: AgentStatus }) {
   const done = status.state === "done";
   const error = status.state === "error";
-  const steps = ["thinking", "artifact", "version", "deploy", "done"];
+  const steps = ["thinking", "context", "plan", "artifact", "module", "version", "deploy", "done"];
   const currentIndex = Math.max(0, steps.indexOf(status.phase));
+  const helpHref =
+    error && status.label.includes("TELEGRAM_BOT_TOKEN") ? "/help/telegram-token" : null;
 
-  return (
+  const panel = (
     <div
       className={cn(
-        "mb-5 overflow-hidden rounded-2xl border px-4 py-3 shadow-[0_14px_36px_rgba(70,130,180,0.10)]",
+        "sticky bottom-3 z-10 mb-5 overflow-hidden rounded-2xl border px-4 py-3 shadow-[0_14px_36px_rgba(70,130,180,0.10)] transition backdrop-blur-xl",
+        helpHref && "cursor-pointer hover:-translate-y-0.5 hover:shadow-[0_18px_42px_rgba(244,63,94,0.16)]",
         error
           ? "border-rose-200 bg-rose-50"
           : "border-sky-100 bg-[linear-gradient(135deg,rgba(255,255,255,0.94),rgba(235,249,255,0.86))]"
@@ -109,7 +112,7 @@ function AgentStatusPanel({ status }: { status: AgentStatus }) {
       </div>
 
       {!error ? (
-        <div className="mt-3 grid grid-cols-5 gap-1.5">
+        <div className="mt-3 grid gap-1.5" style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }}>
           {steps.map((step, index) => (
             <span
               key={step}
@@ -124,6 +127,16 @@ function AgentStatusPanel({ status }: { status: AgentStatus }) {
       ) : null}
     </div>
   );
+
+  if (helpHref) {
+    return (
+      <a href={helpHref} className="block no-underline" aria-label="Открыть инструкцию по получению Telegram token">
+        {panel}
+      </a>
+    );
+  }
+
+  return panel;
 }
 
 function MessageBody({
@@ -171,6 +184,7 @@ export default function ProjectChatPage() {
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
   const [bootstrapping, setBootstrapping] = useState(true);
   const [bootstrapError, setBootstrapError] = useState("");
+  const [chatError, setChatError] = useState("");
   const [mobilePanel, setMobilePanel] = useState<"list" | "chat">("list");
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -216,8 +230,8 @@ export default function ProjectChatPage() {
   }, [projectId, chatId]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "auto" });
-  }, [agentStatus?.label, messages.length]);
+    bottomRef.current?.scrollIntoView({ behavior: loading ? "smooth" : "auto" });
+  }, [agentStatus?.label, loading, messages]);
 
   const filteredChats = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -258,12 +272,15 @@ export default function ProjectChatPage() {
     const files = event.target.files;
     if (!files?.length || !projectId || !chatId) return;
     setUploading(true);
+    setChatError("");
     try {
       const uploaded: ChatFileType[] = [];
       for (const file of Array.from(files)) {
         uploaded.push(await uploadChatFile(projectId, chatId, file));
       }
       setPendingFiles((prev) => [...prev, ...uploaded]);
+    } catch (err) {
+      setChatError(err instanceof Error ? err.message : "Не удалось загрузить файл");
     } finally {
       setUploading(false);
       event.target.value = "";
@@ -284,6 +301,7 @@ export default function ProjectChatPage() {
     setInput("");
     setPendingFiles([]);
     setLoading(true);
+    setChatError("");
     setAgentStatus({ phase: "thinking", label: "AIRuntime осмысляет задачу", state: "running" });
     setMessages((prev) => [
       ...prev,
@@ -294,7 +312,13 @@ export default function ProjectChatPage() {
     try {
       await createMessage(projectId, chatId, userMessage, attachmentIds);
       const response = await streamChat(projectId, chatId, userMessage, attachmentIds);
-      if (!response.body) return;
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(detail || `Stream failed: ${response.status}`);
+      }
+      if (!response.body) {
+        throw new Error("Stream response is empty");
+      }
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let partial = "";
@@ -310,7 +334,7 @@ export default function ProjectChatPage() {
           const payload = line.replace("data: ", "");
           if (payload === "[DONE]") {
             setAgentStatus((prev) =>
-              prev?.state === "error"
+              prev?.state === "error" || prev?.phase === "questions"
                 ? prev
                 : { phase: "done", label: "Готово: проект передан на запуск", state: "done" }
             );
@@ -332,7 +356,8 @@ export default function ProjectChatPage() {
           }
         }
       }
-    } catch {
+    } catch (err) {
+      setChatError(err instanceof Error ? err.message : "Не удалось получить ответ агента");
       setAgentStatus({ phase: "error", label: "Не удалось получить ответ агента", state: "error" });
       setMessages((prev) => {
         const copy = [...prev];
@@ -500,6 +525,11 @@ export default function ProjectChatPage() {
             {bootstrapError ? (
               <p className="mb-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
                 {bootstrapError}
+              </p>
+            ) : null}
+            {chatError ? (
+              <p className="mb-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                {chatError}
               </p>
             ) : null}
 

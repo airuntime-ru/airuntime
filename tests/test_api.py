@@ -296,6 +296,178 @@ def test_telegram_start_refreshes_public_bot_url_from_token(client, monkeypatch)
     assert refreshed.json()["deployment_url"] == "https://t.me/start_url_bot"
 
 
+def test_telegram_profile_settings_are_applied(client, monkeypatch):
+    from src.api.routers import telegram as telegram_router
+
+    headers = auth_tokens(client, "telegram-profile@airuntime.dev")
+    project = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={"type": "telegram_bot", "name": "Profile Bot", "description": ""},
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/secrets",
+        headers=headers,
+        json={"key": "telegram bot token", "value": "12345678901234567890:abc"},
+    )
+
+    captured = {}
+
+    def fake_update(token, *, name=None, description=None, short_description=None):
+        captured.update(
+            {
+                "token": token,
+                "name": name,
+                "description": description,
+                "short_description": short_description,
+            }
+        )
+        return SimpleNamespace(
+            username="profile_bot",
+            public_url="https://t.me/profile_bot",
+            name=name,
+            description=description,
+            short_description=short_description,
+        )
+
+    monkeypatch.setattr(telegram_router, "update_bot_settings", fake_update)
+
+    saved = client.post(
+        f"/api/v1/projects/{project['id']}/telegram/profile",
+        headers=headers,
+        json={
+            "name": "Support Angel",
+            "description": "Answers support questions",
+            "short_description": "Support in Telegram",
+        },
+    )
+
+    assert saved.status_code == 200
+    assert saved.json()["url"] == "https://t.me/profile_bot"
+    assert saved.json()["name"] == "Support Angel"
+    assert captured["token"] == "12345678901234567890:abc"
+    assert captured["description"] == "Answers support questions"
+
+
+def test_telegram_profile_photo_is_applied(client, monkeypatch):
+    from src.api.routers import telegram as telegram_router
+
+    headers = auth_tokens(client, "telegram-photo@airuntime.dev")
+    project = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={"type": "telegram_bot", "name": "Photo Bot", "description": ""},
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/secrets",
+        headers=headers,
+        json={"key": "telegram bot token", "value": "12345678901234567890:abc"},
+    )
+
+    captured = {}
+
+    def fake_photo(token, *, filename, content, content_type):
+        captured.update(
+            {
+                "token": token,
+                "filename": filename,
+                "content": content,
+                "content_type": content_type,
+            }
+        )
+        return SimpleNamespace(
+            username="photo_bot",
+            public_url="https://t.me/photo_bot",
+            name="Photo Bot",
+            description="",
+            short_description="",
+        )
+
+    monkeypatch.setattr(telegram_router, "update_bot_profile_photo", fake_photo)
+
+    saved = client.post(
+        f"/api/v1/projects/{project['id']}/telegram/profile/photo",
+        headers=headers,
+        files={"photo": ("avatar.png", b"fake-image", "image/png")},
+    )
+
+    assert saved.status_code == 200
+    assert saved.json()["url"] == "https://t.me/photo_bot"
+    assert captured["filename"] == "avatar.png"
+    assert captured["content"] == b"fake-image"
+    assert captured["content_type"] == "image/png"
+
+
+def test_project_start_is_limited_to_three_running_projects(client, db):
+    from src.db.models.project import Project
+
+    headers = auth_tokens(client, "runtime-limit@airuntime.dev")
+    projects = []
+    for index in range(4):
+        project = client.post(
+            "/api/v1/projects",
+            headers=headers,
+            json={"type": "website", "name": f"Runtime {index}", "description": ""},
+        ).json()
+        projects.append(project)
+
+    for project in projects[:3]:
+        row = db.get(Project, project["id"])
+        row.status = "live"
+        db.add(row)
+    fourth = db.get(Project, projects[3]["id"])
+    fourth.status = "ready"
+    db.add(fourth)
+    db.commit()
+
+    limits = client.get("/api/v1/projects/runtime-limits", headers=headers)
+    assert limits.status_code == 200
+    assert limits.json() == {"running": 3, "max_running": 3}
+
+    started = client.post(f"/api/v1/projects/{projects[3]['id']}/start", headers=headers)
+    assert started.status_code == 409
+    assert "3" in started.text
+
+
+def test_project_stop_cancels_active_deployments(client, db, monkeypatch):
+    from src.db.models.deployment import Deployment
+    from src.db.models.project import Project
+    from src.services import project_runtime
+
+    headers = auth_tokens(client, "runtime-stop@airuntime.dev")
+    project = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={"type": "website", "name": "Stop Me", "description": ""},
+    ).json()
+    row = db.get(Project, project["id"])
+    row.status = "live"
+    deployment = Deployment(project_id=row.id, status="running")
+    db.add(row)
+    db.add(deployment)
+    db.commit()
+
+    stopped_ids = []
+
+    class FakeDockerDeploymentAdapter:
+        def stop_project(self, project_id: str) -> None:
+            stopped_ids.append(project_id)
+
+    monkeypatch.setattr(
+        project_runtime,
+        "DockerDeploymentAdapter",
+        lambda: FakeDockerDeploymentAdapter(),
+    )
+
+    stopped = client.post(f"/api/v1/projects/{project['id']}/stop", headers=headers)
+
+    assert stopped.status_code == 200
+    assert stopped.json()["status"] == "stopped"
+    assert stopped_ids == [project["id"]]
+    db.refresh(deployment)
+    assert deployment.status == "cancelled"
+
+
 def test_stream_prompt_generates_artifact_and_queues_deployment(
     client, monkeypatch, tmp_path
 ):
@@ -358,6 +530,65 @@ def test_stream_prompt_generates_artifact_and_queues_deployment(
 
     updated = client.get(f"/api/v1/projects/{project['id']}", headers=headers).json()
     assert updated["status"] == "ready"
+
+
+def test_stream_accepts_files_already_linked_to_user_message(client, monkeypatch, tmp_path):
+    from src.api.routers import chat as chat_router
+
+    captured_prompts = []
+
+    class FakeConversationService:
+        async def stream_reply(self, *, chat_id: str, user_message: str):
+            captured_prompts.append(user_message)
+            yield "Принял файл"
+
+    async def fake_generate_project_artifact(db, project, prompt):
+        return tmp_path
+
+    def fake_create_deployment(db, project):
+        return None
+
+    monkeypatch.setattr(chat_router, "ConversationService", FakeConversationService)
+    monkeypatch.setattr(
+        chat_router, "generate_project_artifact_agentic", fake_generate_project_artifact
+    )
+    monkeypatch.setattr(chat_router, "create_deployment_for_project", fake_create_deployment)
+
+    headers = auth_tokens(client, "stream-file@airuntime.dev")
+    project = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={"type": "website", "name": "File Site", "description": ""},
+    ).json()
+    chat = client.post(f"/api/v1/projects/{project['id']}/chats", headers=headers).json()
+
+    upload = client.post(
+        f"/api/v1/projects/{project['id']}/chats/{chat['id']}/files",
+        headers=headers,
+        files={"file": ("brief.txt", b"hero must say hello from attachment", "text/plain")},
+    )
+    assert upload.status_code == 201
+    file_id = upload.json()["id"]
+
+    created = client.post(
+        f"/api/v1/projects/{project['id']}/chats/{chat['id']}/messages",
+        headers=headers,
+        json={"content": "Use attached brief", "attachment_ids": [file_id]},
+    )
+    assert created.status_code == 200
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/chats/{chat['id']}/stream",
+        headers=headers,
+        json={"content": "Use attached brief", "attachment_ids": [file_id]},
+    )
+
+    assert response.status_code == 200
+    assert "data: [DONE]" in response.text
+    assert "context" in response.text
+    assert captured_prompts
+    assert "Attachment: brief.txt" in captured_prompts[0]
+    assert "hero must say hello from attachment" in captured_prompts[0]
 
 
 def test_stream_subdomain_from_prompt_sets_deploy_subdomain(client, monkeypatch, tmp_path):

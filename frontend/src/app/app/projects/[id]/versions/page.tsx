@@ -180,14 +180,14 @@ export default function ProjectVersionsPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-sm leading-7 text-[var(--ar-mist)]">История версий (git) и снапшоты артефактов.</p>
+        <p className="text-sm leading-7 text-[var(--ar-mist)]">Файлы проекта и сохраненные снимки результата.</p>
         {error ? <Badge className="bg-rose-50 text-rose-700 border-rose-200">{error}</Badge> : null}
       </div>
 
       {!hasVersions ? (
         <EmptyState
-          title="Версий пока нет"
-          description="После первой генерации проекта появятся git-снапшоты. Сгенерируйте проект в чате."
+          title="Файлов пока нет"
+          description="После первой генерации здесь появятся файлы проекта. Сгенерируйте проект в чате."
           action={
             <Button variant="accent" onClick={() => router.push(`/app/projects/${projectId}/chat`)}>
               Перейти в чат

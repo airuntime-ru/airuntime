@@ -83,6 +83,19 @@ export type ProvidersType = {
   configured: Record<string, boolean>;
 };
 
+export type ProjectRuntimeLimitsType = {
+  running: number;
+  max_running: number;
+};
+
+export type TelegramBotProfileType = {
+  username: string;
+  url: string;
+  name: string;
+  description: string;
+  short_description: string;
+};
+
 async function rawRequest(path: string, init: RequestInit = {}, retry = true): Promise<Response> {
   const token = getAccessToken();
   const response = await fetch(`${apiBase}${path}`, {
@@ -100,11 +113,21 @@ async function rawRequest(path: string, init: RequestInit = {}, retry = true): P
   return rawRequest(path, init, false);
 }
 
+async function parseErrorMessage(response: Response): Promise<string> {
+  const text = await response.text();
+  try {
+    const payload = JSON.parse(text) as { detail?: unknown };
+    if (typeof payload.detail === "string") return payload.detail;
+  } catch {
+    // Response body is not JSON.
+  }
+  return text || `Request failed: ${response.status}`;
+}
+
 async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await rawRequest(path, init);
   if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(detail || `Request failed: ${response.status}`);
+    throw new Error(await parseErrorMessage(response));
   }
   return (await response.json()) as T;
 }
@@ -170,6 +193,18 @@ export async function logout(): Promise<void> {
 
 export async function listProjects(): Promise<ProjectType[]> {
   return requestJson<ProjectType[]>("/projects");
+}
+
+export async function getProjectRuntimeLimits(): Promise<ProjectRuntimeLimitsType> {
+  return requestJson<ProjectRuntimeLimitsType>("/projects/runtime-limits");
+}
+
+export async function stopProject(projectId: string): Promise<ProjectType> {
+  return requestJson<ProjectType>(`/projects/${projectId}/stop`, { method: "POST" });
+}
+
+export async function startProject(projectId: string): Promise<ProjectType> {
+  return requestJson<ProjectType>(`/projects/${projectId}/start`, { method: "POST" });
 }
 
 export async function getProject(projectId: string): Promise<ProjectType> {
@@ -276,6 +311,43 @@ export async function createSecret(projectId: string, key: string, value: string
 
 export async function deleteSecret(projectId: string, secretId: string): Promise<void> {
   await requestJson(`/projects/${projectId}/secrets/${secretId}`, { method: "DELETE" });
+}
+
+export async function getTelegramBotProfile(projectId: string): Promise<TelegramBotProfileType> {
+  return requestJson<TelegramBotProfileType>(`/projects/${projectId}/telegram/profile`);
+}
+
+export async function updateTelegramBotProfile(
+  projectId: string,
+  payload: {
+    name?: string;
+    description?: string;
+    short_description?: string;
+  },
+): Promise<TelegramBotProfileType> {
+  return requestJson<TelegramBotProfileType>(`/projects/${projectId}/telegram/profile`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateTelegramBotAvatar(
+  projectId: string,
+  file: File,
+): Promise<TelegramBotProfileType> {
+  const token = getAccessToken();
+  const form = new FormData();
+  form.append("photo", file);
+  const response = await fetch(`${apiBase}/projects/${projectId}/telegram/profile/photo`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(detail || `Avatar upload failed: ${response.status}`);
+  }
+  return (await response.json()) as TelegramBotProfileType;
 }
 
 export async function listDeployments(projectId: string): Promise<DeploymentType[]> {

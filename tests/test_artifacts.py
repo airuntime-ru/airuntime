@@ -6,7 +6,13 @@ from src.core.config import settings
 from src.db.models.project import Project
 from src.db.models.secret import Secret
 from src.db.models.user import User
-from src.services.artifacts import ArtifactError, _telegram_token, generate_project_artifact
+from src.services.artifacts import (
+    ArtifactError,
+    _telegram_token,
+    generate_project_artifact,
+    generate_telegram_bot_artifact,
+    generate_website_artifact,
+)
 from src.services.secrets import encrypt_secret
 
 
@@ -71,3 +77,24 @@ def test_telegram_token_secret_lookup_accepts_human_key_names(db):
     db.flush()
 
     assert _telegram_token(db, project) == "123:abc"
+
+
+def test_artifact_generation_cleans_files_from_previous_project_type(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "generated_projects_dir", str(tmp_path))
+    project = Project(
+        id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        type="website",
+        name="Mixed Project",
+        description="Landing",
+    )
+
+    path = generate_website_artifact(project, "Build website")
+    assert (path / "public" / "index.html").exists()
+
+    project.type = "telegram_bot"
+    path = generate_telegram_bot_artifact(project, "Build bot")
+
+    assert (path / "app.py").exists()
+    assert (path / "requirements.txt").exists()
+    assert not (path / "public").exists()

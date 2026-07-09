@@ -19,9 +19,21 @@ def process_job(job: dict) -> None:
         deployment = db.get(Deployment, job["deployment_id"])
         if not deployment:
             return
+        if deployment.status in {"cancelled", "stopped"}:
+            return
         project = db.get(Project, job["project_id"])
         if not project:
             deployment.status = "failed"
+            deployment.finished_at = datetime.now(UTC)
+            db.commit()
+            return
+        if project.status == "stopped":
+            deployment.status = "cancelled"
+            deployment.finished_at = datetime.now(UTC)
+            db.commit()
+            return
+        if project.status == "stopped":
+            deployment.status = "cancelled"
             deployment.finished_at = datetime.now(UTC)
             db.commit()
             return
@@ -58,6 +70,14 @@ def process_job(job: dict) -> None:
         deployment.logs_ref = result["logs_ref"]
         deployment.image_ref = result["image_ref"]
         deployment.finished_at = datetime.now(UTC)
+        db.refresh(project)
+        if project.status == "stopped":
+            DockerDeploymentAdapter().stop_project(str(project.id))
+            deployment.status = "cancelled"
+            deployment.finished_at = datetime.now(UTC)
+            db.add(deployment)
+            db.commit()
+            return
         project.deployment_url = result["url"] if expose_http else telegram_url
         project.status = "live"
         if expose_http:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import json
 import re
+import shutil
 import textwrap
 from pathlib import Path
 from uuid import UUID
@@ -50,6 +51,17 @@ def _project_dir(project_id: UUID | str) -> Path:
     return path
 
 
+def _clean_project_dir(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    for child in path.iterdir():
+        if child.name == ".git":
+            continue
+        if child.is_dir():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+
+
 def _image_tag(project: Project) -> str:
     prefix = "site" if project.type == "website" else "bot"
     return f"airuntime-generated-{prefix}-{str(project.id)[:12]}:latest"
@@ -68,6 +80,7 @@ def _safe_title(project: Project) -> str:
 
 def generate_website_artifact(project: Project, prompt: str = "") -> Path:
     path = _project_dir(project.id)
+    _clean_project_dir(path)
     public_dir = path / "public"
     public_dir.mkdir(parents=True, exist_ok=True)
 
@@ -385,6 +398,7 @@ def _telegram_token(db: Session, project: Project) -> str | None:
 
 def generate_telegram_bot_artifact(project: Project, prompt: str = "") -> Path:
     path = _project_dir(project.id)
+    _clean_project_dir(path)
     safe_name = json.dumps(project.name, ensure_ascii=False)
     safe_description = json.dumps(
         (prompt or project.description or "AIRuntime bot").strip(), ensure_ascii=False

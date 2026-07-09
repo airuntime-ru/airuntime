@@ -1,6 +1,8 @@
 from django.contrib import admin
 from django.urls import path
 
+from airuntime_admin import docker_views
+
 _orig_get_app_list = admin.site.get_app_list
 
 
@@ -44,6 +46,21 @@ def _get_app_list_with_adminuser_under_auth(request, app_label=None):
 admin.site.get_app_list = _get_app_list_with_adminuser_under_auth
 
 urlpatterns = [
+    path(
+        "docker/containers/",
+        admin.site.admin_view(docker_views.docker_containers),
+        name="admin_docker_containers",
+    ),
+    path(
+        "docker/images/",
+        admin.site.admin_view(docker_views.docker_images),
+        name="admin_docker_images",
+    ),
+    path(
+        "docker/resources/",
+        admin.site.admin_view(docker_views.docker_resources),
+        name="admin_docker_resources",
+    ),
     path("", admin.site.urls),
 ]
 

@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from src.api.dependencies.auth import get_current_user
@@ -10,6 +10,7 @@ from src.db.models.project import Project
 from src.db.models.user import User
 from src.db.session import get_db
 from src.services.deployments import create_deployment_for_project
+from src.services.project_runtime import RunningProjectLimitError
 
 router = APIRouter(prefix="/projects/{project_id}/deployments", tags=["deployments"])
 
@@ -48,4 +49,7 @@ def create_deployment(
     )
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    return create_deployment_for_project(db, project)
+    try:
+        return create_deployment_for_project(db, project)
+    except RunningProjectLimitError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc

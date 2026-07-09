@@ -2,17 +2,33 @@
 
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { Rocket } from "lucide-react";
+import { Pause, Play, Rocket } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState, PageLoader } from "@/components/ui/loader";
-import { createDeployment, listDeployments, type DeploymentType } from "@/lib/api";
+import {
+  createDeployment,
+  getProject,
+  getProjectRuntimeLimits,
+  listDeployments,
+  startProject,
+  stopProject,
+  type DeploymentType,
+  type ProjectRuntimeLimitsType,
+  type ProjectType,
+} from "@/lib/api";
+import {
+  canStartProject,
+  canStopProject,
+  isProjectRunning,
+  projectStatusLabel,
+} from "@/lib/project-status";
 
 function statusTone(status: string) {
   if (status === "completed") return "text-emerald-700";
-  if (status === "failed") return "text-rose-700";
+  if (status === "failed" || status === "cancelled") return "text-rose-700";
   if (status === "running") return "text-[var(--ar-sky)]";
   return "text-[var(--ar-stone)]";
 }
@@ -20,6 +36,7 @@ function statusTone(status: string) {
 function statusLabel(status: string) {
   if (status === "completed") return "Готово";
   if (status === "failed") return "Ошибка";
+  if (status === "cancelled") return "Отменён";
   if (status === "running") return "Запускается";
   if (status === "queued") return "В очереди";
   return status;
@@ -41,15 +58,25 @@ function formatDateTime(value: string | null) {
 export default function ProjectDeploymentsPage() {
   const params = useParams<{ id: string }>();
   const projectId = params.id;
+  const [project, setProject] = useState<ProjectType | null>(null);
+  const [limits, setLimits] = useState<ProjectRuntimeLimitsType | null>(null);
   const [deployments, setDeployments] = useState<DeploymentType[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(false);
 
-  const loadDeployments = useCallback(async (options?: { silent?: boolean }) => {
+  const loadPage = useCallback(async (options?: { silent?: boolean }) => {
     if (!projectId) return;
     if (!options?.silent) setLoading(true);
     try {
-      setDeployments(await listDeployments(projectId));
+      const [projectRow, deploymentRows, runtimeLimits] = await Promise.all([
+        getProject(projectId),
+        listDeployments(projectId),
+        getProjectRuntimeLimits(),
+      ]);
+      setProject(projectRow);
+      setDeployments(deploymentRows);
+      setLimits(runtimeLimits);
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось загрузить деплои");
@@ -60,43 +87,111 @@ export default function ProjectDeploymentsPage() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      void loadDeployments();
+      void loadPage();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [loadDeployments]);
+  }, [loadPage]);
 
   const hasActiveDeployments = deployments.some(
-    (item) => item.status === "running" || item.status === "queued"
+    (item) => item.status === "running" || item.status === "queued",
   );
 
   useEffect(() => {
     if (!hasActiveDeployments) return;
     const timer = window.setInterval(() => {
-      void loadDeployments({ silent: true });
+      void loadPage({ silent: true });
     }, 5000);
     return () => window.clearInterval(timer);
-  }, [hasActiveDeployments, loadDeployments]);
+  }, [hasActiveDeployments, loadPage]);
 
   const onDeploy = async () => {
     if (!projectId) return;
+    setActionLoading(true);
+    setError("");
     try {
       await createDeployment(projectId);
-      await loadDeployments();
+      await loadPage({ silent: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось поставить деплой в очередь");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const onStop = async () => {
+    if (!projectId) return;
+    setActionLoading(true);
+    setError("");
+    try {
+      setProject(await stopProject(projectId));
+      setLimits(await getProjectRuntimeLimits());
+      await loadPage({ silent: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось остановить проект");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const onStart = async () => {
+    if (!projectId) return;
+    setActionLoading(true);
+    setError("");
+    try {
+      setProject(await startProject(projectId));
+      setLimits(await getProjectRuntimeLimits());
+      await loadPage({ silent: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось запустить проект");
+    } finally {
+      setActionLoading(false);
     }
   };
 
   if (loading) return <PageLoader />;
 
+  const atLimit = limits ? limits.running >= limits.max_running : false;
+  const startDisabled = actionLoading || !project || (atLimit && !isProjectRunning(project.status));
+
   return (
     <div className="space-y-4">
+      {limits ? (
+        <Card hover={false} className="border-[var(--ar-sky)]/20 bg-[var(--ar-sky)]/5">
+          <p className="text-sm text-[var(--ar-mist)]">
+            Запущено проектов:{" "}
+            <span className="font-semibold text-[var(--ar-black)]">
+              {limits.running} / {limits.max_running}
+            </span>
+            {project ? (
+              <>
+                {" "}
+                · текущий статус: <Badge>{projectStatusLabel(project.status)}</Badge>
+              </>
+            ) : null}
+          </p>
+        </Card>
+      ) : null}
+
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm leading-7 text-[var(--ar-mist)]">История запусков и состояние runtime-контейнеров.</p>
-        <Button variant="accent" size="sm" className="w-full sm:w-auto" onClick={onDeploy}>
-          <Rocket size={15} />
-          Запустить
-        </Button>
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+          {project && canStopProject(project.status) ? (
+            <Button variant="outline" size="sm" className="w-full sm:w-auto" disabled={actionLoading} onClick={onStop}>
+              <Pause size={15} />
+              Остановить
+            </Button>
+          ) : null}
+          {project && canStartProject(project.status) ? (
+            <Button variant="outline" size="sm" className="w-full sm:w-auto" disabled={startDisabled} onClick={onStart}>
+              <Play size={15} />
+              Запустить
+            </Button>
+          ) : null}
+          <Button variant="accent" size="sm" className="w-full sm:w-auto" disabled={actionLoading || startDisabled} onClick={onDeploy}>
+            <Rocket size={15} />
+            Пересобрать и запустить
+          </Button>
+        </div>
       </div>
       {error ? <p className="text-sm text-rose-600">{error}</p> : null}
       {deployments.map((item) => (
@@ -115,7 +210,7 @@ export default function ProjectDeploymentsPage() {
                   ? "w-full bg-emerald-400"
                   : item.status === "running"
                     ? "w-2/3 bg-[var(--ar-sky)]"
-                    : item.status === "failed"
+                    : item.status === "failed" || item.status === "cancelled"
                       ? "w-full bg-rose-400"
                       : "w-1/3 bg-[var(--ar-stone)]"
               }`}
@@ -133,7 +228,7 @@ export default function ProjectDeploymentsPage() {
           title="Деплоев пока нет"
           description="Запустите первую сборку, чтобы получить рабочий runtime."
           action={
-            <Button variant="accent" onClick={onDeploy}>
+            <Button variant="accent" disabled={startDisabled} onClick={onDeploy}>
               <Rocket size={16} />
               Запустить сейчас
             </Button>

@@ -33,6 +33,7 @@ from src.services.file_context import (
 )
 from src.services.project_git import ProjectGitError, commit_snapshot
 from src.services.project_intent import update_project_type_from_prompt
+from src.services.project_runtime import RunningProjectLimitError
 from src.services.project_subdomain import (
     assert_subdomain_available,
     normalize_deploy_subdomain,
@@ -70,6 +71,7 @@ def _validate_attachments(
     chat_id: UUID,
     user_id: UUID,
     attachment_ids: list[UUID],
+    allow_linked: bool = False,
 ) -> None:
     if not attachment_ids:
         return
@@ -85,7 +87,7 @@ def _validate_attachments(
     )
     if len(rows) != len(attachment_ids):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid attachments")
-    if any(row.message_id is not None for row in rows):
+    if not allow_linked and any(row.message_id is not None for row in rows):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Attachment already linked"
         )
@@ -204,6 +206,22 @@ def _extract_deploy_subdomain(text: str) -> str | None:
         if match:
             return match.group(1)
     return None
+
+
+def _queue_deployment_or_notify_limit(db: Session, project: Project) -> str | None:
+    try:
+        create_deployment_for_project(db, project)
+        return None
+    except RunningProjectLimitError as exc:
+        project.status = "ready"
+        note = (
+            f"{exc}\n"
+            "Файлы проекта сохранены. Остановите один из запущенных проектов "
+            "и запустите этот вручную на странице «Деплои»."
+        )
+        project.logs = f"{project.logs}\n{note}".strip() if project.logs else note
+        db.add(project)
+        return str(exc)
 
 
 def _message_response(db: Session, message: Message) -> MessageResponse:
@@ -373,7 +391,7 @@ async def _stream_events(
 
         if _needs_clarification(project, content, attachment_ids):
             questions = _clarifying_questions(project, content)
-            yield _sse_status("questions", "Уточняю требования перед разработкой", "done")
+            yield _sse_status("questions", "Жду ответы на уточняющие вопросы", "done")
             yield append_visible(questions)
             assistant_message = Message(
                 chat_id=chat_id, role="assistant", content_markdown=assistant_full
@@ -387,6 +405,11 @@ async def _stream_events(
             return
 
         yield _sse_status("thinking", "AIRuntime осмысляет задачу")
+        if attachment_ids:
+            yield _sse_status(
+                "context",
+                f"Читаю вложения и готовлю контекст: {len(attachment_ids)} файл(ов)",
+            )
         async for chunk in conversation.stream_reply(
             chat_id=str(chat_id), user_message=safe_message
         ):
@@ -420,8 +443,11 @@ async def _stream_events(
             if project.type == "website" and settings.auto_deploy_websites:
                 yield _sse_status("deploy", "Ставлю сайт в очередь запуска")
                 planned_url = planned_public_url(project)
-                create_deployment_for_project(db, project)
-                if planned_url:
+                limit_message = _queue_deployment_or_notify_limit(db, project)
+                if limit_message:
+                    yield _sse_status("limit", limit_message, "error")
+                    yield append_visible(f"\n\n{limit_message}")
+                elif planned_url:
                     yield append_visible(
                         f"\n\nСайт собран и поставлен в очередь на запуск. URL: {planned_url}"
                     )
@@ -445,11 +471,21 @@ async def _stream_events(
                     yield append_visible(f"\n\n{token_note}")
                     raise _StopDeployment
                 yield _sse_status("deploy", "Ставлю бота в очередь запуска")
-                create_deployment_for_project(db, project)
-                yield append_visible("\n\nБот собран и поставлен в очередь на запуск.")
+                limit_message = _queue_deployment_or_notify_limit(db, project)
+                if limit_message:
+                    yield _sse_status("limit", limit_message, "error")
+                    yield append_visible(f"\n\n{limit_message}")
+                else:
+                    yield append_visible("\n\nБот собран и поставлен в очередь на запуск.")
             yield _sse_status("done", "Готово: проект передан на запуск", "done")
         except _StopDeployment:
             pass
+        except RunningProjectLimitError as exc:
+            project.status = "ready"
+            project.logs = f"{project.logs}\n{exc}".strip() if project.logs else str(exc)
+            db.add(project)
+            yield _sse_status("limit", "Достигнут лимит запущенных проектов", "error")
+            yield append_visible(f"\n\n{exc}")
         except ArtifactError as exc:
             project.status = "needs_configuration"
             project.logs = str(exc)
@@ -485,6 +521,7 @@ async def stream_reply_post(
         chat_id=chat_id,
         user_id=current_user.id,
         attachment_ids=payload.attachment_ids,
+        allow_linked=True,
     )
     return await _stream_events(
         db=db,

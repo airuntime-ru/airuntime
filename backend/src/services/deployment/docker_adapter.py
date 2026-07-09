@@ -22,6 +22,19 @@ class DockerDeploymentAdapter:
     def __init__(self) -> None:
         self._client = docker.from_env()
 
+    def stop_project(self, project_id: str) -> None:
+        container_name = f"airuntime-{project_id[:8]}"
+        for existing in self._client.containers.list(all=True, filters={"name": container_name}):
+            try:
+                if existing.status == "running":
+                    existing.stop(timeout=10)
+            except DockerException:
+                pass
+            try:
+                existing.remove(force=True)
+            except DockerException:
+                pass
+
     def deploy(self, request: DeployRequest) -> dict:
         container_name = f"airuntime-{request.project_id[:8]}"
         host_port = self._allocate_port(request.project_id)
