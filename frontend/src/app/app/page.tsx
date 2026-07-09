@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { Bot, ExternalLink, FolderKanban, MessageSquare, Plus, Rocket } from "lucide-react";
+import { FolderKanban, MessageSquare, Plus, Rocket } from "lucide-react";
 
 import { CreateProjectModal } from "@/components/app/create-project-modal";
 import { Badge } from "@/components/ui/badge";
@@ -10,12 +10,6 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/loader";
 import { useProjects } from "@/lib/use-projects";
-
-function typeLabel(type: string) {
-  if (type === "telegram_bot") return "Telegram-бот";
-  if (type === "website") return "Сайт";
-  return type;
-}
 
 export default function ProjectsPage() {
   const { projects, error, loading, refresh } = useProjects();
@@ -80,7 +74,7 @@ export default function ProjectsPage() {
       {!loading && projects.length === 0 ? (
         <EmptyState
           title="Здесь пока тихо"
-          description="Создайте первый проект: после этого сразу откроется чат, где можно описать сайт или Telegram-бота."
+          description="Создайте первый проект: после этого сразу откроется чат, где можно описать, что нужно собрать и запустить."
           action={
             <Button variant="accent" onClick={() => setCreateOpen(true)}>
               <Plus size={16} />
@@ -101,9 +95,8 @@ export default function ProjectsPage() {
                 <p className="truncate text-lg font-semibold text-[var(--ar-black)]">{project.name}</p>
                 <Badge>{project.status}</Badge>
               </div>
-              <p className="mt-2 flex items-center gap-1.5 text-sm font-medium text-[var(--ar-mist)]">
-                {project.type === "telegram_bot" ? <Bot size={14} /> : <ExternalLink size={14} />}
-                {typeLabel(project.type)}
+              <p className="mt-2 text-sm font-medium text-[var(--ar-mist)]">
+                {project.deployment_url ?? (project.description || "Откройте чат и опишите задачу")}
               </p>
             </div>
             <div className="flex flex-col gap-2 sm:w-44">

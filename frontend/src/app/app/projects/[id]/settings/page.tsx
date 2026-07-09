@@ -124,21 +124,7 @@ export default function ProjectSettingsPage() {
             </div>
           </div>
         </Card>
-      ) : (
-        <Card hover={false}>
-          <div className="flex items-start gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-[var(--ar-radius-sm)] bg-white/80 text-emerald-600 shadow-sm shadow-sky-950/5">
-              <Globe2 size={18} />
-            </span>
-            <div>
-              <p className="text-sm text-[var(--ar-stone)]">Публикация</p>
-              <p className="mt-1 text-sm leading-7 text-[var(--ar-mist)]">
-                Для Telegram-бота отдельный поддомен не нужен.
-              </p>
-            </div>
-          </div>
-        </Card>
-      )}
+      ) : null}
 
       <ProjectSecretsSection projectId={params.id} />
     </div>

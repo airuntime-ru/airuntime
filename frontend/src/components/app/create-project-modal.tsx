@@ -2,29 +2,13 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Bot, Globe2, Sparkles } from "lucide-react";
+import { Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { Textarea } from "@/components/ui/textarea";
 import { createProject } from "@/lib/api";
-import { cn } from "@/lib/cn";
-
-const projectTypes = [
-  {
-    value: "website" as const,
-    label: "Сайт",
-    icon: Globe2,
-    description: "Лендинг, MVP или веб-инструмент, который можно запустить",
-  },
-  {
-    value: "telegram_bot" as const,
-    label: "Telegram-бот",
-    icon: Bot,
-    description: "Сценарии, заявки, ответы, уведомления и рабочие процессы",
-  },
-];
 
 type CreateProjectModalProps = {
   open: boolean;
@@ -36,14 +20,12 @@ export function CreateProjectModal({ open, onClose, onCreated }: CreateProjectMo
   const router = useRouter();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [type, setType] = useState<"telegram_bot" | "website">("website");
   const [createError, setCreateError] = useState("");
   const [creating, setCreating] = useState(false);
 
   const reset = () => {
     setName("");
     setDescription("");
-    setType("website");
     setCreateError("");
     setCreating(false);
   };
@@ -59,7 +41,7 @@ export function CreateProjectModal({ open, onClose, onCreated }: CreateProjectMo
     setCreating(true);
     setCreateError("");
     try {
-      const project = await createProject({ type, name: name.trim(), description });
+      const project = await createProject({ name: name.trim(), description });
       await onCreated?.();
       reset();
       onClose();
@@ -76,38 +58,9 @@ export function CreateProjectModal({ open, onClose, onCreated }: CreateProjectMo
       open={open}
       onClose={handleClose}
       title="Новый проект"
-      description="Выберите формат и опишите задачу. После создания откроется чат, где можно сразу дать первый промпт."
+      description="Опишите, что нужно создать. AIRuntime сам поймет формат и откроет чат для запуска."
     >
       <div data-tour="project-create-form" className="space-y-5">
-        <div className="grid gap-2 sm:grid-cols-2">
-          {projectTypes.map((item) => {
-            const active = type === item.value;
-            return (
-              <button
-                key={item.value}
-                type="button"
-                onClick={() => setType(item.value)}
-                className={cn(
-                  "flex items-start gap-3 rounded-[var(--ar-radius-sm)] border p-3 text-left transition-all",
-                  active
-                    ? "border-[var(--ar-sky)] bg-white/82 ring-2 ring-[var(--ar-sky)]/15"
-                    : "border-white/70 bg-white/52 hover:border-[var(--ar-border-strong)] hover:bg-white/76"
-                )}
-              >
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--ar-radius-sm)] bg-white text-[var(--ar-sky)] shadow-sm shadow-sky-950/5">
-                  <item.icon size={17} />
-                </span>
-                <span className="min-w-0">
-                  <span className="block text-sm font-semibold text-[var(--ar-black)]">{item.label}</span>
-                  <span className="mt-0.5 block text-xs leading-relaxed text-[var(--ar-mist)]">
-                    {item.description}
-                  </span>
-                </span>
-              </button>
-            );
-          })}
-        </div>
-
         <div className="space-y-4">
           <div className="space-y-2">
             <label htmlFor="project-name" className="text-sm font-semibold text-[var(--ar-black)]">
@@ -115,7 +68,7 @@ export function CreateProjectModal({ open, onClose, onCreated }: CreateProjectMo
             </label>
             <Input
               id="project-name"
-              placeholder="Например: Лендинг для консультаций"
+              placeholder="Например: Запуск для консультаций"
               value={name}
               onChange={(event) => setName(event.target.value)}
               disabled={creating}
@@ -123,13 +76,13 @@ export function CreateProjectModal({ open, onClose, onCreated }: CreateProjectMo
           </div>
           <div className="space-y-2">
             <label htmlFor="project-description" className="text-sm font-semibold text-[var(--ar-black)]">
-              Описание
+              Что нужно создать
             </label>
             <Textarea
               id="project-description"
               className="min-h-[112px] resize-none"
               rows={4}
-              placeholder="Кто пользователь, что должно произойти, какой стиль и какие детали важны"
+              placeholder="Например: сделай светлый лендинг для студии йоги или telegram-бота для записи клиентов"
               value={description}
               onChange={(event) => setDescription(event.target.value)}
               disabled={creating}

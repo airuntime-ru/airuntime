@@ -11,7 +11,7 @@ class ProjectType(StrEnum):
 
 
 class ProjectCreateRequest(BaseModel):
-    type: ProjectType
+    type: ProjectType | None = None
     name: str = Field(min_length=2, max_length=120)
     description: str = Field(default="", max_length=2000)
 

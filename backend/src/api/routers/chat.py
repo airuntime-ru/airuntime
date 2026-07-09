@@ -31,6 +31,7 @@ from src.services.file_context import (
     serialize_message_metadata,
 )
 from src.services.project_git import ProjectGitError, commit_snapshot
+from src.services.project_intent import update_project_type_from_prompt
 from src.services.project_subdomain import (
     assert_subdomain_available,
     normalize_deploy_subdomain,
@@ -137,6 +138,10 @@ def _message_response(db: Session, message: Message) -> MessageResponse:
 
 def _sse_chunk(chunk: str) -> str:
     return f"data: {json.dumps({'chunk': chunk})}\n\n"
+
+
+def _sse_status(phase: str, label: str, state: str = "running") -> str:
+    return f"data: {json.dumps({'status': {'phase': phase, 'label': label, 'state': state}})}\n\n"
 
 
 @router.post("", response_model=ChatCreateResponse)
@@ -254,6 +259,11 @@ async def _stream_events(
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
+    if content and update_project_type_from_prompt(project, content):
+        db.add(project)
+        db.commit()
+        db.refresh(project)
+
     if project.type == "website" and content:
         extracted_subdomain = _extract_deploy_subdomain(content)
         if extracted_subdomain:
@@ -274,21 +284,24 @@ async def _stream_events(
 
     async def event_source():
         assistant_full = ""
+
+        def append_visible(text: str) -> str:
+            nonlocal assistant_full
+            assistant_full += text
+            return _sse_chunk(text)
+
+        yield _sse_status("thinking", "AIRuntime осмысляет задачу")
         async for chunk in conversation.stream_reply(
             chat_id=str(chat_id), user_message=safe_message
         ):
-            assistant_full += chunk
-            yield _sse_chunk(chunk)
-        assistant_message = Message(
-            chat_id=chat_id, role="assistant", content_markdown=assistant_full
-        )
-        db.add(assistant_message)
-        usage_cost = max(100, len(safe_message) + len(assistant_full))
-        current_user.credits_balance = max(0, current_user.credits_balance - usage_cost)
+            yield append_visible(chunk)
         try:
+            yield _sse_status("artifact", "Генерирую файлы проекта")
+            yield append_visible("\n\nСоздаю файлы проекта и проверяю структуру...")
             artifact_path = await generate_project_artifact_agentic(db, project, safe_message)
             git_commit_hash: str | None = None
             try:
+                yield _sse_status("version", "Сохраняю версию проекта")
                 git_commit_hash = commit_snapshot(
                     artifact_path,
                     message=f"{project.name}: {safe_message}",
@@ -306,20 +319,35 @@ async def _stream_events(
                 project.logs = f"Generated artifact: {artifact_path}"
             db.add(project)
             if project.type == "website" and settings.auto_deploy_websites:
+                yield _sse_status("deploy", "Ставлю сайт в очередь запуска")
                 planned_url = planned_public_url(project)
                 create_deployment_for_project(db, project)
                 if planned_url:
-                    yield _sse_chunk(f"\n\nСайт собран и поставлен в очередь на запуск. URL: {planned_url}")
+                    yield append_visible(
+                        f"\n\nСайт собран и поставлен в очередь на запуск. URL: {planned_url}"
+                    )
                 else:
-                    yield _sse_chunk("\n\nСайт собран и поставлен в очередь на запуск.")
+                    yield append_visible(
+                        "\n\nСайт собран и поставлен в очередь на запуск."
+                    )
             elif project.type == "telegram_bot":
+                yield _sse_status("deploy", "Ставлю бота в очередь запуска")
                 create_deployment_for_project(db, project)
-                yield _sse_chunk("\n\nБот собран и поставлен в очередь на запуск.")
+                yield append_visible("\n\nБот собран и поставлен в очередь на запуск.")
+            yield _sse_status("done", "Готово: проект передан на запуск", "done")
         except ArtifactError as exc:
             project.status = "needs_configuration"
             project.logs = str(exc)
             db.add(project)
-            yield _sse_chunk(f"\n\nНужно действие: {exc}")
+            yield _sse_status("error", f"Нужно действие: {exc}", "error")
+            yield append_visible(f"\n\nНужно действие: {exc}")
+
+        assistant_message = Message(
+            chat_id=chat_id, role="assistant", content_markdown=assistant_full
+        )
+        db.add(assistant_message)
+        usage_cost = max(100, len(safe_message) + len(assistant_full))
+        current_user.credits_balance = max(0, current_user.credits_balance - usage_cost)
         db.add(current_user)
         db.commit()
         yield "data: [DONE]\n\n"

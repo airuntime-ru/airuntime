@@ -2,7 +2,20 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
-import { ArrowLeft, ArrowUp, ChevronDown, Paperclip, Pin, PinOff, Plus, Search, X } from "lucide-react";
+import {
+  Activity,
+  ArrowLeft,
+  ArrowUp,
+  CheckCircle2,
+  ChevronDown,
+  Loader2,
+  Paperclip,
+  Pin,
+  PinOff,
+  Plus,
+  Search,
+  X,
+} from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 
@@ -25,6 +38,12 @@ type ChatMessage = {
   role: "user" | "assistant";
   content: string;
   attachments?: ChatFileType[];
+};
+
+type AgentStatus = {
+  phase: string;
+  label: string;
+  state: "running" | "done" | "error";
 };
 
 const PINNED_KEY = "airuntime_pinned_chats";
@@ -50,6 +69,59 @@ function AiTypingIndicator() {
         <span className="h-1 w-1 animate-pulse rounded-full bg-[var(--ar-stone)] [animation-delay:120ms]" />
         <span className="h-1 w-1 animate-pulse rounded-full bg-[var(--ar-stone)] [animation-delay:220ms]" />
       </span>
+    </div>
+  );
+}
+
+function AgentStatusPanel({ status }: { status: AgentStatus }) {
+  const done = status.state === "done";
+  const error = status.state === "error";
+  const steps = ["thinking", "artifact", "version", "deploy", "done"];
+  const currentIndex = Math.max(0, steps.indexOf(status.phase));
+
+  return (
+    <div
+      className={cn(
+        "mb-5 overflow-hidden rounded-2xl border px-4 py-3 shadow-[0_14px_36px_rgba(70,130,180,0.10)]",
+        error
+          ? "border-rose-200 bg-rose-50"
+          : "border-sky-100 bg-[linear-gradient(135deg,rgba(255,255,255,0.94),rgba(235,249,255,0.86))]"
+      )}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span
+            className={cn(
+              "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl",
+              error ? "bg-rose-100 text-rose-600" : done ? "bg-emerald-50 text-emerald-600" : "bg-sky-50 text-[var(--ar-sky)]"
+            )}
+          >
+            {done ? <CheckCircle2 size={18} /> : error ? <Activity size={18} /> : <Loader2 size={18} className="animate-spin" />}
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-[var(--ar-black)]">{status.label}</p>
+            <p className="text-xs text-[var(--ar-stone)]">Статус разработки обновляется в реальном времени</p>
+          </div>
+        </div>
+        <span className="hidden rounded-full border border-white/70 bg-white/70 px-2.5 py-1 text-xs font-medium text-[var(--ar-mist)] sm:inline-flex">
+          agent live
+        </span>
+      </div>
+
+      {!error ? (
+        <div className="mt-3 grid grid-cols-5 gap-1.5">
+          {steps.map((step, index) => (
+            <span
+              key={step}
+              className={cn(
+                "h-1.5 rounded-full transition-colors",
+                index <= currentIndex ? "bg-[var(--ar-sky)]" : "bg-black/8",
+                status.state === "running" && index === currentIndex && "animate-pulse"
+              )}
+            />
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -96,6 +168,7 @@ export default function ProjectChatPage() {
   const [pendingFiles, setPendingFiles] = useState<ChatFileType[]>([]);
   const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
   const [bootstrapping, setBootstrapping] = useState(true);
   const [bootstrapError, setBootstrapError] = useState("");
   const [mobilePanel, setMobilePanel] = useState<"list" | "chat">("list");
@@ -137,13 +210,14 @@ export default function ProjectChatPage() {
         }))
       );
       setPendingFiles([]);
+      setAgentStatus(null);
     };
     void loadMessages();
   }, [projectId, chatId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "auto" });
-  }, [messages.length]);
+  }, [agentStatus?.label, messages.length]);
 
   const filteredChats = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -164,6 +238,7 @@ export default function ProjectChatPage() {
     setChatId(chat.id);
     setMessages([]);
     setPendingFiles([]);
+    setAgentStatus(null);
     setMobilePanel("chat");
   };
 
@@ -209,6 +284,7 @@ export default function ProjectChatPage() {
     setInput("");
     setPendingFiles([]);
     setLoading(true);
+    setAgentStatus({ phase: "thinking", label: "AIRuntime осмысляет задачу", state: "running" });
     setMessages((prev) => [
       ...prev,
       { role: "user", content: userMessage || "Прикреплены файлы", attachments: pendingFiles },
@@ -232,19 +308,32 @@ export default function ProjectChatPage() {
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
           const payload = line.replace("data: ", "");
-          if (payload === "[DONE]") continue;
-          const parsed = JSON.parse(payload) as { chunk: string };
-          setMessages((prev) => {
-            const copy = [...prev];
-            const last = copy[copy.length - 1];
-            if (last?.role === "assistant") {
-              last.content += parsed.chunk;
-            }
-            return copy;
-          });
+          if (payload === "[DONE]") {
+            setAgentStatus((prev) =>
+              prev?.state === "error"
+                ? prev
+                : { phase: "done", label: "Готово: проект передан на запуск", state: "done" }
+            );
+            continue;
+          }
+          const parsed = JSON.parse(payload) as { chunk?: string; status?: AgentStatus };
+          if (parsed.status) {
+            setAgentStatus(parsed.status);
+          }
+          if (parsed.chunk) {
+            setMessages((prev) => {
+              const copy = [...prev];
+              const last = copy[copy.length - 1];
+              if (last?.role === "assistant") {
+                last.content += parsed.chunk;
+              }
+              return copy;
+            });
+          }
         }
       }
     } catch {
+      setAgentStatus({ phase: "error", label: "Не удалось получить ответ агента", state: "error" });
       setMessages((prev) => {
         const copy = [...prev];
         const last = copy[copy.length - 1];
@@ -386,6 +475,7 @@ export default function ProjectChatPage() {
                 })}
               </div>
             )}
+            {agentStatus ? <AgentStatusPanel status={agentStatus} /> : null}
             <div ref={bottomRef} className="h-4" />
           </div>
         </div>

@@ -5,10 +5,13 @@ from sqlalchemy.orm import Session
 
 from src.api.dependencies.auth import get_current_user
 from src.api.dto.project import ProjectCreateRequest, ProjectResponse, ProjectUpdateRequest
+from src.api.dto.project_logs import ProjectLogsResponse
 from src.db.models.chat import Chat
 from src.db.models.project import Project
 from src.db.models.user import User
 from src.db.session import get_db
+from src.services.project_intent import infer_project_type
+from src.services.project_logs import read_project_logs
 from src.services.project_subdomain import assert_subdomain_available, normalize_deploy_subdomain
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -37,9 +40,10 @@ def create_project(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ProjectResponse:
+    project_type = payload.type or infer_project_type(f"{payload.name}\n{payload.description}")
     project = Project(
         user_id=current_user.id,
-        type=payload.type,
+        type=project_type,
         name=payload.name,
         description=payload.description,
     )
@@ -82,6 +86,22 @@ def update_project(
     db.commit()
     db.refresh(project)
     return _to_response(project)
+
+
+@router.get("/{project_id}/logs", response_model=ProjectLogsResponse)
+def get_project_logs(
+    project_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ProjectLogsResponse:
+    project = (
+        db.query(Project)
+        .filter(Project.id == project_id, Project.user_id == current_user.id)
+        .first()
+    )
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return read_project_logs(db, project)
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)

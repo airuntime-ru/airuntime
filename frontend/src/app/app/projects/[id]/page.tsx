@@ -11,12 +11,6 @@ import { Card } from "@/components/ui/card";
 import { PageLoader } from "@/components/ui/loader";
 import { getProject, type ProjectType } from "@/lib/api";
 
-function typeLabel(type: string) {
-  if (type === "telegram_bot") return "Telegram-бот";
-  if (type === "website") return "Сайт";
-  return type;
-}
-
 export default function ProjectOverviewPage() {
   const params = useParams<{ id: string }>();
   const [project, setProject] = useState<ProjectType | null>(null);
@@ -45,8 +39,10 @@ export default function ProjectOverviewPage() {
           </div>
         </Card>
         <Card hover={false}>
-          <p className="text-sm text-[var(--ar-stone)]">Тип</p>
-          <p className="mt-2 text-xl font-semibold text-[var(--ar-black)]">{typeLabel(project.type)}</p>
+          <p className="text-sm text-[var(--ar-stone)]">Идея</p>
+          <p className="mt-2 line-clamp-2 text-sm font-medium leading-6 text-[var(--ar-black)]">
+            {project.description || "Опишите задачу в чате"}
+          </p>
         </Card>
         <Card hover={false}>
           <p className="text-sm text-[var(--ar-stone)]">Публикация</p>

@@ -31,6 +31,16 @@ export type DeploymentType = {
   finished_at: string | null;
 };
 
+export type ProjectLogsType = {
+  project_logs: string;
+  deployment_logs: string;
+  runtime_logs: string;
+  runtime_error: string | null;
+  deployment_status: string | null;
+  container_id: string | null;
+  logs_ref: string | null;
+};
+
 export type MeType = {
   id: string;
   email: string;
@@ -166,8 +176,12 @@ export async function getProject(projectId: string): Promise<ProjectType> {
   return requestJson<ProjectType>(`/projects/${projectId}`);
 }
 
+export async function getProjectLogs(projectId: string): Promise<ProjectLogsType> {
+  return requestJson<ProjectLogsType>(`/projects/${projectId}/logs`);
+}
+
 export async function createProject(payload: {
-  type: "telegram_bot" | "website";
+  type?: "telegram_bot" | "website";
   name: string;
   description: string;
 }): Promise<ProjectType> {

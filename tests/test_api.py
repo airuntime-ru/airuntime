@@ -73,6 +73,40 @@ def test_projects_crud(client):
     assert body["planned_site_url"] == "https://my-landing.airuntime.ru"
 
 
+def test_project_type_is_inferred_when_create_payload_has_no_type(client):
+    headers = auth_tokens(client, "intent@airuntime.dev")
+
+    create = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={
+            "name": "Support automation",
+            "description": "Telegram bot for client requests and notifications",
+        },
+    )
+
+    assert create.status_code == 200
+    assert create.json()["type"] == "telegram_bot"
+
+
+def test_project_logs_endpoint(client):
+    headers = auth_tokens(client, "logs@airuntime.dev")
+
+    project = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={"type": "website", "name": "Logs Project", "description": ""},
+    ).json()
+
+    response = client.get(f"/api/v1/projects/{project['id']}/logs", headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["project_logs"] == ""
+    assert body["deployment_status"] is None
+    assert body["runtime_logs"] == ""
+
+
 def test_chat_messages_list(client):
     headers = auth_tokens(client, "chat@airuntime.dev")
 
@@ -171,15 +205,28 @@ def test_stream_prompt_generates_artifact_and_queues_deployment(
     )
 
     assert response.status_code == 200
-    chunks = [
-        json.loads(line.removeprefix("data: "))["chunk"]
+    payloads = [
+        json.loads(line.removeprefix("data: "))
         for line in response.text.splitlines()
         if line.startswith("data: {")
     ]
+    chunks = [payload["chunk"] for payload in payloads if "chunk" in payload]
+    statuses = [payload["status"]["phase"] for payload in payloads if "status" in payload]
+    assert "artifact" in statuses
+    assert "deploy" in statuses
     assert any("Сайт собран и поставлен в очередь на запуск" in chunk for chunk in chunks)
     assert "data: [DONE]" in response.text
     assert generated
     assert deployments == [generated[0][0]]
+
+    messages = client.get(
+        f"/api/v1/projects/{project['id']}/chats/{chat['id']}/messages",
+        headers=headers,
+    ).json()
+    assert any(
+        "Сайт собран и поставлен в очередь на запуск" in message["content_markdown"]
+        for message in messages
+    )
 
     updated = client.get(f"/api/v1/projects/{project['id']}", headers=headers).json()
     assert updated["status"] == "ready"
@@ -220,3 +267,39 @@ def test_stream_subdomain_from_prompt_sets_deploy_subdomain(client, monkeypatch,
     assert response.status_code == 200
     assert any("URL: https://test.airuntime.ru" in line for line in response.text.splitlines())
     assert deployments == ["test"]
+
+
+def test_stream_prompt_reclassifies_project_before_generation(client, monkeypatch, tmp_path):
+    from src.api.routers import chat as chat_router
+
+    generated_types = []
+
+    async def fake_generate_project_artifact(db, project, prompt):
+        generated_types.append(project.type)
+        return tmp_path / "artifact"
+
+    monkeypatch.setattr(chat_router, "ConversationService", _FakeConversationService)
+    monkeypatch.setattr(
+        chat_router, "generate_project_artifact_agentic", fake_generate_project_artifact
+    )
+    monkeypatch.setattr(chat_router, "create_deployment_for_project", lambda db, project: None)
+
+    headers = auth_tokens(client, "reclassify@airuntime.dev")
+    project = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={"name": "Flexible Project", "description": ""},
+    ).json()
+    assert project["type"] == "website"
+    chat = client.post(f"/api/v1/projects/{project['id']}/chats", headers=headers).json()
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/chats/{chat['id']}/stream",
+        headers=headers,
+        json={"content": "Make a Telegram bot for support requests"},
+    )
+
+    assert response.status_code == 200
+    assert generated_types == ["telegram_bot"]
+    updated = client.get(f"/api/v1/projects/{project['id']}", headers=headers).json()
+    assert updated["type"] == "telegram_bot"
