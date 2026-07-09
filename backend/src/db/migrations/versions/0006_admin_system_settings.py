@@ -18,6 +18,12 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    if "admin_system_settings" in inspector.get_table_names():
+        # Table is created by django-admin migrations on production deploys.
+        return
+
     op.create_table(
         "admin_system_settings",
         sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
