@@ -1,5 +1,6 @@
 import json
 import re
+from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -22,7 +23,7 @@ from src.db.models.project import Project
 from src.db.models.user import User
 from src.db.session import get_db
 from src.services.agentic_artifacts import generate_project_artifact_agentic
-from src.services.artifacts import ArtifactError
+from src.services.artifacts import ArtifactError, _telegram_token
 from src.services.conversation import ConversationService
 from src.services.deployments import create_deployment_for_project
 from src.services.file_context import (
@@ -40,6 +41,10 @@ from src.services.project_subdomain import (
 from src.services.prompt_guard import sanitize_user_message
 
 router = APIRouter(prefix="/projects/{project_id}/chats", tags=["chat"])
+
+
+class _StopDeployment(RuntimeError):
+    pass
 
 
 def _authorize_chat(
@@ -88,12 +93,88 @@ def _validate_attachments(
 
 def _compose_model_message(*, content: str, attachment_ids: list[UUID], db: Session) -> str:
     attachment_context = build_attachment_context(db, attachment_ids, max_chars=40_000)
-    parts: list[str] = []
+    parts: list[str] = [
+        (
+            "Ты AIRuntime planner. Отвечай по-русски кратко и профессионально. "
+            "Не выдавай большие блоки кода в чате: код будет создан отдельным агентом. "
+            "Если задача недостаточно ясная, задай 2-4 уточняющих вопроса. "
+            "Если информации достаточно, сначала коротко опиши план разработки."
+        )
+    ]
     if content.strip():
         parts.append(content.strip())
     if attachment_context:
         parts.append(attachment_context)
     return "\n\n".join(parts) if parts else "Review the attached project files."
+
+
+def _needs_clarification(project: Project, content: str, attachment_ids: list[UUID]) -> bool:
+    if attachment_ids:
+        return False
+    text = content.strip().lower()
+    if not text:
+        return True
+    vague_phrases = (
+        "сделай сайт",
+        "сделай лендинг",
+        "самый крутой",
+        "крутой лендинг",
+        "напиши бота",
+        "сделай бота",
+    )
+    has_context = any(
+        marker in text
+        for marker in (
+            "для ",
+            "чтобы ",
+            "котор",
+            "клиент",
+            "продаж",
+            "заяв",
+            "бренд",
+            "стиль",
+            "целевая",
+        )
+    )
+    if len(text) < 26:
+        return True
+    return any(phrase in text for phrase in vague_phrases) and not has_context and not project.description
+
+
+def _clarifying_questions(project: Project, content: str) -> str:
+    if project.type == "telegram_bot":
+        token_help_url = f"{settings.resolved_frontend_url}/help/telegram-token"
+        return (
+            "Перед разработкой бота нужно уточнить пару вещей:\n\n"
+            "1. Где бот должен брать данные и что отвечать по умолчанию?\n"
+            "2. Нужны ли команды вроде /start, /help, заявка, меню или сценарии?\n"
+            "3. Добавьте секрет TELEGRAM_BOT_TOKEN в настройках проекта, чтобы я смог запустить бота.\n\n"
+            "Как получить токен: откройте @BotFather в Telegram, выполните /newbot и скопируйте выданный token. "
+            f"Инструкция: {token_help_url}\n\n"
+            "После этого я соберу файлы, проверю Docker-сборку и запущу polling."
+        )
+    return (
+        "Перед разработкой стоит уточнить основу проекта:\n\n"
+        "1. Для кого этот продукт и какое действие пользователь должен совершить?\n"
+        "2. Какие 3-5 блоков или функций точно нужны?\n"
+        "3. Какой стиль ближе: минимальный, премиальный, playful, SaaS, editorial?\n"
+        "4. Нужен ли конкретный поддомен или можно подобрать автоматически?\n\n"
+        "Ответьте одним сообщением, и я соберу проект уже по нормальному плану."
+    )
+
+
+def _generated_files(path: Path, limit: int = 12) -> list[str]:
+    files: list[str] = []
+    for item in sorted(path.rglob("*")):
+        if not item.is_file():
+            continue
+        rel = item.relative_to(path).as_posix()
+        if rel.startswith(".git/"):
+            continue
+        files.append(rel)
+        if len(files) >= limit:
+            break
+    return files
 
 
 def _extract_deploy_subdomain(text: str) -> str | None:
@@ -290,15 +371,33 @@ async def _stream_events(
             assistant_full += text
             return _sse_chunk(text)
 
+        if _needs_clarification(project, content, attachment_ids):
+            questions = _clarifying_questions(project, content)
+            yield _sse_status("questions", "Уточняю требования перед разработкой", "done")
+            yield append_visible(questions)
+            assistant_message = Message(
+                chat_id=chat_id, role="assistant", content_markdown=assistant_full
+            )
+            db.add(assistant_message)
+            usage_cost = max(100, len(safe_message) + len(assistant_full))
+            current_user.credits_balance = max(0, current_user.credits_balance - usage_cost)
+            db.add(current_user)
+            db.commit()
+            yield "data: [DONE]\n\n"
+            return
+
         yield _sse_status("thinking", "AIRuntime осмысляет задачу")
         async for chunk in conversation.stream_reply(
             chat_id=str(chat_id), user_message=safe_message
         ):
             yield append_visible(chunk)
         try:
+            yield _sse_status("plan", "Проектирую структуру и модули")
             yield _sse_status("artifact", "Генерирую файлы проекта")
             yield append_visible("\n\nСоздаю файлы проекта и проверяю структуру...")
             artifact_path = await generate_project_artifact_agentic(db, project, safe_message)
+            for rel_path in _generated_files(artifact_path):
+                yield _sse_status("module", f"Модуль готов: {rel_path}")
             git_commit_hash: str | None = None
             try:
                 yield _sse_status("version", "Сохраняю версию проекта")
@@ -331,10 +430,26 @@ async def _stream_events(
                         "\n\nСайт собран и поставлен в очередь на запуск."
                     )
             elif project.type == "telegram_bot":
+                if not _telegram_token(db, project):
+                    token_help_url = f"{settings.resolved_frontend_url}/help/telegram-token"
+                    project.status = "needs_configuration"
+                    token_note = (
+                        "Файлы бота созданы, но запуск остановлен: добавьте секрет "
+                        "TELEGRAM_BOT_TOKEN в настройках проекта и повторите запуск.\n\n"
+                        "Как получить токен: откройте @BotFather в Telegram, выполните /newbot "
+                        f"и скопируйте выданный token. Инструкция: {token_help_url}"
+                    )
+                    project.logs = f"{project.logs}\n{token_note}".strip()
+                    db.add(project)
+                    yield _sse_status("needs_configuration", "Нужен TELEGRAM_BOT_TOKEN", "error")
+                    yield append_visible(f"\n\n{token_note}")
+                    raise _StopDeployment
                 yield _sse_status("deploy", "Ставлю бота в очередь запуска")
                 create_deployment_for_project(db, project)
                 yield append_visible("\n\nБот собран и поставлен в очередь на запуск.")
             yield _sse_status("done", "Готово: проект передан на запуск", "done")
+        except _StopDeployment:
+            pass
         except ArtifactError as exc:
             project.status = "needs_configuration"
             project.logs = str(exc)

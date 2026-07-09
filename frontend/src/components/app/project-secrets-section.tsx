@@ -98,6 +98,25 @@ export function ProjectSecretsSection({ projectId }: { projectId: string }) {
           </Button>
         </div>
 
+        <div className="rounded-[var(--ar-radius-sm)] border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm leading-6 text-amber-900">
+          Для Telegram-бота добавьте секрет{" "}
+          <button
+            type="button"
+            className="font-semibold underline underline-offset-2"
+            onClick={() => setKey("TELEGRAM_BOT_TOKEN")}
+          >
+            TELEGRAM_BOT_TOKEN
+          </button>
+          . Токен выдаёт{" "}
+          <a
+            href="/help/telegram-token"
+            className="font-semibold underline underline-offset-2"
+          >
+            инструкция
+          </a>
+          : откройте его в Telegram, выполните /newbot и вставьте полученный token сюда.
+        </div>
+
         {error ? <p className="text-sm text-rose-600">{error}</p> : null}
 
         {loading ? (

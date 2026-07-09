@@ -4,7 +4,10 @@ import pytest
 
 from src.core.config import settings
 from src.db.models.project import Project
-from src.services.artifacts import ArtifactError, generate_project_artifact
+from src.db.models.secret import Secret
+from src.db.models.user import User
+from src.services.artifacts import ArtifactError, _telegram_token, generate_project_artifact
+from src.services.secrets import encrypt_secret
 
 
 def test_generate_website_artifact_escapes_prompt(tmp_path, monkeypatch, db):
@@ -38,3 +41,33 @@ def test_telegram_bot_requires_token_secret(tmp_path, monkeypatch, db):
 
     with pytest.raises(ArtifactError, match="TELEGRAM_BOT_TOKEN"):
         generate_project_artifact(db, project, "Launch the bot")
+
+
+def test_telegram_token_secret_lookup_accepts_human_key_names(db):
+    user = User(
+        id=uuid.uuid4(),
+        email="secret-lookup@airuntime.dev",
+        password_hash=None,
+        is_verified=True,
+    )
+    db.add(user)
+    db.flush()
+    project = Project(
+        id=uuid.uuid4(),
+        user_id=user.id,
+        type="telegram_bot",
+        name="Support Bot",
+        description="Answers customer questions",
+    )
+    db.add(project)
+    db.flush()
+    db.add(
+        Secret(
+            project_id=project.id,
+            key="Telegram Bot Token",
+            encrypted_value=encrypt_secret("123:abc"),
+        )
+    )
+    db.flush()
+
+    assert _telegram_token(db, project) == "123:abc"

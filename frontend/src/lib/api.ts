@@ -183,7 +183,7 @@ export async function getProjectLogs(projectId: string): Promise<ProjectLogsType
 export async function createProject(payload: {
   type?: "telegram_bot" | "website";
   name: string;
-  description: string;
+  description?: string;
 }): Promise<ProjectType> {
   return requestJson<ProjectType>("/projects", {
     method: "POST",

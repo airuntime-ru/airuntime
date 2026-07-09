@@ -8,8 +8,9 @@ from src.db.session import SessionLocal
 from src.services.artifacts import build_project_image
 from src.services.cloudflare_dns import CloudflareDnsError, sync_dns_for_website_deploy
 from src.services.deployment.docker_adapter import DeployRequest, DockerDeploymentAdapter
-from src.services.project_subdomain import resolve_deploy_subdomain
 from src.services.deployment_queue import pop_deployment_job
+from src.services.project_subdomain import resolve_deploy_subdomain
+from src.services.telegram_profile import TelegramProfileError, fetch_bot_profile
 
 
 def process_job(job: dict) -> None:
@@ -32,6 +33,16 @@ def process_job(job: dict) -> None:
         image_ref, environment = build_project_image(db, project)
         subdomain = resolve_deploy_subdomain(project)
         expose_http = project.type == "website"
+        telegram_url = None
+        if project.type == "telegram_bot":
+            token = environment.get("TELEGRAM_BOT_TOKEN")
+            if not token:
+                raise RuntimeError("Telegram bot token is not configured")
+            try:
+                telegram_url = fetch_bot_profile(token).public_url
+            except TelegramProfileError as telegram_exc:
+                raise RuntimeError(str(telegram_exc)) from telegram_exc
+
         result = DockerDeploymentAdapter().deploy(
             DeployRequest(
                 project_id=str(project.id),
@@ -47,7 +58,7 @@ def process_job(job: dict) -> None:
         deployment.logs_ref = result["logs_ref"]
         deployment.image_ref = result["image_ref"]
         deployment.finished_at = datetime.now(UTC)
-        project.deployment_url = result["url"] if expose_http else "telegram-bot:polling"
+        project.deployment_url = result["url"] if expose_http else telegram_url
         project.status = "live"
         if expose_http:
             try:
@@ -64,6 +75,11 @@ def process_job(job: dict) -> None:
             deployment.status = "failed"
             deployment.logs_ref = str(exc)[:2000]
             deployment.finished_at = datetime.now(UTC)
+            if project := db.get(Project, job.get("project_id")):
+                project.status = "needs_configuration"
+                note = f"Deployment failed: {exc}"
+                project.logs = f"{project.logs}\n{note}".strip() if project.logs else note
+                db.add(project)
             db.commit()
     finally:
         db.close()

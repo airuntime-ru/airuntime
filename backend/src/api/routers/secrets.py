@@ -1,3 +1,4 @@
+import re
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -19,6 +20,15 @@ class SecretCreateRequest(BaseModel):
     value: str = Field(min_length=1, max_length=4000)
 
 
+def _normalize_secret_key(value: str) -> str:
+    normalized = re.sub(r"[^A-Za-z0-9]+", "_", value.strip().upper()).strip("_")
+    if normalized in {"TELEGRAM_BOT", "TELEGRAMBOT", "TG_BOT", "TG"}:
+        return "TELEGRAM_BOT_TOKEN"
+    if normalized in {"TELEGRAM_TOKEN", "BOT_TOKEN", "TG_TOKEN"}:
+        return "TELEGRAM_BOT_TOKEN"
+    return normalized
+
+
 @router.post("")
 def create_secret(
     project_id: str,
@@ -33,9 +43,18 @@ def create_secret(
     )
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    secret = Secret(
-        project_id=project.id, key=payload.key, encrypted_value=encrypt_secret(payload.value)
+    secret_key = _normalize_secret_key(payload.key)
+    existing = (
+        db.query(Secret)
+        .filter(Secret.project_id == project.id, Secret.key == secret_key)
+        .first()
     )
+    if existing:
+        existing.encrypted_value = encrypt_secret(payload.value)
+        db.add(existing)
+        db.commit()
+        return {"id": str(existing.id), "key": existing.key}
+    secret = Secret(project_id=project.id, key=secret_key, encrypted_value=encrypt_secret(payload.value))
     db.add(secret)
     db.commit()
     return {"id": str(secret.id), "key": secret.key}

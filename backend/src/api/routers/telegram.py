@@ -7,7 +7,8 @@ from src.db.models.project import Project
 from src.db.models.secret import Secret
 from src.db.models.user import User
 from src.db.session import get_db
-from src.services.secrets import encrypt_secret
+from src.services.secrets import decrypt_secret, encrypt_secret
+from src.services.telegram_profile import TelegramProfileError, fetch_bot_profile
 
 router = APIRouter(prefix="/projects/{project_id}/telegram", tags=["telegram"])
 
@@ -31,6 +32,12 @@ def save_bot_token(
     )
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    if project.type != "telegram_bot":
+        raise HTTPException(status_code=400, detail="Project is not a Telegram bot")
+    try:
+        profile = fetch_bot_profile(payload.bot_token)
+    except TelegramProfileError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     existing = (
         db.query(Secret)
         .filter(Secret.project_id == project.id, Secret.key == "TELEGRAM_BOT_TOKEN")
@@ -46,8 +53,10 @@ def save_bot_token(
                 encrypted_value=encrypt_secret(payload.bot_token),
             )
         )
+    project.deployment_url = profile.public_url
+    project.status = "telegram_ready"
     db.commit()
-    return {"status": "saved", "mode": payload.mode}
+    return {"status": "saved", "mode": payload.mode, "url": profile.public_url}
 
 
 @router.post("/start")
@@ -72,6 +81,16 @@ def start_bot(
     )
     if not token:
         raise HTTPException(status_code=400, detail="Telegram bot token is not configured")
+    try:
+        profile = fetch_bot_profile(decrypt_secret(token.encrypted_value))
+    except TelegramProfileError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     project.status = "telegram_ready"
+    project.deployment_url = profile.public_url
     db.commit()
-    return {"status": "ready", "project_id": project_id, "runtime": "telegram-worker"}
+    return {
+        "status": "ready",
+        "project_id": project_id,
+        "runtime": "telegram-worker",
+        "url": profile.public_url,
+    }

@@ -79,8 +79,16 @@ class _RedisOtpStore:
 class OtpService:
     def __init__(self) -> None:
         self._store: _MemoryOtpStore | _RedisOtpStore
+        if settings.debug:
+            self._store = _MemoryOtpStore()
+            return
         try:
-            client = Redis.from_url(settings.redis_url, decode_responses=True)
+            client = Redis.from_url(
+                settings.redis_url,
+                decode_responses=True,
+                socket_connect_timeout=0.2,
+                socket_timeout=0.2,
+            )
             client.ping()
             self._store = _RedisOtpStore(client)
         except RedisError:

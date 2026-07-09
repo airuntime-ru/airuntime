@@ -9,11 +9,11 @@ from src.core.config import settings
 from src.services.project_git import (
     archive_version_stream,
     commit_snapshot,
+    list_version_tree,
     list_versions,
     project_repo_dir,
-    rollback_to,
-    list_version_tree,
     read_version_file,
+    rollback_to,
 )
 
 
@@ -81,13 +81,19 @@ def test_git_rollback_restores_tree(project_dir):
 
 def test_git_tree_and_file_read(project_dir):
     _write(project_dir, "Dockerfile", "FROM nginx:1\n")
+    (project_dir / "public").mkdir()
+    _write(project_dir, "public/index.html", "<h1>Hello</h1>\n")
     commit1 = commit_snapshot(project_dir, message="first")
     assert commit1 is not None
 
     entries = list_version_tree(project_dir, commit_hash=commit1, rel_path="")
     assert any(e.name == "Dockerfile" and e.entry_type == "blob" for e in entries)
+    assert any(e.name == "public" and e.entry_type == "tree" for e in entries)
+
+    nested_entries = list_version_tree(project_dir, commit_hash=commit1, rel_path="public")
+    assert any(e.name == "index.html" and e.entry_type == "blob" for e in nested_entries)
+    assert all(not e.name.startswith("public/") for e in nested_entries)
 
     file_payload = read_version_file(project_dir, commit_hash=commit1, rel_path="Dockerfile")
     assert file_payload["is_binary"] is False
     assert "FROM nginx:1" in file_payload["content"]
-

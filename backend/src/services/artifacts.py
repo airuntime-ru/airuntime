@@ -17,7 +17,18 @@ from src.db.models.secret import Secret
 from src.services.project_git import with_project_git_lock
 from src.services.secrets import decrypt_secret
 
-TOKEN_SECRET_KEYS = ("TELEGRAM_BOT_TOKEN", "TELEGRAM_TOKEN", "BOT_TOKEN")
+TOKEN_SECRET_KEYS = {
+    "TELEGRAM_BOT_TOKEN",
+    "TELEGRAM_TOKEN",
+    "BOT_TOKEN",
+    "TG_BOT_TOKEN",
+    "TG_TOKEN",
+    "TELEGRAMBOT_TOKEN",
+    "TELEGRAMBOTTOKEN",
+    "TELEGRAM_BOT",
+    "TELEGRAMBOT",
+    "TG_BOT",
+}
 
 
 class ArtifactError(RuntimeError):
@@ -365,7 +376,9 @@ def generate_website_artifact(project: Project, prompt: str = "") -> Path:
 def _telegram_token(db: Session, project: Project) -> str | None:
     rows = db.query(Secret).filter(Secret.project_id == project.id).all()
     for row in rows:
-        if row.key.upper() in TOKEN_SECRET_KEYS:
+        normalized_key = re.sub(r"[^A-Z0-9]+", "_", row.key.upper()).strip("_")
+        compact_key = normalized_key.replace("_", "")
+        if normalized_key in TOKEN_SECRET_KEYS or f"{compact_key}_TOKEN" in TOKEN_SECRET_KEYS:
             return decrypt_secret(row.encrypted_value)
     return None
 

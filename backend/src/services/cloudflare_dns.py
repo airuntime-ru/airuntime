@@ -108,5 +108,12 @@ def sync_dns_for_website_deploy(subdomain: str) -> list[str]:
         return ["dns sync skipped (not configured)"]
 
     messages = ensure_platform_dns()
+    messages.append(
+        upsert_dns_record(
+            "A",
+            f"{subdomain}.{settings.resolved_app_domain}",
+            settings.server_ip or "",
+        )
+    )
     logger.info("Cloudflare DNS synced for %s.%s", subdomain, settings.resolved_app_domain)
     return messages

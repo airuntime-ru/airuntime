@@ -11,7 +11,7 @@ from sqlalchemy.pool import StaticPool
 os.environ.setdefault(
     "DATABASE_URL", "postgresql+psycopg://postgres:postgres@localhost:5432/airuntime_test"
 )
-os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
+os.environ["REDIS_URL"] = "redis://localhost:6379/0"
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 os.environ.setdefault("ALLOWED_HOSTS", "localhost,127.0.0.1,testserver")
 os.environ.setdefault("DEBUG", "true")

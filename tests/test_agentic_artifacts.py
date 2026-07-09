@@ -125,7 +125,7 @@ def test_agentic_telegram_manifest_requires_token_env(tmp_path, monkeypatch):
         asyncio.run(generate_agentic_artifact(DummyDb(), _project("telegram_bot"), "Build bot"))
 
 
-def test_agentic_telegram_generation_requires_token_before_fallback(tmp_path, monkeypatch):
+def test_agentic_telegram_generation_can_create_files_before_token_is_added(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "generated_projects_dir", str(tmp_path))
 
     class FailingProvider:
@@ -134,8 +134,10 @@ def test_agentic_telegram_generation_requires_token_before_fallback(tmp_path, mo
             yield ""
 
     monkeypatch.setattr(agentic_artifacts, "get_provider", lambda provider_name: FailingProvider())
+    project = _project("telegram_bot")
 
-    with pytest.raises(ArtifactError, match="TELEGRAM_BOT_TOKEN"):
-        asyncio.run(
-            generate_project_artifact_agentic(TokenlessDb(), _project("telegram_bot"), "Build bot")
-        )
+    path = asyncio.run(generate_project_artifact_agentic(TokenlessDb(), project, "Build bot"))
+
+    assert (path / "app.py").exists()
+    assert (path / "requirements.txt").exists()
+    assert "fallback used" in project.logs

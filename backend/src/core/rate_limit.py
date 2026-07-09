@@ -53,7 +53,12 @@ class RedisRateLimiter:
 _memory_fallback = InMemoryRateLimiter()
 _redis_client: Redis | None = None
 try:
-    _redis_client = Redis.from_url(settings.redis_url, decode_responses=True)
+    _redis_client = Redis.from_url(
+        settings.redis_url,
+        decode_responses=True,
+        socket_connect_timeout=0.2,
+        socket_timeout=0.2,
+    )
 except RedisError:
     _redis_client = None
 

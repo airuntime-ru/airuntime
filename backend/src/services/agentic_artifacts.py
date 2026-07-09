@@ -13,7 +13,6 @@ from src.core.config import settings
 from src.db.models.project import Project
 from src.services.artifacts import (
     ArtifactError,
-    _telegram_token,
     generate_telegram_bot_artifact,
     generate_website_artifact,
 )
@@ -291,8 +290,6 @@ def generate_fallback_artifact(db: Session, project: Project, prompt: str = "") 
 
 
 async def generate_project_artifact_agentic(db: Session, project: Project, prompt: str = "") -> Path:
-    if project.type == "telegram_bot" and not _telegram_token(db, project):
-        raise ArtifactError("Telegram bot requires TELEGRAM_BOT_TOKEN secret before deployment")
     try:
         return await generate_agentic_artifact(db, project, prompt)
     except Exception as exc:

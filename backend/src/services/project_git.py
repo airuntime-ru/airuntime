@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 import time
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import ContextManager, Generator
 from uuid import UUID, uuid4
 
 from src.core.config import settings
@@ -79,8 +78,7 @@ def _run_git_bytes(*, cwd: Path, args: list[str], check: bool = True) -> subproc
         ["git", *args],
         cwd=str(cwd),
         check=check,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
     )
 
 
@@ -105,11 +103,16 @@ def init_repo_if_needed(project_dir: Path) -> None:
     )
 
 
-def _redis() -> "Redis | None":
+def _redis() -> Redis | None:
     if Redis is None:
         return None
     try:
-        return Redis.from_url(settings.redis_url, decode_responses=True)
+        return Redis.from_url(
+            settings.redis_url,
+            decode_responses=True,
+            socket_connect_timeout=0.2,
+            socket_timeout=0.2,
+        )
     except Exception:
         return None
 
@@ -126,7 +129,7 @@ class _NullLock:
         return None
 
 
-def with_project_git_lock(project_id: UUID | str, *, ttl_seconds: int = 180) -> ContextManager[None]:
+def with_project_git_lock(project_id: UUID | str, *, ttl_seconds: int = 180) -> AbstractContextManager[None]:
     """
     Best-effort lock to protect git checkout/commit and docker builds.
 
@@ -215,7 +218,7 @@ def list_versions(project_dir: Path, *, limit: int = 30) -> list[ProjectVersion]
     versions: list[ProjectVersion] = []
     for line in out.splitlines():
         commit_hash, unix_ct, msg = line.split("|", 2)
-        created_at = datetime.fromtimestamp(int(unix_ct), tz=timezone.utc)
+        created_at = datetime.fromtimestamp(int(unix_ct), tz=UTC)
         versions.append(ProjectVersion(commit_hash=commit_hash, created_at=created_at, message=msg))
     return versions
 
@@ -228,10 +231,11 @@ def list_version_tree(
 
     normalized = _normalize_repo_rel_path(rel_path)
 
-    # `git ls-tree` returns direct children of the given path inside the tree.
-    # We use `-l` to get size and `-z` to parse safely.
+    # `git ls-tree <commit>:<path>` returns direct children with names relative to
+    # that path. Using `-- <path>` returns prefixed names like `public/index.html`,
+    # which makes the UI accidentally build paths such as `public/public/...`.
     if normalized:
-        args = ["ls-tree", "-z", "-l", commit_hash, "--", normalized]
+        args = ["ls-tree", "-z", "-l", f"{commit_hash}:{normalized}"]
     else:
         args = ["ls-tree", "-z", "-l", commit_hash]
 
@@ -337,7 +341,11 @@ def archive_version(project_dir: Path, *, commit_hash: str, out_path: Path) -> N
     try:
         proc = _run_git_bytes(cwd=project_dir, args=["archive", "--format=zip", commit_hash])
     except subprocess.CalledProcessError as exc:
-        stderr = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, (bytes, bytearray)) else str(exc.stderr)
+        stderr = (
+            exc.stderr.decode("utf-8", errors="replace")
+            if isinstance(exc.stderr, bytes | bytearray)
+            else str(exc.stderr)
+        )
         raise ProjectGitError(stderr.strip() or "git archive failed") from exc
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_bytes(proc.stdout)
@@ -348,7 +356,11 @@ def archive_version_stream(project_dir: Path, *, commit_hash: str) -> bytes:
     try:
         proc = _run_git_bytes(cwd=project_dir, args=["archive", "--format=zip", commit_hash])
     except subprocess.CalledProcessError as exc:
-        stderr = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, (bytes, bytearray)) else str(exc.stderr)
+        stderr = (
+            exc.stderr.decode("utf-8", errors="replace")
+            if isinstance(exc.stderr, bytes | bytearray)
+            else str(exc.stderr)
+        )
         raise ProjectGitError(stderr.strip() or "git archive failed") from exc
     return proc.stdout
 
@@ -380,4 +392,3 @@ def rollback_to(project_dir: Path, *, commit_hash: str, message: str) -> str:
         except subprocess.CalledProcessError as exc:
             stderr = exc.stderr.strip() if isinstance(exc.stderr, str) else str(exc.stderr)
             raise ProjectGitError(stderr or "git rev-parse failed") from exc
-
