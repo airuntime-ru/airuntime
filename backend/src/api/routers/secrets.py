@@ -11,6 +11,7 @@ from src.db.models.secret import Secret
 from src.db.models.user import User
 from src.db.session import get_db
 from src.services.secrets import encrypt_secret
+from src.services.telegram_profile import TelegramProfileError, fetch_bot_profile
 
 router = APIRouter(prefix="/projects/{project_id}/secrets", tags=["secrets"])
 
@@ -27,6 +28,23 @@ def _normalize_secret_key(value: str) -> str:
     if normalized in {"TELEGRAM_TOKEN", "BOT_TOKEN", "TG_TOKEN"}:
         return "TELEGRAM_BOT_TOKEN"
     return normalized
+
+
+def _looks_like_telegram_token(value: str) -> bool:
+    return bool(re.fullmatch(r"\d{6,}:[A-Za-z0-9_-]{20,}", value.strip()))
+
+
+def _refresh_telegram_url_if_possible(project: Project, key: str, value: str) -> str | None:
+    if project.type != "telegram_bot" or key != "TELEGRAM_BOT_TOKEN":
+        return None
+    if not _looks_like_telegram_token(value):
+        return None
+    try:
+        profile = fetch_bot_profile(value)
+    except TelegramProfileError:
+        return None
+    project.deployment_url = profile.public_url
+    return profile.public_url
 
 
 @router.post("")
@@ -51,13 +69,23 @@ def create_secret(
     )
     if existing:
         existing.encrypted_value = encrypt_secret(payload.value)
+        url = _refresh_telegram_url_if_possible(project, secret_key, payload.value)
         db.add(existing)
+        db.add(project)
         db.commit()
-        return {"id": str(existing.id), "key": existing.key}
+        response = {"id": str(existing.id), "key": existing.key}
+        if url:
+            response["url"] = url
+        return response
     secret = Secret(project_id=project.id, key=secret_key, encrypted_value=encrypt_secret(payload.value))
+    url = _refresh_telegram_url_if_possible(project, secret_key, payload.value)
     db.add(secret)
+    db.add(project)
     db.commit()
-    return {"id": str(secret.id), "key": secret.key}
+    response = {"id": str(secret.id), "key": secret.key}
+    if url:
+        response["url"] = url
+    return response
 
 
 @router.get("")

@@ -204,6 +204,38 @@ def test_secret_key_is_normalized_for_telegram_token(client):
     assert created.json()["key"] == "TELEGRAM_BOT_TOKEN"
 
 
+def test_telegram_token_secret_sets_public_bot_url(client, monkeypatch):
+    from src.api.routers import secrets as secrets_router
+
+    headers = auth_tokens(client, "secret-telegram-url@airuntime.dev")
+    project = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={"type": "telegram_bot", "name": "Secret URL Bot", "description": ""},
+    ).json()
+
+    monkeypatch.setattr(
+        secrets_router,
+        "fetch_bot_profile",
+        lambda token: SimpleNamespace(public_url="https://t.me/secret_url_bot"),
+    )
+
+    created = client.post(
+        f"/api/v1/projects/{project['id']}/secrets",
+        headers=headers,
+        json={
+            "key": "telegram bot token",
+            "value": "12345678901234567890:abcdefghijklmnopqrstuvwxyz",
+        },
+    )
+
+    assert created.status_code == 200
+    assert created.json()["url"] == "https://t.me/secret_url_bot"
+
+    refreshed = client.get(f"/api/v1/projects/{project['id']}", headers=headers)
+    assert refreshed.json()["deployment_url"] == "https://t.me/secret_url_bot"
+
+
 def test_telegram_token_save_sets_public_bot_url(client, monkeypatch):
     from src.api.routers import telegram as telegram_router
 
