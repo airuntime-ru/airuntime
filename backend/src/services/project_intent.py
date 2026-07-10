@@ -1,3 +1,5 @@
+import re
+
 from src.api.dto.project import ProjectType
 from src.db.models.project import Project
 
@@ -25,10 +27,17 @@ _SITE_TERMS = (
 )
 
 
+def _count_word_matches(terms: tuple[str, ...], text: str) -> int:
+    # Match at a word start (not anywhere mid-word - a plain "in" check would count ordinary
+    # words like "работа"/"работало" as bot signals, since they contain "бот" as a substring),
+    # but allow anything after the term so inflected forms still count ("бота", "боту", ...).
+    return sum(1 for term in terms if re.search(rf"\b{re.escape(term)}\w*", text))
+
+
 def infer_project_type(text: str) -> ProjectType:
     normalized = text.lower()
-    bot_score = sum(1 for term in _BOT_TERMS if term in normalized)
-    site_score = sum(1 for term in _SITE_TERMS if term in normalized)
+    bot_score = _count_word_matches(_BOT_TERMS, normalized)
+    site_score = _count_word_matches(_SITE_TERMS, normalized)
     if bot_score > site_score:
         return ProjectType.telegram_bot
     return ProjectType.website

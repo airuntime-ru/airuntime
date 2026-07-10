@@ -212,8 +212,10 @@ def _extract_deploy_subdomain(text: str) -> str | None:
     Supported patterns:
     - test.airuntime.ru
     - https://test.airuntime.ru
-    - поддомен: test
+    - поддомен: test / домен: test
     - subdomain = test
+    - Free-form Russian like "домен хочу test" or "пусть домен будет test" - falls back to
+      the first Latin-alphabet token found shortly after the word "домен"/"поддомен".
     """
 
     base_domain = settings.resolved_app_domain
@@ -222,15 +224,28 @@ def _extract_deploy_subdomain(text: str) -> str | None:
         return None
 
     base_domain_escaped = re.escape(base_domain)
+    base_domain_labels = {label for label in base_domain.split(".") if label}
     for pattern in [
         rf"https?://([a-z0-9-]{{3,48}})\.{base_domain_escaped}",
         rf"\b([a-z0-9-]{{3,48}})\.{base_domain_escaped}\b",
-        r"\bподдомен\s*[:=]?\s*([a-z0-9-]{3,48})\b",
+        r"\bпод ?домен\w*\s*[:=]?\s*([a-z0-9-]{3,48})\b",
+        r"\bдомен\w*\s*[:=]?\s*([a-z0-9-]{3,48})\b",
         r"\bsubdomain\s*[:=]?\s*([a-z0-9-]{3,48})\b",
     ]:
         match = re.search(pattern, text_l, flags=re.IGNORECASE)
-        if match:
+        if match and match.group(1) not in base_domain_labels:
             return match.group(1)
+
+    # Loose fallback: user mentioned "домен"/"поддомен" but phrased it as a sentence
+    # ("домен хочу morning-coffee") rather than "домен: x" - grab the first Latin-script
+    # token within a short window after the word, skipping the base domain's own labels.
+    domain_word = re.search(r"под ?домен\w*|домен\w*|subdomain", text_l)
+    if domain_word:
+        window = text_l[domain_word.end() : domain_word.end() + 60]
+        for candidate in re.finditer(r"\b([a-z][a-z0-9-]{2,47})\b", window):
+            token = candidate.group(1)
+            if token not in base_domain_labels and token not in {"the", "for", "and"}:
+                return token
     return None
 
 
@@ -386,7 +401,10 @@ async def _stream_events(
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    if content and update_project_type_from_prompt(project, content):
+    # Only allowed to move away from the initial guess while nothing has been generated yet -
+    # once a project has real files/a deploy, a later message mentioning an unrelated word
+    # (e.g. any form of "работать") must not silently flip it to a different project type.
+    if content and project.status == "created" and update_project_type_from_prompt(project, content):
         db.add(project)
         db.commit()
         db.refresh(project)
