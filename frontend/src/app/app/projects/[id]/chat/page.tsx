@@ -474,11 +474,11 @@ export default function ProjectChatPage() {
           }
           if (parsed.chunk) {
             setMessages((prev) => {
+              const lastIndex = prev.length - 1;
+              const last = prev[lastIndex];
+              if (last?.role !== "assistant") return prev;
               const copy = [...prev];
-              const last = copy[copy.length - 1];
-              if (last?.role === "assistant") {
-                last.content += parsed.chunk;
-              }
+              copy[lastIndex] = { ...last, content: last.content + parsed.chunk };
               return copy;
             });
           }
@@ -489,22 +489,25 @@ export default function ProjectChatPage() {
       if (aborted) {
         updateAgentStatus({ phase: "done", label: "Остановлено пользователем", state: "done" });
         setMessages((prev) => {
+          const lastIndex = prev.length - 1;
+          const last = prev[lastIndex];
+          if (last?.role !== "assistant" || last.content) return prev;
           const copy = [...prev];
-          const last = copy[copy.length - 1];
-          if (last?.role === "assistant" && !last.content) {
-            last.content = "Остановлено.";
-          }
+          copy[lastIndex] = { ...last, content: "Остановлено." };
           return copy;
         });
       } else {
         setChatError(err instanceof Error ? err.message : "Не удалось получить ответ агента");
         updateAgentStatus({ phase: "error", label: "Не удалось получить ответ агента", state: "error" });
         setMessages((prev) => {
+          const lastIndex = prev.length - 1;
+          const last = prev[lastIndex];
+          if (last?.role !== "assistant") return prev;
           const copy = [...prev];
-          const last = copy[copy.length - 1];
-          if (last?.role === "assistant") {
-            last.content = "Не удалось получить ответ. Проверьте настройки провайдера и токен авторизации.";
-          }
+          copy[lastIndex] = {
+            ...last,
+            content: "Не удалось получить ответ. Проверьте настройки провайдера и токен авторизации.",
+          };
           return copy;
         });
       }
