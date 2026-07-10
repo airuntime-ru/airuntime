@@ -1,12 +1,11 @@
 from uuid import UUID
 
-import docker
-from docker.errors import DockerException, NotFound
 from sqlalchemy.orm import Session
 
 from src.api.dto.project_logs import ProjectLogsResponse
 from src.db.models.deployment import Deployment
 from src.db.models.project import Project
+from src.services.docker_control_queue import submit_control_job
 
 MAX_LOG_CHARS = 80_000
 
@@ -17,23 +16,21 @@ def _tail_text(value: str, max_chars: int = MAX_LOG_CHARS) -> str:
     return value[-max_chars:]
 
 
-def _read_runtime_logs(logs_ref: str | None) -> tuple[str, str | None]:
+def _read_runtime_logs(project_id: UUID, logs_ref: str | None) -> tuple[str, str | None]:
     if not logs_ref:
         return "", None
     if not logs_ref.startswith("docker://"):
         return "", f"Unsupported logs source: {logs_ref}"
 
     container_id = logs_ref.removeprefix("docker://")
-    try:
-        client = docker.from_env()
-        container = client.containers.get(container_id)
-        raw_logs = container.logs(tail=400, timestamps=True)
-    except NotFound:
-        return "", f"Container {container_id} was not found."
-    except DockerException as exc:
-        return "", f"Runtime logs are unavailable: {exc}"
-
-    return _tail_text(raw_logs.decode("utf-8", errors="replace")), None
+    result = submit_control_job(
+        action="logs", project_id=str(project_id), extra={"container_id": container_id, "tail": 400}
+    )
+    if result is None:
+        return "", "Runtime logs are unavailable: deployment service did not respond."
+    if not result.get("ok"):
+        return "", f"Runtime logs are unavailable: {result.get('error', 'unknown error')}"
+    return _tail_text(result.get("logs", "")), None
 
 
 def _latest_deployment(db: Session, project_id: UUID) -> Deployment | None:
@@ -67,7 +64,7 @@ def read_project_logs(db: Session, project: Project) -> ProjectLogsResponse:
             ]
             if line
         )
-        runtime_logs, runtime_error = _read_runtime_logs(deployment.logs_ref)
+        runtime_logs, runtime_error = _read_runtime_logs(project.id, deployment.logs_ref)
 
     return ProjectLogsResponse(
         project_logs=_tail_text(project.logs or ""),

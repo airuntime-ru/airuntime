@@ -2,7 +2,7 @@ import re
 from dataclasses import dataclass
 
 import docker
-from docker.errors import DockerException
+from docker.errors import DockerException, NotFound
 
 from src.core.config import settings
 
@@ -21,6 +21,14 @@ class DockerDeploymentAdapter:
 
     def __init__(self) -> None:
         self._client = docker.from_env()
+
+    def fetch_container_logs(self, container_id: str, *, tail: int = 400) -> str:
+        try:
+            container = self._client.containers.get(container_id)
+            raw_logs = container.logs(tail=tail, timestamps=True)
+        except NotFound as exc:
+            raise RuntimeError(f"Container {container_id} was not found.") from exc
+        return raw_logs.decode("utf-8", errors="replace")
 
     def stop_project(self, project_id: str) -> None:
         container_name = f"airuntime-{project_id[:8]}"

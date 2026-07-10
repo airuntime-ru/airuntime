@@ -23,13 +23,13 @@ def _redis() -> Redis:
 
 
 def submit_control_job(
-    *, action: str, project_id: str, timeout_seconds: int = 20
+    *, action: str, project_id: str, timeout_seconds: int = 20, extra: dict | None = None
 ) -> dict | None:
     """Push a control job and block for the worker's result. Returns None if Redis/the worker
     is unreachable or the job timed out - callers should treat that as "couldn't confirm",
     not as a hard failure, since Docker itself may just be briefly unavailable."""
     job_id = uuid.uuid4().hex
-    job = {"job_id": job_id, "action": action, "project_id": project_id}
+    job = {"job_id": job_id, "action": action, "project_id": project_id, **(extra or {})}
     result_key = f"{RESULT_PREFIX}{job_id}"
     try:
         r = _redis()

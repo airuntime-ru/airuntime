@@ -33,7 +33,14 @@ def process_control_job(job: dict) -> None:
     try:
         if action in ("stop", "cleanup") and project_id:
             DockerDeploymentAdapter().stop_project(str(project_id))
-        push_control_result(job_id, {"ok": True})
+            push_control_result(job_id, {"ok": True})
+        elif action == "logs":
+            container_id = job.get("container_id")
+            tail = job.get("tail", 400)
+            logs = DockerDeploymentAdapter().fetch_container_logs(str(container_id), tail=tail)
+            push_control_result(job_id, {"ok": True, "logs": logs})
+        else:
+            push_control_result(job_id, {"ok": True})
     except Exception as exc:  # noqa: BLE001 - always report back, never crash the worker loop
         push_control_result(job_id, {"ok": False, "error": str(exc)})
 
