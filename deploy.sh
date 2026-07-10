@@ -67,6 +67,9 @@ print("SystemSetting defaults upserted")
 PY
 )"
 
+echo "==> Clean up dangling images from superseded builds"
+docker image prune -f || true
+
 echo "==> Status"
 docker compose -f docker-compose.prod.yml --env-file .env ps
 

@@ -21,6 +21,7 @@ from src.api.dto.auth import (
     VerifyEmailRequest,
 )
 from src.core.config import settings
+from src.core.rate_limit import hit_email_send_rate_limit
 from src.core.security import (
     create_access_token,
     create_purpose_token,
@@ -73,6 +74,7 @@ def _issue_tokens(db: Session, user: User) -> TokenPairResponse:
 
 @router.post("/request-code", response_model=RequestCodeResponse)
 def request_code(payload: RequestCodeRequest) -> RequestCodeResponse:
+    hit_email_send_rate_limit(payload.email)
     code = otp_service.issue_code()
     ttl_seconds = settings.otp_expire_minutes * 60
     otp_service.store(payload.email, code, ttl_seconds)
@@ -219,6 +221,7 @@ def forgot_password(
 ) -> AuthMessageResponse:
     user = db.query(User).filter(User.email == payload.email).first()
     if user:
+        hit_email_send_rate_limit(user.email)
         token = create_purpose_token(str(user.id), "password_reset", timedelta(minutes=15))
         reset_url = f"{settings.resolved_frontend_url}/auth/reset?token={token}"
         content = password_reset_email(reset_url=reset_url)
@@ -228,7 +231,7 @@ def forgot_password(
             plain=content.plain,
             html=content.html,
         )
-    return AuthMessageResponse(message="If the account exists, reset instructions were issued")
+    return AuthMessageResponse(message="Если аккаунт существует, инструкции по сбросу пароля отправлены на почту")
 
 
 @router.post("/verify-email", response_model=AuthMessageResponse)

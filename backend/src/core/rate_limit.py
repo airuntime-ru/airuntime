@@ -71,3 +71,22 @@ def hit_rate_limit(key: str) -> None:
         RedisRateLimiter(_redis_client).hit(key)
     except RedisError:
         _memory_fallback.hit(key)
+
+
+_email_memory_fallback = InMemoryRateLimiter(max_requests=3, window_seconds=900)
+
+
+def hit_email_send_rate_limit(email: str) -> None:
+    """Stricter, per-recipient limit for endpoints that email an arbitrary, unauthenticated
+    address (OTP codes, password reset) - the blanket per-IP limit alone doesn't stop someone
+    from email-bombing a victim's inbox from a single IP or a handful of IPs."""
+    if settings.debug:
+        return
+    key = f"email-send:{email.strip().lower()}"
+    if _redis_client is None:
+        _email_memory_fallback.hit(key)
+        return
+    try:
+        RedisRateLimiter(_redis_client, max_requests=3, window_seconds=900).hit(key)
+    except RedisError:
+        _email_memory_fallback.hit(key)
