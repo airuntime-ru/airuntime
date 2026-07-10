@@ -212,6 +212,10 @@ export async function getProject(projectId: string): Promise<ProjectType> {
   return requestJson<ProjectType>(`/projects/${projectId}`);
 }
 
+export async function deleteProject(projectId: string): Promise<void> {
+  await requestJson(`/projects/${projectId}`, { method: "DELETE" });
+}
+
 export async function getProjectLogs(projectId: string): Promise<ProjectLogsType> {
   return requestJson<ProjectLogsType>(`/projects/${projectId}/logs`);
 }

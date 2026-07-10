@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState, PageLoader } from "@/components/ui/loader";
+import { Modal } from "@/components/ui/modal";
 import {
   downloadProjectVersionArchive,
   getProjectVersionFile,
@@ -40,6 +41,7 @@ export default function ProjectVersionsPage() {
 
   const [downloading, setDownloading] = useState<string | null>(null);
   const [rollingBack, setRollingBack] = useState<string | null>(null);
+  const [confirmRollback, setConfirmRollback] = useState<ProjectVersionType | null>(null);
 
   const [activeCommitHash, setActiveCommitHash] = useState<string | null>(null);
   const [treePath, setTreePath] = useState("");
@@ -101,6 +103,7 @@ export default function ProjectVersionsPage() {
 
   const onRollback = async (commitHash: string) => {
     if (!projectId) return;
+    setConfirmRollback(null);
     setRollingBack(commitHash);
     try {
       await rollbackProjectVersion(projectId, commitHash);
@@ -219,11 +222,11 @@ export default function ProjectVersionsPage() {
               <Button
                 variant="accent"
                 size="sm"
-                onClick={() => void onRollback(v.commit_hash)}
+                onClick={() => setConfirmRollback(v)}
                 disabled={rollingBack === v.commit_hash}
               >
                 <RotateCcw size={15} />
-                {rollingBack === v.commit_hash ? "..." : "Откат"}
+                {rollingBack === v.commit_hash ? "..." : "Откатиться"}
               </Button>
               <Button
                 variant="outline"
@@ -364,6 +367,30 @@ export default function ProjectVersionsPage() {
           </Card>
         </div>
       ) : null}
+
+      <Modal
+        open={Boolean(confirmRollback)}
+        onClose={() => setConfirmRollback(null)}
+        title="Откатиться на эту версию?"
+        description={
+          confirmRollback
+            ? `Проект вернётся к состоянию commit ${shortHash(confirmRollback.commit_hash)} от ${formatDateTime(confirmRollback.created_at)}. Более поздние изменения останутся в истории версий, но текущий код проекта заменится.`
+            : undefined
+        }
+      >
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <Button variant="ghost" onClick={() => setConfirmRollback(null)}>
+            Отмена
+          </Button>
+          <Button
+            variant="accent"
+            onClick={() => confirmRollback && void onRollback(confirmRollback.commit_hash)}
+          >
+            <RotateCcw size={15} />
+            Да, откатиться
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 }

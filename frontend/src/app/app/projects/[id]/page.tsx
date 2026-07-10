@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ExternalLink, MessageSquare, Pause, Play, Rocket, Sparkles } from "lucide-react";
+import { ExternalLink, MessageSquare, Play, Settings, Sparkles, Square } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -88,6 +88,73 @@ export default function ProjectOverviewPage() {
 
   const atLimit = limits ? limits.running >= limits.max_running : false;
   const startDisabled = actionLoading || (atLimit && !isProjectRunning(project.status));
+  const chatHref = `/app/projects/${project.id}/chat`;
+
+  const running = isProjectRunning(project.status);
+  const needsConfig = project.status === "needs_configuration";
+  const canRun = canStartProject(project.status) && !needsConfig;
+
+  let heading = "Доведите идею до запуска через чат";
+  let description =
+    "Опишите сценарий в чате, приложите материалы при необходимости - AIRuntime соберёт и задеплоит проект.";
+  let primaryAction: React.ReactNode = (
+    <Link href={chatHref} className="w-full">
+      <Button variant="accent" className="w-full">
+        <MessageSquare size={16} />
+        Открыть чат
+      </Button>
+    </Link>
+  );
+  let secondaryAction: React.ReactNode = null;
+
+  if (running) {
+    heading = "Проект в эфире";
+    description = "Дальнейшие правки вносите через чат - платформа пересоберёт и перезапустит проект сама.";
+    primaryAction = project.deployment_url ? (
+      <a href={project.deployment_url} target="_blank" rel="noreferrer" className="w-full">
+        <Button variant="accent" className="w-full">
+          <ExternalLink size={16} />
+          Открыть ссылку
+        </Button>
+      </a>
+    ) : null;
+  } else if (needsConfig) {
+    heading = "Нужна настройка";
+    description = "Заполните недостающие данные в настройках проекта, и запуск продолжится автоматически.";
+    primaryAction = (
+      <Link href={`/app/projects/${project.id}/settings`} className="w-full">
+        <Button variant="accent" className="w-full">
+          <Settings size={16} />
+          Перейти в настройки
+        </Button>
+      </Link>
+    );
+    secondaryAction = (
+      <Link href={chatHref} className="w-full">
+        <Button variant="outline" className="w-full">
+          <MessageSquare size={16} />
+          Открыть чат
+        </Button>
+      </Link>
+    );
+  } else if (canRun) {
+    heading = "Готово к запуску";
+    description = "Файлы собраны - запустите проект, когда будете готовы.";
+    primaryAction = (
+      <Button variant="accent" className="w-full" disabled={startDisabled} onClick={onStart}>
+        <Play size={16} />
+        Запустить
+      </Button>
+    );
+    secondaryAction = (
+      <Link href={chatHref} className="w-full">
+        <Button variant="outline" className="w-full">
+          <MessageSquare size={16} />
+          Открыть чат
+        </Button>
+      </Link>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -107,8 +174,14 @@ export default function ProjectOverviewPage() {
       <div className="grid gap-4 sm:grid-cols-2">
         <Card hover={false}>
           <p className="text-sm text-[var(--ar-stone)]">Статус</p>
-          <div className="mt-2">
+          <div className="mt-2 flex flex-wrap items-center gap-2">
             <Badge>{projectStatusLabel(project.status)}</Badge>
+            {canStopProject(project.status) ? (
+              <Button variant="ghost" size="sm" disabled={actionLoading} onClick={onStop}>
+                <Square size={13} />
+                Остановить
+              </Button>
+            ) : null}
           </div>
         </Card>
         <Card hover={false}>
@@ -125,45 +198,12 @@ export default function ProjectOverviewPage() {
             <Sparkles size={14} />
             Следующее действие
           </p>
-          <h2 className="mt-3 text-2xl font-semibold text-[var(--ar-black)]">Доведите идею до запуска через чат</h2>
-          <p className="mt-3 text-sm leading-7 text-[var(--ar-mist)]">
-            Уточните сценарий, приложите материалы и попросите AIRuntime собрать проект. Управляйте запуском и
-            остановкой runtime прямо отсюда.
-          </p>
+          <h2 className="mt-3 text-2xl font-semibold text-[var(--ar-black)]">{heading}</h2>
+          <p className="mt-3 text-sm leading-7 text-[var(--ar-mist)]">{description}</p>
         </div>
         <div className="flex flex-col justify-center gap-2">
-          <Link href={`/app/projects/${project.id}/chat`} className="w-full">
-            <Button variant="accent" className="w-full">
-              <MessageSquare size={16} />
-              Открыть чат
-            </Button>
-          </Link>
-          {canStopProject(project.status) ? (
-            <Button variant="outline" className="w-full" disabled={actionLoading} onClick={onStop}>
-              <Pause size={16} />
-              Остановить
-            </Button>
-          ) : null}
-          {canStartProject(project.status) ? (
-            <Button variant="outline" className="w-full" disabled={startDisabled} onClick={onStart}>
-              <Play size={16} />
-              Запустить
-            </Button>
-          ) : null}
-          <Link href={`/app/projects/${project.id}/deployments`} className="w-full">
-            <Button variant="outline" className="w-full">
-              <Rocket size={16} />
-              Деплои
-            </Button>
-          </Link>
-          {project.deployment_url ? (
-            <a href={project.deployment_url} target="_blank" rel="noreferrer" className="w-full">
-              <Button variant="outline" className="w-full">
-                <ExternalLink size={16} />
-                Открыть ссылку
-              </Button>
-            </a>
-          ) : null}
+          {primaryAction}
+          {secondaryAction}
         </div>
       </Card>
     </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { FolderKanban, MessageSquare, Plus, Rocket } from "lucide-react";
 
@@ -14,6 +15,7 @@ import { projectStatusLabel } from "@/lib/project-status";
 import { useProjects } from "@/lib/use-projects";
 
 export default function ProjectsPage() {
+  const router = useRouter();
   const { projects, error, loading, refresh } = useProjects();
   const [createOpen, setCreateOpen] = useState(false);
   const [limits, setLimits] = useState<ProjectRuntimeLimitsType | null>(null);
@@ -56,14 +58,6 @@ export default function ProjectsPage() {
                 <Plus size={18} />
                 Новый проект
               </Button>
-              {projects[0] ? (
-                <Link href={`/app/projects/${projects[0].id}/chat`}>
-                  <Button variant="outline" size="lg" className="w-full sm:w-auto">
-                    <MessageSquare size={18} />
-                    Продолжить диалог
-                  </Button>
-                </Link>
-              ) : null}
             </div>
           </div>
 
@@ -113,7 +107,13 @@ export default function ProjectsPage() {
         {projects.map((project) => (
           <Card
             key={project.id}
-            className="group grid gap-4 p-4 sm:grid-cols-[1fr_auto] sm:items-center"
+            role="link"
+            tabIndex={0}
+            onClick={() => router.push(`/app/projects/${project.id}`)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") router.push(`/app/projects/${project.id}`);
+            }}
+            className="group grid cursor-pointer gap-4 p-4 sm:grid-cols-[1fr_auto] sm:items-center"
           >
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
@@ -124,16 +124,14 @@ export default function ProjectsPage() {
                 {project.deployment_url ?? (project.description || "Откройте чат и опишите задачу")}
               </p>
             </div>
-            <div className="flex flex-col gap-2 sm:w-44">
-              <Link href={`/app/projects/${project.id}/chat`}>
+            <div className="sm:w-36">
+              <Link
+                href={`/app/projects/${project.id}/chat`}
+                onClick={(event) => event.stopPropagation()}
+              >
                 <Button variant="accent" size="sm" className="w-full">
                   <MessageSquare size={15} />
                   В чат
-                </Button>
-              </Link>
-              <Link href={`/app/projects/${project.id}`}>
-                <Button variant="outline" size="sm" className="w-full">
-                  Обзор
                 </Button>
               </Link>
             </div>

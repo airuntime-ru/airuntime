@@ -1,13 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { CheckCircle2, KeyRound, ShieldCheck } from "lucide-react";
+import { BookOpen, CheckCircle2, KeyRound, ShieldCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/loader";
 import { Input } from "@/components/ui/input";
 import { setSecretValue, listSecrets, type SecretType } from "@/lib/api";
+
+// Known secret keys that have a dedicated setup walkthrough - shown as an "Инструкция" link
+// next to the row. Add an entry here whenever a new /help/* page is created for a secret type.
+const SECRET_HELP_LINKS: Record<string, string> = {
+  TELEGRAM_BOT_TOKEN: "/help/telegram-token",
+};
 
 function SecretRow({
   secret,
@@ -21,6 +27,7 @@ function SecretRow({
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const helpUrl = SECRET_HELP_LINKS[secret.key];
 
   const onSave = async () => {
     if (!value.trim()) return;
@@ -46,12 +53,22 @@ function SecretRow({
             <p className="mt-0.5 text-xs text-[var(--ar-stone)]">{secret.reason}</p>
           ) : null}
         </div>
-        {secret.has_value ? (
-          <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-            <CheckCircle2 size={14} />
-            Настроено
-          </span>
-        ) : null}
+        <div className="flex shrink-0 items-center gap-2">
+          {helpUrl ? (
+            <a href={helpUrl} target="_blank" rel="noreferrer">
+              <Button variant="outline" size="sm">
+                <BookOpen size={14} />
+                Инструкция
+              </Button>
+            </a>
+          ) : null}
+          {secret.has_value ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+              <CheckCircle2 size={14} />
+              Настроено
+            </span>
+          ) : null}
+        </div>
       </div>
       {!secret.has_value ? (
         <div className="flex flex-col gap-2 sm:flex-row">

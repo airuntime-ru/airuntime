@@ -1,16 +1,18 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { Bot, ExternalLink, Globe2, ImageUp } from "lucide-react";
+import { AlertTriangle, Bot, ExternalLink, Globe2, ImageUp, Trash2 } from "lucide-react";
 
 import { ProjectSecretsSection } from "@/components/app/project-secrets-section";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Modal } from "@/components/ui/modal";
 import { PageLoader } from "@/components/ui/loader";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  deleteProject,
   getProject,
   getTelegramBotProfile,
   updateProject,
@@ -190,6 +192,7 @@ function TelegramBotAppearanceCard({ projectId }: { projectId: string }) {
 
 export default function ProjectSettingsPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const [project, setProject] = useState<ProjectType | null>(null);
   const [subdomain, setSubdomain] = useState("");
   const [saving, setSaving] = useState(false);
@@ -199,6 +202,24 @@ export default function ProjectSettingsPage() {
   const botTokenConfigured = secrets?.some(
     (secret) => secret.key === "TELEGRAM_BOT_TOKEN" && secret.has_value
   );
+
+  const [deleteStep, setDeleteStep] = useState<0 | 1 | 2>(0);
+  const [deleteConfirmName, setDeleteConfirmName] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+
+  const onDeleteProject = async () => {
+    if (!params.id) return;
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      await deleteProject(params.id);
+      router.push("/app");
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Не удалось удалить проект");
+      setDeleting(false);
+    }
+  };
 
   useEffect(() => {
     let active = true;
@@ -310,6 +331,81 @@ export default function ProjectSettingsPage() {
       ) : null}
 
       <ProjectSecretsSection projectId={params.id} onChange={setSecrets} />
+
+      <Card hover={false} className="md:col-span-2 border-rose-200 bg-rose-50/40">
+        <div className="flex items-start gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--ar-radius-sm)] bg-rose-100 text-rose-600">
+            <AlertTriangle size={18} />
+          </span>
+          <div className="min-w-0 flex-1 space-y-3">
+            <div>
+              <p className="text-sm font-semibold text-[var(--ar-black)]">Опасная зона</p>
+              <p className="mt-1 text-sm leading-7 text-[var(--ar-mist)]">
+                Удаление проекта необратимо: остановится и удалится контейнер, пропадут чаты, файлы,
+                деплои и секреты.
+              </p>
+            </div>
+            <Button variant="outline" className="border-rose-300 text-rose-700 hover:bg-rose-100" onClick={() => setDeleteStep(1)}>
+              <Trash2 size={16} />
+              Удалить проект
+            </Button>
+          </div>
+        </div>
+      </Card>
+
+      <Modal
+        open={deleteStep === 1}
+        onClose={() => setDeleteStep(0)}
+        title="Удалить проект?"
+        description={`Проект «${project.name}» и всё его содержимое будут удалены безвозвратно.`}
+      >
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <Button variant="ghost" onClick={() => setDeleteStep(0)}>
+            Отмена
+          </Button>
+          <Button
+            variant="outline"
+            className="border-rose-300 text-rose-700 hover:bg-rose-100"
+            onClick={() => {
+              setDeleteConfirmName("");
+              setDeleteStep(2);
+            }}
+          >
+            Продолжить удаление
+          </Button>
+        </div>
+      </Modal>
+
+      <Modal
+        open={deleteStep === 2}
+        onClose={() => setDeleteStep(0)}
+        title="Подтвердите удаление"
+        description={`Чтобы окончательно удалить проект, введите его название: ${project.name}`}
+      >
+        <div className="space-y-4">
+          <Input
+            value={deleteConfirmName}
+            onChange={(event) => setDeleteConfirmName(event.target.value)}
+            placeholder={project.name}
+            autoComplete="off"
+          />
+          {deleteError ? <p className="text-sm text-rose-600">{deleteError}</p> : null}
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button variant="ghost" onClick={() => setDeleteStep(0)} disabled={deleting}>
+              Отмена
+            </Button>
+            <Button
+              variant="outline"
+              className="border-rose-300 text-rose-700 hover:bg-rose-100"
+              disabled={deleteConfirmName !== project.name || deleting}
+              onClick={() => void onDeleteProject()}
+            >
+              <Trash2 size={16} />
+              {deleting ? "Удаляем..." : "Удалить навсегда"}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
