@@ -48,11 +48,11 @@ export function Modal({
         aria-modal="true"
         aria-labelledby="modal-title"
         className={cn(
-          "relative z-10 w-full max-w-lg overflow-hidden rounded-[var(--ar-radius-sm)] border border-black/10 bg-white shadow-[0_18px_44px_rgba(7,20,38,0.14)]",
+          "relative z-10 flex max-h-[calc(100vh-2rem)] w-full max-w-lg flex-col overflow-hidden rounded-[var(--ar-radius-sm)] border border-black/10 bg-white shadow-[0_18px_44px_rgba(7,20,38,0.14)]",
           className
         )}
       >
-        <div className="flex items-start justify-between gap-4 border-b border-black/10 px-5 py-4">
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-black/10 px-5 py-4">
           <div>
             <h2 id="modal-title" className="text-lg font-semibold text-[var(--ar-black)]">
               {title}
@@ -68,7 +68,7 @@ export function Modal({
             <X size={18} />
           </button>
         </div>
-        <div className="px-5 py-5">{children}</div>
+        <div className="overflow-y-auto px-5 py-5">{children}</div>
       </div>
     </div>
   );
