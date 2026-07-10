@@ -17,6 +17,7 @@ import {
   updateTelegramBotAvatar,
   updateTelegramBotProfile,
   type ProjectType,
+  type SecretType,
   type TelegramBotProfileType,
 } from "@/lib/api";
 
@@ -194,6 +195,10 @@ export default function ProjectSettingsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
+  const [secrets, setSecrets] = useState<SecretType[] | null>(null);
+  const botTokenConfigured = secrets?.some(
+    (secret) => secret.key === "TELEGRAM_BOT_TOKEN" && secret.has_value
+  );
 
   useEffect(() => {
     let active = true;
@@ -300,9 +305,11 @@ export default function ProjectSettingsPage() {
         </Card>
       ) : null}
 
-      {project.type === "telegram_bot" ? <TelegramBotAppearanceCard projectId={params.id} /> : null}
+      {project.type === "telegram_bot" && botTokenConfigured ? (
+        <TelegramBotAppearanceCard projectId={params.id} />
+      ) : null}
 
-      <ProjectSecretsSection projectId={params.id} />
+      <ProjectSecretsSection projectId={params.id} onChange={setSecrets} />
     </div>
   );
 }

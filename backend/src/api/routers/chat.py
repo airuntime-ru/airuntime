@@ -45,6 +45,7 @@ from src.services.project_subdomain import (
 )
 from src.services.prompt_guard import sanitize_user_message
 from src.services.provider.factory import resolve_model
+from src.services.secrets import ensure_secret_placeholder
 from src.services.system_settings import resolve_api_key_for_provider
 from src.services.workspace import project_dir
 
@@ -128,6 +129,9 @@ def _tool_status_label(name: str, arguments: dict) -> str:
         return f"Правлю {path}"
     if name == "delete_file":
         return f"Удаляю {path}"
+    if name == "request_secret":
+        key = arguments.get("key", "") if isinstance(arguments, dict) else ""
+        return f"Запрашиваю секрет {key}" if key else "Запрашиваю секрет"
     return f"Инструмент: {name}"
 
 
@@ -173,7 +177,7 @@ def _clarifying_questions(project: Project, content: str) -> str:
             "2. Нужны ли команды вроде /start, /help, заявка, меню или сценарии?\n"
             "3. Добавьте секрет TELEGRAM_BOT_TOKEN в настройках проекта, чтобы я смог запустить бота.\n\n"
             "Как получить токен: откройте @BotFather в Telegram, выполните /newbot и скопируйте выданный token. "
-            f"Инструкция: {token_help_url}\n\n"
+            f"[Подробная инструкция]({token_help_url})\n\n"
             "После этого я соберу файлы, проверю Docker-сборку и запущу polling."
         )
     return (
@@ -421,6 +425,10 @@ async def _stream_events(
             return _sse_chunk(text)
 
         if _needs_clarification(project, content, attachment_ids):
+            if project.type == "telegram_bot":
+                ensure_secret_placeholder(
+                    db, project, "TELEGRAM_BOT_TOKEN", "Нужен для запуска Telegram-бота"
+                )
             questions = _clarifying_questions(project, content)
             yield _sse_status("questions", "Жду ответы на уточняющие вопросы", "waiting")
             yield append_visible(questions)
@@ -444,6 +452,7 @@ async def _stream_events(
 
         artifact_path = project_dir(project.id)
         agent_error: str | None = None
+        requested_secret_keys: set[str] = set()
 
         if not api_key:
             yield append_visible(
@@ -479,6 +488,19 @@ async def _stream_events(
                     )
                 elif isinstance(event, AgentDone) and event.reason == "error":
                     agent_error = event.error
+
+            new_secret_lines: list[str] = []
+            for key, reason in workspace.requested_secrets:
+                secret_row, created = ensure_secret_placeholder(db, project, key, reason)
+                requested_secret_keys.add(secret_row.key)
+                if created:
+                    label = f"**{secret_row.key}**"
+                    new_secret_lines.append(f"- {label} - {reason}" if reason else f"- {label}")
+            if new_secret_lines:
+                yield append_visible(
+                    "\n\nЧтобы проект заработал, заполните в настройках проекта "
+                    "(вкладка «Настройки») эти значения:\n" + "\n".join(new_secret_lines)
+                )
 
             if agent_error:
                 lowered = (agent_error or "").lower()
@@ -537,14 +559,22 @@ async def _stream_events(
                     )
             elif project.type == "telegram_bot":
                 if not _telegram_token(db, project):
-                    token_help_url = f"{settings.resolved_frontend_url}/help/telegram-token"
-                    project.status = "needs_configuration"
-                    token_note = (
-                        "Файлы бота созданы, но запуск остановлен: добавьте секрет "
-                        "TELEGRAM_BOT_TOKEN в настройках проекта и повторите запуск.\n\n"
-                        "Как получить токен: откройте @BotFather в Telegram, выполните /newbot "
-                        f"и скопируйте выданный token. Инструкция: {token_help_url}"
+                    ensure_secret_placeholder(
+                        db, project, "TELEGRAM_BOT_TOKEN", "Нужен для запуска Telegram-бота"
                     )
+                    project.status = "needs_configuration"
+                    if "TELEGRAM_BOT_TOKEN" in requested_secret_keys:
+                        # Already explained above (agent called request_secret this turn) -
+                        # avoid repeating the same instructions twice in one reply.
+                        token_note = "Запуск отложен до заполнения токена."
+                    else:
+                        token_help_url = f"{settings.resolved_frontend_url}/help/telegram-token"
+                        token_note = (
+                            "Файлы бота созданы, но запуск остановлен: добавьте секрет "
+                            "TELEGRAM_BOT_TOKEN в настройках проекта и повторите запуск.\n\n"
+                            "Как получить токен: откройте @BotFather в Telegram, выполните /newbot "
+                            f"и скопируйте выданный token. [Подробная инструкция]({token_help_url})"
+                        )
                     project.logs = f"{project.logs}\n{token_note}".strip()
                     db.add(project)
                     yield _sse_status("needs_configuration", "Нужен TELEGRAM_BOT_TOKEN", "error")

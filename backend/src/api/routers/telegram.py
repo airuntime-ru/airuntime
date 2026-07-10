@@ -7,7 +7,7 @@ from src.db.models.project import Project
 from src.db.models.secret import Secret
 from src.db.models.user import User
 from src.db.session import get_db
-from src.services.secrets import decrypt_secret, encrypt_secret
+from src.services.secrets import TELEGRAM_BOT_TOKEN_KEY, decrypt_secret, encrypt_secret
 from src.services.telegram_profile import (
     TelegramBotProfile,
     TelegramProfileError,
@@ -57,11 +57,13 @@ def _telegram_project_and_token(
         raise HTTPException(status_code=400, detail="Project is not a Telegram bot")
     secret = (
         db.query(Secret)
-        .filter(Secret.project_id == project.id, Secret.key == "TELEGRAM_BOT_TOKEN")
+        .filter(Secret.project_id == project.id, Secret.key == TELEGRAM_BOT_TOKEN_KEY)
         .first()
     )
-    if not secret:
-        raise HTTPException(status_code=400, detail="Telegram bot token is not configured")
+    if not secret or not secret.encrypted_value:
+        raise HTTPException(
+            status_code=400, detail="Токен Telegram-бота ещё не задан в настройках проекта"
+        )
     return project, decrypt_secret(secret.encrypted_value)
 
 
@@ -87,7 +89,7 @@ def save_bot_token(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     existing = (
         db.query(Secret)
-        .filter(Secret.project_id == project.id, Secret.key == "TELEGRAM_BOT_TOKEN")
+        .filter(Secret.project_id == project.id, Secret.key == TELEGRAM_BOT_TOKEN_KEY)
         .first()
     )
     if existing:
@@ -96,7 +98,7 @@ def save_bot_token(
         db.add(
             Secret(
                 project_id=project.id,
-                key="TELEGRAM_BOT_TOKEN",
+                key=TELEGRAM_BOT_TOKEN_KEY,
                 encrypted_value=encrypt_secret(payload.bot_token),
             )
         )
@@ -187,11 +189,13 @@ def start_bot(
         raise HTTPException(status_code=400, detail="Project is not a Telegram bot")
     token = (
         db.query(Secret)
-        .filter(Secret.project_id == project.id, Secret.key == "TELEGRAM_BOT_TOKEN")
+        .filter(Secret.project_id == project.id, Secret.key == TELEGRAM_BOT_TOKEN_KEY)
         .first()
     )
-    if not token:
-        raise HTTPException(status_code=400, detail="Telegram bot token is not configured")
+    if not token or not token.encrypted_value:
+        raise HTTPException(
+            status_code=400, detail="Токен Telegram-бота ещё не задан в настройках проекта"
+        )
     try:
         profile = fetch_bot_profile(decrypt_secret(token.encrypted_value))
     except TelegramProfileError as exc:

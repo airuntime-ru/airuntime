@@ -104,18 +104,12 @@ export default function ProjectOverviewPage() {
       ) : null}
       {error ? <p className="text-sm text-rose-600">{error}</p> : null}
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2">
         <Card hover={false}>
           <p className="text-sm text-[var(--ar-stone)]">Статус</p>
           <div className="mt-2">
             <Badge>{projectStatusLabel(project.status)}</Badge>
           </div>
-        </Card>
-        <Card hover={false}>
-          <p className="text-sm text-[var(--ar-stone)]">Идея</p>
-          <p className="mt-2 line-clamp-2 text-sm font-medium leading-6 text-[var(--ar-black)]">
-            {project.description || "Опишите задачу в чате"}
-          </p>
         </Card>
         <Card hover={false}>
           <p className="text-sm text-[var(--ar-stone)]">Публикация</p>

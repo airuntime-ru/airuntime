@@ -16,20 +16,7 @@ from src.core.config import settings
 from src.db.models.project import Project
 from src.db.models.secret import Secret
 from src.services.project_git import with_project_git_lock
-from src.services.secrets import decrypt_secret
-
-TOKEN_SECRET_KEYS = {
-    "TELEGRAM_BOT_TOKEN",
-    "TELEGRAM_TOKEN",
-    "BOT_TOKEN",
-    "TG_BOT_TOKEN",
-    "TG_TOKEN",
-    "TELEGRAMBOT_TOKEN",
-    "TELEGRAMBOTTOKEN",
-    "TELEGRAM_BOT",
-    "TELEGRAMBOT",
-    "TG_BOT",
-}
+from src.services.secrets import TELEGRAM_BOT_TOKEN_KEY, decrypt_secret, normalize_secret_key
 
 
 class ArtifactError(RuntimeError):
@@ -389,9 +376,10 @@ def generate_website_artifact(project: Project, prompt: str = "") -> Path:
 def _telegram_token(db: Session, project: Project) -> str | None:
     rows = db.query(Secret).filter(Secret.project_id == project.id).all()
     for row in rows:
-        normalized_key = re.sub(r"[^A-Z0-9]+", "_", row.key.upper()).strip("_")
-        compact_key = normalized_key.replace("_", "")
-        if normalized_key in TOKEN_SECRET_KEYS or f"{compact_key}_TOKEN" in TOKEN_SECRET_KEYS:
+        if not row.encrypted_value:
+            continue
+        normalized_key = normalize_secret_key(row.key, project_type=project.type)
+        if normalized_key == TELEGRAM_BOT_TOKEN_KEY:
             return decrypt_secret(row.encrypted_value)
     return None
 
@@ -400,9 +388,6 @@ def generate_telegram_bot_artifact(project: Project, prompt: str = "") -> Path:
     path = _project_dir(project.id)
     _clean_project_dir(path)
     safe_name = json.dumps(project.name, ensure_ascii=False)
-    safe_description = json.dumps(
-        (prompt or project.description or "AIRuntime bot").strip(), ensure_ascii=False
-    )
     app_py = f"""
 import logging
 import os
@@ -411,11 +396,14 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 BOT_NAME = {safe_name}
-DESCRIPTION = {safe_description}
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(f"{{BOT_NAME}} запущен. {{DESCRIPTION}}")
+    user_name = update.effective_user.first_name if update.effective_user else None
+    greeting = f"Привет, {{user_name}}!" if user_name else "Привет!"
+    await update.message.reply_text(
+        f"{{greeting}} Я {{BOT_NAME}}. Уже на связи и готов помогать - просто напишите сообщение."
+    )
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

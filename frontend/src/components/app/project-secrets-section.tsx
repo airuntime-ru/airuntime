@@ -1,66 +1,112 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { KeyRound, ShieldCheck, Trash2 } from "lucide-react";
+import { CheckCircle2, KeyRound, ShieldCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/loader";
 import { Input } from "@/components/ui/input";
-import { createSecret, deleteSecret, listSecrets, type SecretType } from "@/lib/api";
+import { setSecretValue, listSecrets, type SecretType } from "@/lib/api";
 
-export function ProjectSecretsSection({ projectId }: { projectId: string }) {
-  const [secrets, setSecrets] = useState<SecretType[]>([]);
-  const [key, setKey] = useState("");
+function SecretRow({
+  secret,
+  projectId,
+  onSaved,
+}: {
+  secret: SecretType;
+  projectId: string;
+  onSaved: (updated: SecretType) => void;
+}) {
   const [value, setValue] = useState("");
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const onSave = async () => {
+    if (!value.trim()) return;
+    setSaving(true);
+    setError("");
+    try {
+      const updated = await setSecretValue(projectId, secret.id, value);
+      setValue("");
+      onSaved(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось сохранить значение");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-3 rounded-[var(--ar-radius-sm)] border border-white/70 bg-white/64 px-4 py-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <p className="font-medium text-[var(--ar-black)]">{secret.key}</p>
+          {secret.reason ? (
+            <p className="mt-0.5 text-xs text-[var(--ar-stone)]">{secret.reason}</p>
+          ) : null}
+        </div>
+        {secret.has_value ? (
+          <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+            <CheckCircle2 size={14} />
+            Настроено
+          </span>
+        ) : null}
+      </div>
+      {!secret.has_value ? (
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Input
+            placeholder="Вставьте значение"
+            type="password"
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+            autoComplete="off"
+          />
+          <Button
+            variant="accent"
+            size="sm"
+            className="sm:w-auto"
+            onClick={() => void onSave()}
+            disabled={saving || !value.trim()}
+          >
+            <KeyRound size={14} />
+            {saving ? "Проверяем..." : "Сохранить"}
+          </Button>
+        </div>
+      ) : null}
+      {error ? <p className="text-sm text-rose-600">{error}</p> : null}
+    </div>
+  );
+}
+
+export function ProjectSecretsSection({
+  projectId,
+  onChange,
+}: {
+  projectId: string;
+  onChange?: (secrets: SecretType[]) => void;
+}) {
+  const [secrets, setSecrets] = useState<SecretType[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      setSecrets(await listSecrets(projectId));
+      const rows = await listSecrets(projectId);
+      setSecrets(rows);
+      onChange?.(rows);
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось загрузить секреты");
     } finally {
       setLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, onChange]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void refresh();
-    }, 0);
-    return () => window.clearTimeout(timer);
+    void refresh();
   }, [refresh]);
-
-  const onCreate = async () => {
-    if (!key.trim() || !value.trim()) return;
-    setSaving(true);
-    setError("");
-    try {
-      await createSecret(projectId, key.trim().toUpperCase(), value);
-      setKey("");
-      setValue("");
-      await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось сохранить секрет");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const onDelete = async (secretId: string) => {
-    setError("");
-    try {
-      await deleteSecret(projectId, secretId);
-      await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось удалить секрет");
-    }
-  };
 
   return (
     <Card hover={false} className="md:col-span-2" id="secrets">
@@ -72,49 +118,11 @@ export function ProjectSecretsSection({ projectId }: { projectId: string }) {
           <div>
             <p className="text-sm font-semibold text-[var(--ar-black)]">Защищенный контур</p>
             <p className="mt-1 text-sm leading-7 text-[var(--ar-mist)]">
-              API-ключи и токены хранятся зашифрованно и доступны только при сборке и запуске проекта.
+              Когда проекту нужен токен или API-ключ, AIRuntime сам заводит для него слот здесь -
+              просто впишите значение. Хранится зашифрованно и доступно только при сборке и
+              запуске проекта.
             </p>
           </div>
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
-          <Input
-            placeholder="Ключ, например TELEGRAM_BOT_TOKEN"
-            value={key}
-            onChange={(event) => setKey(event.target.value.toUpperCase())}
-            autoComplete="off"
-            spellCheck={false}
-          />
-          <Input
-            placeholder="Значение"
-            type="password"
-            value={value}
-            onChange={(event) => setValue(event.target.value)}
-            autoComplete="off"
-          />
-          <Button variant="accent" className="w-full md:w-auto" onClick={() => void onCreate()} disabled={saving || !key || !value}>
-            <KeyRound size={16} />
-            {saving ? "Сохраняем..." : "Добавить"}
-          </Button>
-        </div>
-
-        <div className="rounded-[var(--ar-radius-sm)] border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm leading-6 text-amber-900">
-          Для Telegram-бота добавьте секрет{" "}
-          <button
-            type="button"
-            className="font-semibold underline underline-offset-2"
-            onClick={() => setKey("TELEGRAM_BOT_TOKEN")}
-          >
-            TELEGRAM_BOT_TOKEN
-          </button>
-          . Токен выдаёт{" "}
-          <a
-            href="/help/telegram-token"
-            className="font-semibold underline underline-offset-2"
-          >
-            инструкция
-          </a>
-          : откройте его в Telegram, выполните /newbot и вставьте полученный token сюда.
         </div>
 
         {error ? <p className="text-sm text-rose-600">{error}</p> : null}
@@ -124,24 +132,23 @@ export function ProjectSecretsSection({ projectId }: { projectId: string }) {
         ) : secrets.length === 0 ? (
           <EmptyState
             title="Секретов пока нет"
-            description="Добавьте токены и ключи, если проекту нужен внешний сервис, Telegram или платежи."
+            description="Как только проекту понадобится токен или ключ API, он появится здесь - опишите задачу в чате."
           />
         ) : (
           <div className="grid gap-2">
             {secrets.map((secret) => (
-              <div
+              <SecretRow
                 key={secret.id}
-                className="flex flex-col gap-3 rounded-[var(--ar-radius-sm)] border border-white/70 bg-white/64 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div>
-                  <p className="font-medium text-[var(--ar-black)]">{secret.key}</p>
-                  <p className="text-xs text-[var(--ar-stone)]">Значение скрыто</p>
-                </div>
-                <Button variant="ghost" size="sm" onClick={() => void onDelete(secret.id)}>
-                  <Trash2 size={15} />
-                  Удалить
-                </Button>
-              </div>
+                secret={secret}
+                projectId={projectId}
+                onSaved={(updated) => {
+                  setSecrets((prev) => {
+                    const next = prev.map((row) => (row.id === updated.id ? updated : row));
+                    onChange?.(next);
+                    return next;
+                  });
+                }}
+              />
             ))}
           </div>
         )}

@@ -94,6 +94,35 @@ TOOL_DEFS: list[dict[str, Any]] = [
             "required": ["path"],
         },
     },
+    {
+        "name": "request_secret",
+        "description": (
+            "Ask the platform to reserve a secret slot (API key, token, credential) that this "
+            "project's code will read from an environment variable. This does NOT ask the user "
+            "for the value in chat - it creates an empty, named slot that the user fills in "
+            "themselves in the project's Settings page, where the platform can validate it. "
+            "Call this as soon as you know the project needs a credential you don't have, "
+            "instead of asking for it as chat text and instead of inventing/hardcoding a value. "
+            "Safe to call again for the same key - it won't overwrite an existing value."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string",
+                    "description": (
+                        "UPPER_SNAKE_CASE environment variable name the code reads, e.g. "
+                        "TELEGRAM_BOT_TOKEN or STRIPE_SECRET_KEY."
+                    ),
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "One short sentence shown to the user explaining what it's for.",
+                },
+            },
+            "required": ["key", "reason"],
+        },
+    },
 ]
 
 TOOL_NAMES = {tool["name"] for tool in TOOL_DEFS}
@@ -112,6 +141,7 @@ class WorkspaceTools:
     def __init__(self, root: Path) -> None:
         self.root = root
         self.touched_files: set[str] = set()
+        self.requested_secrets: list[tuple[str, str]] = []
 
     def call(self, name: str, arguments: dict[str, Any]) -> ToolExecutionResult:
         try:
@@ -129,6 +159,10 @@ class WorkspaceTools:
                 )
             if name == "delete_file":
                 return self._delete_file(str(arguments.get("path", "")))
+            if name == "request_secret":
+                return self._request_secret(
+                    str(arguments.get("key", "")), str(arguments.get("reason", ""))
+                )
             return ToolExecutionResult(ok=False, summary=f"Unknown tool: {name}")
         except WorkspaceError as exc:
             return ToolExecutionResult(ok=False, summary=str(exc))
@@ -215,6 +249,16 @@ class WorkspaceTools:
         rel = target.relative_to(self.root).as_posix()
         self.touched_files.add(rel)
         return ToolExecutionResult(ok=True, summary=f"Edited {rel}")
+
+    def _request_secret(self, key: str, reason: str) -> ToolExecutionResult:
+        key = key.strip()
+        if not key:
+            return ToolExecutionResult(ok=False, summary="key must not be empty")
+        self.requested_secrets.append((key, reason.strip()))
+        return ToolExecutionResult(
+            ok=True,
+            summary=f"Requested secret {key} - the user will fill in the value in Settings",
+        )
 
     def _delete_file(self, path: str) -> ToolExecutionResult:
         target = resolve_in_workspace(self.root, path)

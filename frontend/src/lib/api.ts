@@ -303,21 +303,27 @@ export async function deleteChatFile(projectId: string, chatId: string, fileId: 
   await requestJson(`/projects/${projectId}/chats/${chatId}/files/${fileId}`, { method: "DELETE" });
 }
 
-export type SecretType = { id: string; key: string; created_at: string };
+export type SecretType = {
+  id: string;
+  key: string;
+  reason: string | null;
+  has_value: boolean;
+  created_at: string;
+};
 
 export async function listSecrets(projectId: string): Promise<SecretType[]> {
   return requestJson<SecretType[]>(`/projects/${projectId}/secrets`);
 }
 
-export async function createSecret(projectId: string, key: string, value: string): Promise<void> {
-  await requestJson(`/projects/${projectId}/secrets`, {
-    method: "POST",
-    body: JSON.stringify({ key, value }),
+export async function setSecretValue(
+  projectId: string,
+  secretId: string,
+  value: string
+): Promise<SecretType & { url?: string }> {
+  return requestJson(`/projects/${projectId}/secrets/${secretId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ value }),
   });
-}
-
-export async function deleteSecret(projectId: string, secretId: string): Promise<void> {
-  await requestJson(`/projects/${projectId}/secrets/${secretId}`, { method: "DELETE" });
 }
 
 export async function getTelegramBotProfile(projectId: string): Promise<TelegramBotProfileType> {
