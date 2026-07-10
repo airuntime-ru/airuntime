@@ -1,6 +1,7 @@
 from src.db.models import (
     chat,
     chat_file,
+    credit_ledger,
     credit_topup,
     deployment,
     message,
@@ -26,4 +27,5 @@ __all__ = [
     "moderation_event",
     "plan",
     "credit_topup",
+    "credit_ledger",
 ]

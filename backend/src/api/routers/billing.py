@@ -3,17 +3,22 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from src.api.dependencies.auth import get_current_user
+from src.db.models.credit_ledger import CreditLedgerEntry
 from src.db.models.credit_topup import CreditTopUp
 from src.db.models.plan import Plan
 from src.db.models.user import User
 from src.db.session import get_db
-from src.services.billing import request_topup
+from src.services.billing import list_recent_ledger, request_topup, switch_plan
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
 
 class TopUpRequest(BaseModel):
     credits: int = Field(gt=0, le=10_000_000)
+
+
+class SwitchPlanRequest(BaseModel):
+    plan_id: str
 
 
 def _plan_response(plan: Plan) -> dict:
@@ -36,6 +41,16 @@ def _topup_response(invoice: CreditTopUp) -> dict:
         "status": invoice.status,
         "created_at": invoice.created_at,
         "paid_at": invoice.paid_at,
+    }
+
+
+def _ledger_response(entry: CreditLedgerEntry) -> dict:
+    return {
+        "id": str(entry.id),
+        "amount": entry.amount,
+        "reason": entry.reason,
+        "project_id": str(entry.project_id) if entry.project_id else None,
+        "created_at": entry.created_at,
     }
 
 
@@ -79,3 +94,30 @@ def list_topups(
         .all()
     )
     return [_topup_response(row) for row in rows]
+
+
+@router.post("/plan")
+def change_plan(
+    payload: SwitchPlanRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    plan = db.query(Plan).filter(Plan.id == payload.plan_id, Plan.is_active.is_(True)).first()
+    if not plan:
+        raise HTTPException(status_code=404, detail="Тариф не найден")
+    if current_user.plan_id and str(current_user.plan_id) == payload.plan_id:
+        raise HTTPException(status_code=400, detail="Этот тариф уже активен")
+    switch_plan(db, current_user, plan)
+    return {
+        "credits_balance": current_user.credits_balance,
+        "billing_period_start": current_user.billing_period_start,
+        "billing_period_end": current_user.billing_period_end,
+        "plan": _plan_response(plan),
+    }
+
+
+@router.get("/usage")
+def get_usage_history(
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> list[dict]:
+    return [_ledger_response(row) for row in list_recent_ledger(db, current_user)]

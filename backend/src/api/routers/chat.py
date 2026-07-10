@@ -29,6 +29,7 @@ from src.services.agent.prompt import build_system_prompt
 from src.services.agent.tools import WorkspaceTools
 from src.services.agentic_artifacts import ensure_required_files, generate_fallback_artifact
 from src.services.artifacts import ArtifactError, _telegram_token
+from src.services.billing import record_usage
 from src.services.chat_context import build_llm_context
 from src.services.deployments import create_deployment_for_project
 from src.services.file_context import (
@@ -496,8 +497,7 @@ async def _stream_events(
             )
             db.add(assistant_message)
             usage_cost = max(100, len(safe_message) + len(assistant_full))
-            current_user.credits_balance = max(0, current_user.credits_balance - usage_cost)
-            db.add(current_user)
+            record_usage(db, current_user, project_id=project.id, amount=usage_cost)
             db.commit()
             yield "data: [DONE]\n\n"
             return
@@ -669,8 +669,7 @@ async def _stream_events(
         )
         db.add(assistant_message)
         usage_cost = max(100, len(safe_message) + len(assistant_full))
-        current_user.credits_balance = max(0, current_user.credits_balance - usage_cost)
-        db.add(current_user)
+        record_usage(db, current_user, project_id=project.id, amount=usage_cost)
         db.commit()
         yield "data: [DONE]\n\n"
 

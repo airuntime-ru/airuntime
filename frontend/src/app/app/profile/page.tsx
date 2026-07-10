@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, CreditCard, Sparkles, UserRound, Zap } from "lucide-react";
+import { CheckCircle2, CreditCard, History, Layers, Sparkles, UserRound, Zap } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,10 +10,15 @@ import { PageLoader } from "@/components/ui/loader";
 import { Modal } from "@/components/ui/modal";
 import {
   type BillingSummaryType,
+  type CreditLedgerEntryType,
   type CreditTopUpType,
+  type PlanType,
   createTopUp,
   getBillingSummary,
+  getUsageHistory,
+  listPlans,
   listTopUps,
+  switchPlan,
 } from "@/lib/api";
 import { useProfile } from "@/lib/use-profile";
 
@@ -23,6 +28,23 @@ function formatDate(value: string | null): string {
   if (!value) return "—";
   return new Date(value).toLocaleDateString("ru-RU", { day: "2-digit", month: "long", year: "numeric" });
 }
+
+function formatDateTime(value: string): string {
+  return new Date(value).toLocaleString("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+const LEDGER_REASON_LABEL: Record<CreditLedgerEntryType["reason"], string> = {
+  chat_message: "Сообщение в чате",
+  topup: "Пополнение баланса",
+  period_renewal: "Обновление тарифного периода",
+  plan_change: "Смена тарифа",
+};
 
 // "до N проектов": genitive case throughout, so only the "N=1" form differs ("до 1 проекта" vs "до 5 проектов").
 function pluralizeProjects(count: number): string {
@@ -41,15 +63,28 @@ export default function ProfilePage() {
   const { profile, error, loading } = useProfile();
   const [billing, setBilling] = useState<BillingSummaryType | null>(null);
   const [topups, setTopups] = useState<CreditTopUpType[]>([]);
+  const [usage, setUsage] = useState<CreditLedgerEntryType[]>([]);
+  const [plans, setPlans] = useState<PlanType[]>([]);
   const [topupOpen, setTopupOpen] = useState(false);
   const [topupCredits, setTopupCredits] = useState(TOPUP_PRESETS[0]);
   const [topupBusy, setTopupBusy] = useState(false);
   const [topupError, setTopupError] = useState<string | null>(null);
+  const [planModalOpen, setPlanModalOpen] = useState(false);
+  const [confirmPlan, setConfirmPlan] = useState<PlanType | null>(null);
+  const [planBusy, setPlanBusy] = useState(false);
+  const [planError, setPlanError] = useState<string | null>(null);
 
   const loadBilling = async () => {
-    const [summary, invoices] = await Promise.all([getBillingSummary(), listTopUps()]);
+    const [summary, invoices, usageRows, planRows] = await Promise.all([
+      getBillingSummary(),
+      listTopUps(),
+      getUsageHistory(),
+      listPlans(),
+    ]);
     setBilling(summary);
     setTopups(invoices);
+    setUsage(usageRows);
+    setPlans(planRows);
   };
 
   useEffect(() => {
@@ -70,6 +105,22 @@ export default function ProfilePage() {
       setTopupError(err instanceof Error ? err.message : "Не удалось создать счёт");
     } finally {
       setTopupBusy(false);
+    }
+  };
+
+  const onConfirmPlanSwitch = async () => {
+    if (!confirmPlan) return;
+    setPlanBusy(true);
+    setPlanError(null);
+    try {
+      await switchPlan(confirmPlan.id);
+      await loadBilling();
+      setConfirmPlan(null);
+      setPlanModalOpen(false);
+    } catch (err) {
+      setPlanError(err instanceof Error ? err.message : "Не удалось сменить тариф");
+    } finally {
+      setPlanBusy(false);
     }
   };
 
@@ -136,10 +187,16 @@ export default function ProfilePage() {
                 </p>
               </div>
             </div>
-            <Button variant="accent" onClick={() => setTopupOpen(true)}>
-              <CreditCard size={15} />
-              Пополнить баланс
-            </Button>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button variant="outline" onClick={() => setPlanModalOpen(true)}>
+                <Layers size={15} />
+                Сменить тариф
+              </Button>
+              <Button variant="accent" onClick={() => setTopupOpen(true)}>
+                <CreditCard size={15} />
+                Пополнить баланс
+              </Button>
+            </div>
           </div>
           <div className="grid gap-4 sm:grid-cols-3">
             <div>
@@ -171,6 +228,34 @@ export default function ProfilePage() {
                       {invoice.credits.toLocaleString()} кредитов · {invoice.amount_rub} ₽
                     </span>
                     <Badge>{TOPUP_STATUS_LABEL[invoice.status]}</Badge>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {usage.length > 0 ? (
+            <div className="border-t border-white/60 pt-4">
+              <p className="mb-2 flex items-center gap-1.5 text-sm text-[var(--ar-stone)]">
+                <History size={14} />
+                История списаний и начислений
+              </p>
+              <div className="space-y-2">
+                {usage.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className="flex items-center justify-between rounded-[var(--ar-radius-sm)] border border-black/5 bg-white/60 px-3 py-2 text-sm"
+                  >
+                    <div>
+                      <p className="font-medium text-[var(--ar-black)]">{LEDGER_REASON_LABEL[entry.reason]}</p>
+                      <p className="text-xs text-[var(--ar-stone)]">{formatDateTime(entry.created_at)}</p>
+                    </div>
+                    <span
+                      className={`font-semibold tabular-nums ${entry.amount >= 0 ? "text-emerald-600" : "text-[var(--ar-black)]"}`}
+                    >
+                      {entry.amount >= 0 ? "+" : ""}
+                      {entry.amount.toLocaleString()}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -212,6 +297,69 @@ export default function ProfilePage() {
             </Button>
             <Button variant="accent" onClick={() => void onRequestTopup()} disabled={topupBusy}>
               {topupBusy ? "Создаём счёт…" : "Создать счёт"}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={planModalOpen}
+        onClose={() => setPlanModalOpen(false)}
+        title="Выберите тариф"
+        description="Смена тарифа сразу обновляет баланс до месячного лимита нового тарифа и начинает новый период."
+      >
+        <div className="space-y-2">
+          {plans.map((plan) => {
+            const isCurrent = billing?.plan?.id === plan.id;
+            return (
+              <button
+                key={plan.id}
+                type="button"
+                disabled={isCurrent}
+                onClick={() => setConfirmPlan(plan)}
+                className={`w-full rounded-[var(--ar-radius-sm)] border p-3 text-left transition ${
+                  isCurrent
+                    ? "cursor-default border-[var(--ar-sky)]/40 bg-[var(--ar-sky)]/5"
+                    : "border-black/10 hover:border-black/20"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-semibold text-[var(--ar-black)]">
+                    {plan.name}
+                    {isCurrent ? <span className="ml-2 text-xs font-normal text-[var(--ar-sky)]">текущий</span> : null}
+                  </p>
+                  <p className="font-semibold tabular-nums text-[var(--ar-black)]">
+                    {plan.price_rub > 0 ? `${plan.price_rub} ₽/мес` : "Бесплатно"}
+                  </p>
+                </div>
+                <p className="mt-1 text-sm text-[var(--ar-mist)]">
+                  {plan.monthly_credits.toLocaleString()} кредитов в месяц · до {plan.max_concurrent_projects}{" "}
+                  {pluralizeProjects(plan.max_concurrent_projects)} одновременно
+                </p>
+              </button>
+            );
+          })}
+        </div>
+      </Modal>
+
+      <Modal
+        open={Boolean(confirmPlan)}
+        onClose={() => setConfirmPlan(null)}
+        title="Сменить тариф?"
+        description={
+          confirmPlan
+            ? `Тариф изменится на «${confirmPlan.name}». Баланс сразу станет ${confirmPlan.monthly_credits.toLocaleString()} кредитов, текущий тарифный период начнётся заново.`
+            : undefined
+        }
+      >
+        <div className="space-y-4">
+          {planError ? <p className="text-sm text-rose-600">{planError}</p> : null}
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button variant="ghost" onClick={() => setConfirmPlan(null)} disabled={planBusy}>
+              Отмена
+            </Button>
+            <Button variant="accent" onClick={() => void onConfirmPlanSwitch()} disabled={planBusy}>
+              {planBusy ? "Меняем тариф…" : "Да, сменить тариф"}
             </Button>
           </div>
         </div>

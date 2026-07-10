@@ -521,3 +521,22 @@ export async function createTopUp(credits: number): Promise<CreditTopUpType> {
 export async function listTopUps(): Promise<CreditTopUpType[]> {
   return requestJson<CreditTopUpType[]>("/billing/topups");
 }
+
+export async function switchPlan(planId: string): Promise<BillingSummaryType> {
+  return requestJson<BillingSummaryType>("/billing/plan", {
+    method: "POST",
+    body: JSON.stringify({ plan_id: planId }),
+  });
+}
+
+export type CreditLedgerEntryType = {
+  id: string;
+  amount: number;
+  reason: "chat_message" | "topup" | "period_renewal" | "plan_change";
+  project_id: string | null;
+  created_at: string;
+};
+
+export async function getUsageHistory(): Promise<CreditLedgerEntryType[]> {
+  return requestJson<CreditLedgerEntryType[]>("/billing/usage");
+}

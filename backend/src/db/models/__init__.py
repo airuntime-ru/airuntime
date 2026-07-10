@@ -1,5 +1,6 @@
 from src.db.models.chat import Chat
 from src.db.models.chat_file import ChatFile
+from src.db.models.credit_ledger import CreditLedgerEntry
 from src.db.models.credit_topup import CreditTopUp
 from src.db.models.deployment import Deployment
 from src.db.models.message import Message
@@ -24,4 +25,5 @@ __all__ = [
     "ModerationEvent",
     "Plan",
     "CreditTopUp",
+    "CreditLedgerEntry",
 ]
