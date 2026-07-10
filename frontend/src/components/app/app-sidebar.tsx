@@ -40,7 +40,7 @@ export function AppSidebar({ credits, onLogout }: { credits: number; onLogout: (
       </div>
 
       <div className="relative z-10 mb-5 overflow-hidden rounded-[var(--ar-radius-md)] border border-white/10 bg-white/[0.04] p-4">
-        <div className="absolute -right-6 -top-6 h-20 w-20 rounded-full bg-[var(--ar-accent-gradient)] opacity-20 blur-2xl" aria-hidden />
+        <div className="absolute -right-6 -top-6 h-20 w-20 rounded-full bg-[image:var(--ar-accent-gradient)] opacity-20 blur-2xl" aria-hidden />
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/35">Кредиты</p>
         <p className="mt-1 text-2xl font-semibold tabular-nums text-[var(--ar-ink-text-strong)]">
           {credits.toLocaleString()}

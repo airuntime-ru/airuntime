@@ -78,6 +78,7 @@ textarea {
   -webkit-tap-highlight-color: transparent;
 }
 
+@layer components {
 .runtime-sky {
   position: relative;
   overflow-x: hidden;
@@ -474,6 +475,7 @@ textarea {
   text-decoration: underline;
   text-decoration-color: rgba(35, 136, 255, 0.28);
   text-underline-offset: 3px;
+}
 }
 
 @keyframes sky-drift {

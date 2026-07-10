@@ -42,7 +42,7 @@ export default function ProjectsPage() {
         <div className="relative grid gap-6 lg:grid-cols-[1.1fr_0.9fr] lg:items-end">
           <div>
             <p className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-black/[0.03] px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ar-mist)]">
-              <span className="h-1.5 w-1.5 rounded-full bg-[var(--ar-accent-gradient)]" aria-hidden />
+              <span className="h-1.5 w-1.5 rounded-full bg-[image:var(--ar-accent-gradient)]" aria-hidden />
               AIRuntime
             </p>
             <h1 className="mt-5 max-w-3xl text-[2.35rem] font-semibold leading-[1.04] tracking-normal text-[var(--ar-black)] sm:text-5xl xl:text-6xl">

@@ -11,11 +11,11 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "border border-white/10 bg-[var(--ar-accent-gradient)] text-white shadow-[0_10px_28px_rgba(35,136,255,0.28)] hover:brightness-[1.06] hover:shadow-[0_14px_34px_rgba(35,136,255,0.36)]",
+          "border border-white/10 bg-[image:var(--ar-accent-gradient)] text-white shadow-[0_10px_28px_rgba(35,136,255,0.28)] hover:brightness-[1.06] hover:shadow-[0_14px_34px_rgba(35,136,255,0.36)]",
         ghost:
           "text-[var(--ar-graphite)] hover:bg-black/5",
         accent:
-          "border border-white/10 bg-[var(--ar-accent-gradient)] text-white shadow-[0_10px_28px_rgba(35,136,255,0.28)] hover:brightness-[1.06] hover:shadow-[0_14px_34px_rgba(35,136,255,0.36)]",
+          "border border-white/10 bg-[image:var(--ar-accent-gradient)] text-white shadow-[0_10px_28px_rgba(35,136,255,0.28)] hover:brightness-[1.06] hover:shadow-[0_14px_34px_rgba(35,136,255,0.36)]",
         outline:
           "border border-black/12 bg-white text-[var(--ar-graphite)] hover:border-[var(--ar-sky)]/35 hover:bg-[rgba(35,136,255,0.04)]",
       },

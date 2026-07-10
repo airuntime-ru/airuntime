@@ -8,7 +8,7 @@ export function Badge({ children, className }: { children: React.ReactNode; clas
         className
       )}
     >
-      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--ar-accent-gradient)]" aria-hidden />
+      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[image:var(--ar-accent-gradient)]" aria-hidden />
       {children}
     </span>
   );

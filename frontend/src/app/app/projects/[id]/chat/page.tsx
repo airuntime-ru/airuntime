@@ -796,7 +796,7 @@ export default function ProjectChatPage() {
                       className={cn(
                         "flex h-8 w-8 items-center justify-center rounded-full transition-all",
                         canSend && !loading && !bootstrapping
-                          ? "bg-[var(--ar-accent-gradient)] text-white shadow-[0_6px_18px_rgba(35,136,255,0.32)] hover:brightness-[1.06]"
+                          ? "bg-[image:var(--ar-accent-gradient)] text-white shadow-[0_6px_18px_rgba(35,136,255,0.32)] hover:brightness-[1.06]"
                           : "bg-black/10 text-[var(--ar-stone)]"
                       )}
                       aria-label="Отправить"

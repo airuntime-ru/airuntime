@@ -55,7 +55,7 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-black/[0.03] px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--ar-mist)]">
-                <span className="h-1.5 w-1.5 rounded-full bg-[var(--ar-accent-gradient)]" aria-hidden />
+                <span className="h-1.5 w-1.5 rounded-full bg-[image:var(--ar-accent-gradient)]" aria-hidden />
                 AIRuntime project
               </span>
               <Badge>{project.status}</Badge>
