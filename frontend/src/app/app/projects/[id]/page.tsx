@@ -138,7 +138,7 @@ export default function ProjectOverviewPage() {
       </Link>
     );
   } else if (canRun) {
-    heading = "Готово к запуску";
+    heading = "Можно запускать";
     description = "Файлы собраны - запустите проект, когда будете готовы.";
     primaryAction = (
       <Button variant="accent" className="w-full" disabled={startDisabled} onClick={onStart}>

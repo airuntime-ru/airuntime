@@ -22,7 +22,7 @@ const STATUS_GUIDANCE: Record<
     body:
       project.type === "telegram_bot"
         ? "Файлы бота уже собраны, но запустить его пока нельзя: не хватает токена. Откройте настройки проекта, вставьте TELEGRAM_BOT_TOKEN (его выдаёт @BotFather в Telegram после команды /newbot) и запуск продолжится автоматически."
-        : "Проекту не хватает данных для запуска - откройте настройки проекта и заполните то, что запрашивается в разделе «Защищённый контур».",
+        : "Проекту не хватает данных для запуска - откройте настройки проекта и заполните то, что запрашивается в разделе «Ключи и токены».",
     cta: "Перейти в настройки",
   }),
   blocked: (project) => ({
@@ -66,7 +66,7 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
     { href: base, label: "Обзор" },
     { href: `${base}/chat`, label: "Чат" },
     { href: `${base}/deployments`, label: "Деплои" },
-    { href: `${base}/versions`, label: "Файлы" },
+    { href: `${base}/versions`, label: "Версии" },
     { href: `${base}/logs`, label: "Логи" },
     { href: `${base}/settings`, label: "Настройки" },
   ];

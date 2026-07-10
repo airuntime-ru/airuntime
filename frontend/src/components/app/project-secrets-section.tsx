@@ -136,7 +136,7 @@ export function ProjectSecretsSection({
             <ShieldCheck size={18} />
           </span>
           <div>
-            <p className="text-sm font-semibold text-[var(--ar-black)]">Защищенный контур</p>
+            <p className="text-sm font-semibold text-[var(--ar-black)]">Ключи и токены</p>
             <p className="mt-1 text-sm leading-7 text-[var(--ar-mist)]">
               Когда проекту нужен токен или API-ключ, AIRuntime сам заводит для него слот здесь -
               просто впишите значение. Хранится зашифрованно и доступно только при сборке и

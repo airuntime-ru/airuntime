@@ -186,12 +186,12 @@ function AgentStatusPanel({ status }: { status: AgentStatus }) {
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold text-[var(--ar-black)]">{status.label}</p>
             <p className="text-xs text-[var(--ar-stone)]">
-              {waiting ? "Ответьте в чат, и агент продолжит сборку" : "Статус разработки обновляется в реальном времени"}
+              {waiting ? "Ответьте в чат, и агент продолжит сборку" : "Статус сборки обновляется в реальном времени"}
             </p>
           </div>
         </div>
         <span className="hidden rounded-full border border-white/70 bg-white/70 px-2.5 py-1 text-xs font-medium text-[var(--ar-mist)] sm:inline-flex">
-          {waiting ? "waiting" : "agent live"}
+          {waiting ? "ожидание" : "агент работает"}
         </span>
       </div>
 
@@ -418,7 +418,7 @@ export default function ProjectChatPage() {
     setLoading(true);
     setChatError("");
     setToolActivity([]);
-    updateAgentStatus({ phase: "thinking", label: "AIRuntime осмысляет задачу", state: "running" });
+    updateAgentStatus({ phase: "thinking", label: "AIRuntime анализирует задачу", state: "running" });
     setMessages((prev) => [
       ...prev,
       { role: "user", content: userMessage || "Прикреплены файлы", attachments },
@@ -443,10 +443,10 @@ export default function ProjectChatPage() {
         } catch {
           // raw wasn't JSON - use it as-is
         }
-        throw new Error(detail || `Stream failed: ${response.status}`);
+        throw new Error(detail || `Не удалось получить ответ (код ${response.status})`);
       }
       if (!response.body) {
-        throw new Error("Stream response is empty");
+        throw new Error("Пустой ответ сервера");
       }
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -466,7 +466,7 @@ export default function ProjectChatPage() {
             if (latestStatus && (latestStatus.state !== "running" || latestStatus.phase === "questions")) {
               continue;
             }
-            updateAgentStatus({ phase: "done", label: "Готово: проект передан на запуск", state: "done" });
+            updateAgentStatus({ phase: "done", label: "Изменения сохранены - проект собирается и запускается", state: "done" });
             continue;
           }
           const parsed = JSON.parse(payload) as { chunk?: string; status?: AgentStatus };
@@ -502,9 +502,7 @@ export default function ProjectChatPage() {
           const lastIndex = prev.length - 1;
           const last = prev[lastIndex];
           if (last?.role !== "assistant" || last.content) return prev;
-          const copy = [...prev];
-          copy[lastIndex] = { ...last, content: "Остановлено." };
-          return copy;
+          return prev.slice(0, lastIndex);
         });
       } else {
         const message = err instanceof Error ? err.message : "Не удалось получить ответ агента";
@@ -793,7 +791,7 @@ export default function ProjectChatPage() {
                 className="min-h-[52px] resize-none border-0 bg-transparent px-4 py-3.5 text-[15px] shadow-none ring-0 placeholder:text-[var(--ar-stone)] focus:border-0 focus:ring-0"
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
-                placeholder={bootstrapping ? "Загрузка..." : "Опишите задачу, @ для контекста"}
+                placeholder={bootstrapping ? "Загрузка..." : "Опишите задачу (можно упомянуть файл через @)"}
                 disabled={bootstrapping || !chatId}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
@@ -827,7 +825,7 @@ export default function ProjectChatPage() {
                           !selectedProvider && "font-medium text-[var(--ar-black)]"
                         )}
                       >
-                        По умолчанию платформы
+                        Модель по умолчанию
                       </button>
                       {(providers?.supported ?? []).map((name) => {
                         const configured = providers?.configured?.[name];
@@ -871,7 +869,7 @@ export default function ProjectChatPage() {
                       type="button"
                       onClick={onStop}
                       className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--ar-black)] text-white shadow-[0_6px_18px_rgba(7,20,38,0.28)] hover:bg-black/85"
-                      aria-label="Остановить"
+                      aria-label="Прервать генерацию"
                     >
                       <Square size={13} strokeWidth={2.5} fill="currentColor" />
                     </button>

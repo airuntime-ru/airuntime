@@ -240,7 +240,7 @@ export default function ProjectVersionsPage() {
                 }}
               >
                 <FileText size={15} />
-                Файлы
+                Открыть файлы версии
               </Button>
             </div>
           </div>
@@ -256,7 +256,7 @@ export default function ProjectVersionsPage() {
                   <p className="text-sm font-semibold">Файлы commit {shortHash(activeCommitHash)}</p>
                   <p className="mt-1 text-xs text-[var(--ar-stone)]">Просмотр содержимого (только текст).</p>
                 </div>
-                <Badge className="border-black/10 bg-black/5 text-[var(--ar-stone)]">{treeLoading ? "..." : "ready"}</Badge>
+                <Badge className="border-black/10 bg-black/5 text-[var(--ar-stone)]">{treeLoading ? "..." : "готово"}</Badge>
               </div>
 
               <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -341,7 +341,7 @@ export default function ProjectVersionsPage() {
                   <div className="min-w-0">
                     <p className="text-sm font-semibold break-all">{filePath}</p>
                     <p className="mt-1 text-xs text-[var(--ar-stone)]">
-                      {fileData.truncated ? "truncated" : "full"}; size: {fileData.size_bytes} bytes
+                      {fileData.truncated ? "усечённый файл" : "полностью"}, размер: {fileData.size_bytes} байт
                     </p>
                   </div>
                   <Button

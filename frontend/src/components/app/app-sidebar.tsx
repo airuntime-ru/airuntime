@@ -18,7 +18,7 @@ const nav = [
   {
     href: "/app/profile",
     label: "Профиль",
-    hint: "баланс и доступ",
+    hint: "баланс и статус аккаунта",
     icon: User,
     match: (path: string) => path === "/app/profile",
   },

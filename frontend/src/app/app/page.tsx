@@ -92,12 +92,12 @@ export default function ProjectsPage() {
 
       {!loading && projects.length === 0 ? (
         <EmptyState
-          title="Здесь пока тихо"
+          title="Проектов пока нет"
           description="Создайте первый проект: после этого сразу откроется чат, где можно описать, что нужно собрать и запустить."
           action={
             <Button variant="accent" onClick={() => setCreateOpen(true)}>
               <Plus size={16} />
-              Начать создание
+              Новый проект
             </Button>
           }
         />
@@ -131,7 +131,7 @@ export default function ProjectsPage() {
               >
                 <Button variant="accent" size="sm" className="w-full">
                   <MessageSquare size={15} />
-                  В чат
+                  Открыть чат
                 </Button>
               </Link>
             </div>

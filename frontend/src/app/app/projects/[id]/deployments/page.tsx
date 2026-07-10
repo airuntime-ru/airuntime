@@ -22,6 +22,7 @@ import {
 import {
   canStartProject,
   canStopProject,
+  deploymentStatusLabel,
   isProjectRunning,
   projectStatusLabel,
 } from "@/lib/project-status";
@@ -31,15 +32,6 @@ function statusTone(status: string) {
   if (status === "failed" || status === "cancelled") return "text-rose-700";
   if (status === "running") return "text-[var(--ar-sky)]";
   return "text-[var(--ar-stone)]";
-}
-
-function statusLabel(status: string) {
-  if (status === "completed") return "Готово";
-  if (status === "failed") return "Ошибка";
-  if (status === "cancelled") return "Отменён";
-  if (status === "running") return "Запускается";
-  if (status === "queued") return "В очереди";
-  return status;
 }
 
 function formatDateTime(value: string | null) {
@@ -173,7 +165,7 @@ export default function ProjectDeploymentsPage() {
       ) : null}
 
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm leading-7 text-[var(--ar-mist)]">История запусков и состояние runtime-контейнеров.</p>
+        <p className="text-sm leading-7 text-[var(--ar-mist)]">История запусков проекта и его текущее состояние.</p>
         <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
           {project && canStopProject(project.status) ? (
             <Button variant="outline" size="sm" className="w-full sm:w-auto" disabled={actionLoading} onClick={onStop}>
@@ -189,7 +181,7 @@ export default function ProjectDeploymentsPage() {
           ) : null}
           <Button variant="accent" size="sm" className="w-full sm:w-auto" disabled={actionLoading || startDisabled} onClick={onDeploy}>
             <Rocket size={15} />
-            Пересобрать и запустить
+            Собрать и запустить
           </Button>
         </div>
       </div>
@@ -201,7 +193,7 @@ export default function ProjectDeploymentsPage() {
               <p className="break-all font-semibold text-[var(--ar-black)]">{item.image_ref ?? "Образ приложения"}</p>
               <p className="mt-1 text-xs text-[var(--ar-stone)]">ID: {item.id}</p>
             </div>
-            <Badge className={statusTone(item.status)}>{statusLabel(item.status)}</Badge>
+            <Badge className={statusTone(item.status)}>{deploymentStatusLabel(item.status)}</Badge>
           </div>
           <div className="h-2 overflow-hidden rounded-full bg-white/70">
             <div
@@ -230,7 +222,7 @@ export default function ProjectDeploymentsPage() {
           action={
             <Button variant="accent" disabled={startDisabled} onClick={onDeploy}>
               <Rocket size={16} />
-              Запустить сейчас
+              Собрать и запустить
             </Button>
           }
         />
