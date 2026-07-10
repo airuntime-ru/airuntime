@@ -113,6 +113,14 @@ textarea {
   background: transparent;
 }
 
+/* The dashboard shell renders on every authenticated page, so the landing page's infinitely
+   animated + blurred background (repaints every frame, forever) is a real perf cost there.
+   Keep the static gradient wash but drop the continuous animation - one paint instead of an
+   endless one. */
+.app-shell-bg::before {
+  animation: none;
+}
+
 .runtime-wind {
   position: absolute;
   inset: 0;
