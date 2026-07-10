@@ -10,11 +10,12 @@ import { Modal } from "@/components/ui/modal";
 import { Tabs } from "@/components/ui/tabs";
 import { PageLoader } from "@/components/ui/loader";
 import { getProject, type ProjectType } from "@/lib/api";
+import { cn } from "@/lib/cn";
 import { projectStatusLabel } from "@/lib/project-status";
 
 const STATUS_GUIDANCE: Record<
   string,
-  (project: ProjectType) => { title: string; body: string; cta: string }
+  (project: ProjectType) => { title: string; body: string; cta?: string }
 > = {
   needs_configuration: (project) => ({
     title: "Нужна настройка",
@@ -23,6 +24,13 @@ const STATUS_GUIDANCE: Record<
         ? "Файлы бота уже собраны, но запустить его пока нельзя: не хватает токена. Откройте настройки проекта, вставьте TELEGRAM_BOT_TOKEN (его выдаёт @BotFather в Telegram после команды /newbot) и запуск продолжится автоматически."
         : "Проекту не хватает данных для запуска - откройте настройки проекта и заполните то, что запрашивается в разделе «Защищённый контур».",
     cta: "Перейти в настройки",
+  }),
+  blocked: (project) => ({
+    title: "Заблокирован модерацией",
+    body:
+      "Проект остановлен автоматической проверкой безопасности" +
+      (project.blocked_reason ? `: ${project.blocked_reason}.` : ".") +
+      " Если считаете это ошибкой, напишите в поддержку - решение может принять только администратор.",
   }),
 };
 
@@ -82,7 +90,14 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
               </span>
               {guidance ? (
                 <button type="button" onClick={() => setStatusModalOpen(true)}>
-                  <Badge className="cursor-pointer border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100">
+                  <Badge
+                    className={cn(
+                      "cursor-pointer",
+                      project.status === "blocked"
+                        ? "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                        : "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                    )}
+                  >
                     {projectStatusLabel(project.status)}
                   </Badge>
                 </button>
@@ -107,23 +122,30 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
         >
           <div className="space-y-5">
             <div className="flex items-start gap-3">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--ar-radius-sm)] bg-amber-50 text-amber-600">
+              <span
+                className={cn(
+                  "flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--ar-radius-sm)]",
+                  project.status === "blocked" ? "bg-rose-50 text-rose-600" : "bg-amber-50 text-amber-600"
+                )}
+              >
                 <KeyRound size={18} />
               </span>
               <p className="text-sm leading-7 text-[var(--ar-mist)]">{guidance.body}</p>
             </div>
-            <div className="flex justify-end">
-              <Button
-                variant="accent"
-                onClick={() => {
-                  setStatusModalOpen(false);
-                  router.push(`${base}/settings`);
-                }}
-              >
-                <Settings size={16} />
-                {guidance.cta}
-              </Button>
-            </div>
+            {guidance.cta ? (
+              <div className="flex justify-end">
+                <Button
+                  variant="accent"
+                  onClick={() => {
+                    setStatusModalOpen(false);
+                    router.push(`${base}/settings`);
+                  }}
+                >
+                  <Settings size={16} />
+                  {guidance.cta}
+                </Button>
+              </div>
+            ) : null}
           </div>
         </Modal>
       ) : null}

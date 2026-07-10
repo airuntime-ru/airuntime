@@ -32,6 +32,7 @@ class ProjectResponse(BaseModel):
     logs: str
     deployment_url: str | None
     deploy_subdomain: str | None
+    blocked_reason: str | None = None
     planned_site_url: str | None = None
     git_history: str
     created_at: datetime

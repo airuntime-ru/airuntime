@@ -46,6 +46,8 @@ class AppUser(models.Model):
     role = models.CharField(max_length=50, default="user")
     credits_balance = models.IntegerField(default=1_000_000_000)
     onboarding_completed = models.BooleanField(default=False)
+    is_banned = models.BooleanField(default=False)
+    banned_reason = models.CharField(max_length=500, null=True, blank=True)
     created_at = models.DateTimeField()
     updated_at = models.DateTimeField()
 
@@ -70,6 +72,7 @@ class Project(models.Model):
     deployment_url = models.CharField(max_length=512, null=True, blank=True)
     deploy_subdomain = models.CharField(max_length=63, null=True, blank=True)
     git_history = models.TextField()
+    blocked_reason = models.TextField(null=True, blank=True)
     created_at = models.DateTimeField()
     updated_at = models.DateTimeField()
 
@@ -181,6 +184,34 @@ class ChatFile(models.Model):
         db_table = "chat_files"
         verbose_name = "Файл чата"
         verbose_name_plural = "Файлы чата"
+
+
+class ModerationEvent(models.Model):
+    ACTIONS = [
+        ("flagged", "Заблокирован"),
+        ("unblocked", "Разблокирован"),
+        ("deleted", "Удалён"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    project = models.ForeignKey(
+        Project, on_delete=models.DO_NOTHING, db_column="project_id", null=True, blank=True
+    )
+    project_name = models.CharField(max_length=255)
+    user = models.ForeignKey(AppUser, on_delete=models.DO_NOTHING, db_column="user_id")
+    action = models.CharField(max_length=32, choices=ACTIONS)
+    category = models.CharField(max_length=64, null=True, blank=True)
+    reason = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField()
+
+    class Meta:
+        managed = False
+        db_table = "moderation_events"
+        verbose_name = "Событие модерации"
+        verbose_name_plural = "История модерации"
+
+    def __str__(self) -> str:
+        return f"{self.get_action_display()} - {self.project_name}"
 
 
 class SystemSetting(models.Model):

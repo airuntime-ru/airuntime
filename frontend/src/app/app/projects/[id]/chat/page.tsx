@@ -435,7 +435,14 @@ export default function ProjectChatPage() {
         signal: controller.signal,
       });
       if (!response.ok) {
-        const detail = await response.text();
+        const raw = await response.text();
+        let detail = raw;
+        try {
+          const parsed = JSON.parse(raw) as { detail?: string };
+          if (parsed.detail) detail = parsed.detail;
+        } catch {
+          // raw wasn't JSON - use it as-is
+        }
         throw new Error(detail || `Stream failed: ${response.status}`);
       }
       if (!response.body) {
@@ -500,17 +507,15 @@ export default function ProjectChatPage() {
           return copy;
         });
       } else {
-        setChatError(err instanceof Error ? err.message : "Не удалось получить ответ агента");
+        const message = err instanceof Error ? err.message : "Не удалось получить ответ агента";
+        setChatError(message);
         updateAgentStatus({ phase: "error", label: "Не удалось получить ответ агента", state: "error" });
         setMessages((prev) => {
           const lastIndex = prev.length - 1;
           const last = prev[lastIndex];
           if (last?.role !== "assistant") return prev;
           const copy = [...prev];
-          copy[lastIndex] = {
-            ...last,
-            content: "Не удалось получить ответ. Проверьте настройки провайдера и токен авторизации.",
-          };
+          copy[lastIndex] = { ...last, content: message };
           return copy;
         });
       }

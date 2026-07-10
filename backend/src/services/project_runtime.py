@@ -76,6 +76,20 @@ def stop_project_runtime(db: Session, project: Project) -> Project:
     return project
 
 
+def block_project(db: Session, project: Project, *, reason: str) -> Project:
+    try:
+        DockerDeploymentAdapter().stop_project(str(project.id))
+    except Exception:  # noqa: BLE001 - blocking must succeed even if Docker is unreachable
+        pass
+    _cancel_active_deployments(db, project.id)
+    project.status = "blocked"
+    project.blocked_reason = reason
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+    return project
+
+
 def start_project_runtime(db: Session, project: Project) -> Project:
     if project.status in RUNNING_STATUSES:
         raise ValueError("Проект уже запущен или запускается")

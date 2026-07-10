@@ -6,6 +6,7 @@ const STATUS_LABELS: Record<string, string> = {
   stopped: "Остановлен",
   needs_configuration: "Нужна настройка",
   telegram_ready: "Бот настроен",
+  blocked: "Заблокирован модерацией",
 };
 
 export function projectStatusLabel(status: string): string {

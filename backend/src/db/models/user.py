@@ -18,6 +18,8 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(50), default="user", nullable=False)
     credits_balance: Mapped[int] = mapped_column(Integer, default=1_000_000_000, nullable=False)
     onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_banned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    banned_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

@@ -1,4 +1,4 @@
-from core.models import AppUser, Deployment, Project, Secret
+from core.models import AppUser, Deployment, ModerationEvent, Project, Secret
 
 
 class DomainAppUser(AppUser):
@@ -13,6 +13,20 @@ class DomainProject(Project):
         proxy = True
         verbose_name = "Проект"
         verbose_name_plural = "Проекты"
+
+
+class BlockedProject(Project):
+    class Meta:
+        proxy = True
+        verbose_name = "Заблокированный проект"
+        verbose_name_plural = "Заблокированные проекты"
+
+
+class DomainModerationEvent(ModerationEvent):
+    class Meta:
+        proxy = True
+        verbose_name = "Событие модерации"
+        verbose_name_plural = "История модерации"
 
 
 class DomainSecret(Secret):

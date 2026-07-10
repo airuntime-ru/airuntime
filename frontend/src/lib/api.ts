@@ -16,6 +16,7 @@ export type ProjectType = {
   logs: string;
   deployment_url: string | null;
   deploy_subdomain: string | null;
+  blocked_reason: string | null;
   planned_site_url: string | null;
   git_history: string;
 };

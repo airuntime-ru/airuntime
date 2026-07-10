@@ -19,6 +19,7 @@ from src.core.config import settings
 from src.db.models.chat import Chat
 from src.db.models.chat_file import ChatFile
 from src.db.models.message import Message
+from src.db.models.moderation_event import ModerationEvent
 from src.db.models.project import Project
 from src.db.models.user import User
 from src.db.session import get_db
@@ -36,9 +37,10 @@ from src.services.file_context import (
     extract_image_attachments,
     serialize_message_metadata,
 )
+from src.services.moderation import check_project_safety
 from src.services.project_git import ProjectGitError, commit_snapshot
 from src.services.project_intent import update_project_type_from_prompt
-from src.services.project_runtime import RunningProjectLimitError
+from src.services.project_runtime import RunningProjectLimitError, block_project
 from src.services.project_subdomain import (
     assert_subdomain_available,
     normalize_deploy_subdomain,
@@ -393,6 +395,20 @@ async def _stream_events(
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="Insufficient credits"
         )
+    if current_user.is_banned:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Аккаунт заблокирован администратором" + (
+                f": {current_user.banned_reason}" if current_user.banned_reason else "."
+            ),
+        )
+    if project.status == "blocked":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Проект заблокирован модерацией" + (
+                f": {project.blocked_reason}" if project.blocked_reason else "."
+            ),
+        )
 
     content = user_message.strip()
     if content:
@@ -435,6 +451,29 @@ async def _stream_events(
         or getattr(settings, f"{provider_name}_api_key", None)
         or ""
     )
+
+    if content:
+        verdict = await check_project_safety(
+            text=content, provider_name=provider_name, model=model, api_key=api_key
+        )
+        if verdict.blocked:
+            reason = f"{verdict.category}: {verdict.reason}" if verdict.reason else verdict.category
+            block_project(db, project, reason=reason)
+            db.add(
+                ModerationEvent(
+                    project_id=project.id,
+                    project_name=project.name,
+                    user_id=current_user.id,
+                    action="flagged",
+                    category=verdict.category,
+                    reason=verdict.reason,
+                )
+            )
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Проект заблокирован модерацией: {reason}",
+            )
 
     async def event_source():
         assistant_full = ""

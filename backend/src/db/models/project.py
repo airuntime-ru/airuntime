@@ -23,6 +23,7 @@ class Project(Base):
     deployment_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     deploy_subdomain: Mapped[str | None] = mapped_column(String(63), nullable=True, unique=True, index=True)
     git_history: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    blocked_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
