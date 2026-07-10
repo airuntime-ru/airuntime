@@ -55,7 +55,8 @@ letsencrypt/
 admin/staticfiles/
 admin/*.sqlite3
 
-# Logs
+# Logs (anchored to repo root - unanchored "logs/" would also match the Next.js
+# route folder at frontend/src/app/app/projects/[id]/logs/)
 *.log
-logs/
-output/
+/logs/
+/output/
