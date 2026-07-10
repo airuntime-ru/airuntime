@@ -15,3 +15,8 @@ class DeploymentResponse(BaseModel):
     finished_at: datetime | None
 
     model_config = {"from_attributes": True}
+
+
+class DeploymentListResponse(BaseModel):
+    items: list[DeploymentResponse]
+    total: int

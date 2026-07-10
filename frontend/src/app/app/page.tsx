@@ -16,7 +16,8 @@ import { useProjects } from "@/lib/use-projects";
 
 export default function ProjectsPage() {
   const router = useRouter();
-  const { projects, error, loading, refresh } = useProjects();
+  const { projects, total, deployedTotal, error, loading, loadingMore, hasMore, refresh, loadMore } =
+    useProjects();
   const [createOpen, setCreateOpen] = useState(false);
   const [limits, setLimits] = useState<ProjectRuntimeLimitsType | null>(null);
 
@@ -30,7 +31,6 @@ export default function ProjectsPage() {
     })();
   }, [projects]);
 
-  const deployed = projects.filter((project) => Boolean(project.deployment_url)).length;
   const running = projects.filter((project) => project.status === "live" || project.status === "deploying").length;
 
   return (
@@ -63,13 +63,13 @@ export default function ProjectsPage() {
 
           <div className="grid grid-cols-3 gap-2 sm:gap-3 lg:grid-cols-1">
             {[
-              { label: "Проектов", value: projects.length, icon: FolderKanban },
+              { label: "Проектов", value: total, icon: FolderKanban },
               {
                 label: "Запущено",
                 value: limits ? `${limits.running}/${limits.max_running}` : running,
                 icon: Rocket,
               },
-              { label: "Опубликовано", value: deployed, icon: Rocket },
+              { label: "Опубликовано", value: deployedTotal, icon: Rocket },
             ].map((item) => (
               <div
                 key={item.label}
@@ -138,6 +138,14 @@ export default function ProjectsPage() {
           </Card>
         ))}
       </div>
+
+      {hasMore ? (
+        <div className="flex justify-center">
+          <Button variant="outline" onClick={() => void loadMore()} disabled={loadingMore}>
+            {loadingMore ? "Загружаем…" : "Показать ещё"}
+          </Button>
+        </div>
+      ) : null}
 
       <CreateProjectModal open={createOpen} onClose={() => setCreateOpen(false)} onCreated={refresh} />
     </div>

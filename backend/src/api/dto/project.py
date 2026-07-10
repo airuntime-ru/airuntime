@@ -47,3 +47,9 @@ class ProjectResponse(BaseModel):
         )
 
     model_config = {"from_attributes": True}
+
+
+class ProjectListResponse(BaseModel):
+    items: list[ProjectResponse]
+    total: int
+    deployed_total: int

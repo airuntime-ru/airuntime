@@ -47,27 +47,34 @@ function formatDateTime(value: string | null) {
   });
 }
 
+const PAGE_SIZE = 20;
+
 export default function ProjectDeploymentsPage() {
   const params = useParams<{ id: string }>();
   const projectId = params.id;
   const [project, setProject] = useState<ProjectType | null>(null);
   const [limits, setLimits] = useState<ProjectRuntimeLimitsType | null>(null);
   const [deployments, setDeployments] = useState<DeploymentType[]>([]);
+  const [deploymentsTotal, setDeploymentsTotal] = useState(0);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
 
-  const loadPage = useCallback(async (options?: { silent?: boolean }) => {
+  const loadPage = useCallback(async (options?: { silent?: boolean; limit?: number }) => {
     if (!projectId) return;
+    const limit = options?.limit ?? visibleCount;
     if (!options?.silent) setLoading(true);
     try {
-      const [projectRow, deploymentRows, runtimeLimits] = await Promise.all([
+      const [projectRow, deploymentResult, runtimeLimits] = await Promise.all([
         getProject(projectId),
-        listDeployments(projectId),
+        listDeployments(projectId, limit, 0),
         getProjectRuntimeLimits(),
       ]);
       setProject(projectRow);
-      setDeployments(deploymentRows);
+      setDeployments(deploymentResult.items);
+      setDeploymentsTotal(deploymentResult.total);
       setLimits(runtimeLimits);
       setError("");
     } catch (err) {
@@ -75,7 +82,7 @@ export default function ProjectDeploymentsPage() {
     } finally {
       if (!options?.silent) setLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, visibleCount]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -83,6 +90,17 @@ export default function ProjectDeploymentsPage() {
     }, 0);
     return () => window.clearTimeout(timer);
   }, [loadPage]);
+
+  const onLoadMore = async () => {
+    setLoadingMore(true);
+    const nextLimit = visibleCount + PAGE_SIZE;
+    try {
+      await loadPage({ silent: true, limit: nextLimit });
+      setVisibleCount(nextLimit);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const hasActiveDeployments = deployments.some(
     (item) => item.status === "running" || item.status === "queued",
@@ -226,6 +244,13 @@ export default function ProjectDeploymentsPage() {
             </Button>
           }
         />
+      ) : null}
+      {deployments.length < deploymentsTotal ? (
+        <div className="flex justify-center">
+          <Button variant="outline" onClick={() => void onLoadMore()} disabled={loadingMore}>
+            {loadingMore ? "Загружаем…" : "Показать ещё"}
+          </Button>
+        </div>
       ) : null}
     </div>
   );

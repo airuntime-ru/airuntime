@@ -70,7 +70,7 @@ def read_project_logs(db: Session, project: Project) -> ProjectLogsResponse:
         runtime_logs, runtime_error = _read_runtime_logs(deployment.logs_ref)
 
     return ProjectLogsResponse(
-        project_logs=project.logs or "",
+        project_logs=_tail_text(project.logs or ""),
         deployment_logs=deployment_logs,
         runtime_logs=runtime_logs,
         runtime_error=runtime_error,

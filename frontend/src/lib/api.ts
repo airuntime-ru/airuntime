@@ -192,8 +192,15 @@ export async function logout(): Promise<void> {
   }
 }
 
-export async function listProjects(): Promise<ProjectType[]> {
-  return requestJson<ProjectType[]>("/projects");
+export type PagedResult<T> = {
+  items: T[];
+  total: number;
+};
+
+export type ProjectListResult = PagedResult<ProjectType> & { deployed_total: number };
+
+export async function listProjects(limit = 20, offset = 0): Promise<ProjectListResult> {
+  return requestJson<ProjectListResult>(`/projects?limit=${limit}&offset=${offset}`);
 }
 
 export async function getProjectRuntimeLimits(): Promise<ProjectRuntimeLimitsType> {
@@ -368,8 +375,14 @@ export async function updateTelegramBotAvatar(
   return (await response.json()) as TelegramBotProfileType;
 }
 
-export async function listDeployments(projectId: string): Promise<DeploymentType[]> {
-  return requestJson<DeploymentType[]>(`/projects/${projectId}/deployments`);
+export async function listDeployments(
+  projectId: string,
+  limit = 20,
+  offset = 0,
+): Promise<PagedResult<DeploymentType>> {
+  return requestJson<PagedResult<DeploymentType>>(
+    `/projects/${projectId}/deployments?limit=${limit}&offset=${offset}`,
+  );
 }
 
 export async function createDeployment(projectId: string): Promise<DeploymentType> {

@@ -1,11 +1,16 @@
 import shutil
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from src.api.dependencies.auth import get_current_user
-from src.api.dto.project import ProjectCreateRequest, ProjectResponse, ProjectUpdateRequest
+from src.api.dto.project import (
+    ProjectCreateRequest,
+    ProjectListResponse,
+    ProjectResponse,
+    ProjectUpdateRequest,
+)
 from src.api.dto.project_logs import ProjectLogsResponse
 from src.api.dto.project_runtime import ProjectRuntimeLimitsResponse
 from src.db.models.chat import Chat
@@ -33,17 +38,20 @@ def _to_response(project: Project) -> ProjectResponse:
     return ProjectResponse.from_project(project)
 
 
-@router.get("", response_model=list[ProjectResponse])
+@router.get("", response_model=ProjectListResponse)
 def list_projects(
-    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
-) -> list[ProjectResponse]:
-    rows = (
-        db.query(Project)
-        .filter(Project.user_id == current_user.id)
-        .order_by(Project.created_at.desc())
-        .all()
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ProjectListResponse:
+    base_query = db.query(Project).filter(Project.user_id == current_user.id)
+    total = base_query.count()
+    deployed_total = base_query.filter(Project.deployment_url.isnot(None)).count()
+    rows = base_query.order_by(Project.created_at.desc()).offset(offset).limit(limit).all()
+    return ProjectListResponse(
+        items=[_to_response(project) for project in rows], total=total, deployed_total=deployed_total
     )
-    return [_to_response(project) for project in rows]
 
 
 @router.post("", response_model=ProjectResponse)
