@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from src.services.agent.events import AgentDone, TextDelta, ToolCallRequested, ToolCallResult
 from src.services.agent.providers import get_agent_provider
 from src.services.agent.tools import TOOL_DEFS, WorkspaceTools
+from src.services.file_context import ImageAttachment
 
 MAX_ITERATIONS = 14
 
@@ -69,10 +70,16 @@ class CodingAgentSession:
         self.system_prompt = system_prompt
 
     async def run(
-        self, *, history: list[dict[str, str]], user_message: str
+        self,
+        *,
+        history: list[dict[str, str]],
+        user_message: str,
+        images: list[ImageAttachment] | None = None,
     ) -> AsyncIterator[TextDelta | ToolCallRequested | ToolCallResult | AgentDone]:
         tools = TOOL_DEFS if self.provider.supports_tools() else []
-        wire_messages = self.provider.build_messages(_normalize_history(history), user_message)
+        wire_messages = self.provider.build_messages(
+            _normalize_history(history), user_message, images=images or []
+        )
 
         final_text_parts: list[str] = []
         iterations = 0

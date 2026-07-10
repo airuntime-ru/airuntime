@@ -33,6 +33,7 @@ from src.services.deployments import create_deployment_for_project
 from src.services.file_context import (
     attach_files_to_message,
     build_attachment_context,
+    extract_image_attachments,
     serialize_message_metadata,
 )
 from src.services.project_git import ProjectGitError, commit_snapshot
@@ -405,6 +406,7 @@ async def _stream_events(
         safe_message = sanitize_user_message(user_agent_message)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    image_attachments = extract_image_attachments(db, attachment_ids)
 
     provider_name = provider_override or settings.provider_name
     if provider_name not in {"openai", "anthropic", "gemini", "openrouter"}:
@@ -476,7 +478,9 @@ async def _stream_events(
                 system_prompt=system_prompt,
             )
 
-            async for event in session.run(history=history, user_message=safe_message):
+            async for event in session.run(
+                history=history, user_message=safe_message, images=image_attachments
+            ):
                 if isinstance(event, TextDelta):
                     yield append_visible(event.text)
                 elif isinstance(event, ToolCallRequested):

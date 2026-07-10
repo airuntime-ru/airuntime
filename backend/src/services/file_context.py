@@ -1,4 +1,6 @@
+import base64
 import json
+from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -13,6 +15,16 @@ TEXTUAL_TYPES = {
     "application/xml",
     "application/x-yaml",
 }
+
+IMAGE_CONTENT_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
+MAX_IMAGE_BYTES = 5 * 1024 * 1024
+
+
+@dataclass(frozen=True)
+class ImageAttachment:
+    filename: str
+    content_type: str
+    data_base64: str
 
 
 def _is_textual(content_type: str, filename: str) -> bool:
@@ -81,6 +93,10 @@ def build_attachment_context(db: Session, attachment_ids: list[UUID], *, max_cha
                 block = f"{header}\n```\n{preview}\n```"
             else:
                 block = f"{header}\n[binary or unreadable text content omitted]"
+        elif row.content_type in IMAGE_CONTENT_TYPES:
+            # Sent to the model as real image content (see extract_image_attachments) - just
+            # note its presence here so the text transcript still makes sense on its own.
+            block = f"{header}\n[image attached below]"
         else:
             block = f"{header}\n[non-text attachment omitted from model context]"
         parts.append(block)
@@ -88,6 +104,32 @@ def build_attachment_context(db: Session, attachment_ids: list[UUID], *, max_cha
         if remaining <= 0:
             break
     return "\n\n".join(parts)
+
+
+def extract_image_attachments(db: Session, attachment_ids: list[UUID]) -> list[ImageAttachment]:
+    if not attachment_ids:
+        return []
+    rows = (
+        db.query(ChatFile)
+        .filter(ChatFile.id.in_(attachment_ids), ChatFile.content_type.in_(IMAGE_CONTENT_TYPES))
+        .order_by(ChatFile.created_at.asc())
+        .all()
+    )
+    images: list[ImageAttachment] = []
+    for row in rows:
+        if row.size_bytes > MAX_IMAGE_BYTES:
+            continue
+        data = storage_service.read_bytes(row.object_key, max_bytes=MAX_IMAGE_BYTES)
+        if not data:
+            continue
+        images.append(
+            ImageAttachment(
+                filename=row.original_filename,
+                content_type=row.content_type,
+                data_base64=base64.b64encode(data).decode("ascii"),
+            )
+        )
+    return images
 
 
 def serialize_message_metadata(attachment_ids: list[UUID]) -> str:

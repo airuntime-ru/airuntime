@@ -26,6 +26,7 @@ from typing import Any, Protocol
 import httpx
 
 from src.services.agent.events import TextDelta, ToolCallRequested, ToolCallResult, TurnFinished
+from src.services.file_context import ImageAttachment
 
 REQUEST_TIMEOUT = httpx.Timeout(120.0, connect=15.0)
 
@@ -38,7 +39,13 @@ class PlainMessage(Protocol):
 class AgentProvider(Protocol):
     def supports_tools(self) -> bool: ...
 
-    def build_messages(self, history: list[dict[str, str]], user_message: str) -> list[dict[str, Any]]: ...
+    def build_messages(
+        self,
+        history: list[dict[str, str]],
+        user_message: str,
+        *,
+        images: list[ImageAttachment] = ...,
+    ) -> list[dict[str, Any]]: ...
 
     def build_tool_result_messages(self, results: list[ToolCallResult]) -> list[dict[str, Any]]:
         ...
@@ -68,9 +75,28 @@ class OpenAICompatibleProvider:
     def supports_tools(self) -> bool:
         return True
 
-    def build_messages(self, history: list[dict[str, str]], user_message: str) -> list[dict[str, Any]]:
+    def build_messages(
+        self,
+        history: list[dict[str, str]],
+        user_message: str,
+        *,
+        images: list[ImageAttachment] = (),
+    ) -> list[dict[str, Any]]:
         msgs = [{"role": h["role"], "content": h["content"]} for h in history]
-        msgs.append({"role": "user", "content": user_message})
+        if images:
+            content: list[dict[str, Any]] = [{"type": "text", "text": user_message}]
+            for image in images:
+                content.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{image.content_type};base64,{image.data_base64}"
+                        },
+                    }
+                )
+            msgs.append({"role": "user", "content": content})
+        else:
+            msgs.append({"role": "user", "content": user_message})
         return msgs
 
     def build_tool_result_messages(self, results: list[ToolCallResult]) -> list[dict[str, Any]]:
@@ -210,11 +236,29 @@ class AnthropicProvider:
     def supports_tools(self) -> bool:
         return True
 
-    def build_messages(self, history: list[dict[str, str]], user_message: str) -> list[dict[str, Any]]:
+    def build_messages(
+        self,
+        history: list[dict[str, str]],
+        user_message: str,
+        *,
+        images: list[ImageAttachment] = (),
+    ) -> list[dict[str, Any]]:
         msgs = [
             {"role": h["role"], "content": [{"type": "text", "text": h["content"]}]} for h in history
         ]
-        msgs.append({"role": "user", "content": [{"type": "text", "text": user_message}]})
+        content: list[dict[str, Any]] = [{"type": "text", "text": user_message}]
+        for image in images:
+            content.append(
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": image.content_type,
+                        "data": image.data_base64,
+                    },
+                }
+            )
+        msgs.append({"role": "user", "content": content})
         return msgs
 
     def build_tool_result_messages(self, results: list[ToolCallResult]) -> list[dict[str, Any]]:
@@ -359,12 +403,23 @@ class GeminiProvider:
     def supports_tools(self) -> bool:
         return False
 
-    def build_messages(self, history: list[dict[str, str]], user_message: str) -> list[dict[str, Any]]:
+    def build_messages(
+        self,
+        history: list[dict[str, str]],
+        user_message: str,
+        *,
+        images: list[ImageAttachment] = (),
+    ) -> list[dict[str, Any]]:
         msgs = []
         for h in history:
             role = "model" if h["role"] == "assistant" else "user"
             msgs.append({"role": role, "parts": [{"text": h["content"]}]})
-        msgs.append({"role": "user", "parts": [{"text": user_message}]})
+        parts: list[dict[str, Any]] = [{"text": user_message}]
+        for image in images:
+            parts.append(
+                {"inline_data": {"mime_type": image.content_type, "data": image.data_base64}}
+            )
+        msgs.append({"role": "user", "parts": parts})
         return msgs
 
     def build_tool_result_messages(self, results: list[ToolCallResult]) -> list[dict[str, Any]]:

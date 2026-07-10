@@ -162,6 +162,13 @@ class ObjectStorageService:
             ExpiresIn=settings.s3_presign_expire_seconds,
         )
 
+    def read_bytes(self, object_key: str, *, max_bytes: int) -> bytes | None:
+        try:
+            response = _internal_client().get_object(Bucket=settings.s3_bucket, Key=object_key)
+            return response["Body"].read(max_bytes + 1)[:max_bytes]
+        except ClientError:
+            return None
+
     def read_text_preview(self, object_key: str, *, max_chars: int) -> str | None:
         try:
             response = _internal_client().get_object(Bucket=settings.s3_bucket, Key=object_key)
