@@ -53,7 +53,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="runtime-sky isolate min-h-screen text-[var(--ar-black)]">
+    <div className="runtime-sky grid-texture isolate min-h-screen text-[var(--ar-black)]">
       <AppSidebar credits={credits} onLogout={onLogout} />
       <AppMobileHeader credits={credits} />
       <AppMobileNav credits={credits} onLogout={onLogout} />

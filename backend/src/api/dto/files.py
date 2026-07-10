@@ -32,6 +32,8 @@ class MessageCreateRequest(BaseModel):
 class StreamRequest(BaseModel):
     content: str = Field(default="", max_length=12_000)
     attachment_ids: list[UUID] = Field(default_factory=list)
+    provider: str | None = Field(default=None, max_length=32)
+    model: str | None = Field(default=None, max_length=128)
 
     @model_validator(mode="after")
     def validate_content_or_attachments(self) -> "StreamRequest":

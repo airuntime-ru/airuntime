@@ -22,9 +22,13 @@ from src.db.models.message import Message
 from src.db.models.project import Project
 from src.db.models.user import User
 from src.db.session import get_db
-from src.services.agentic_artifacts import generate_project_artifact_agentic
+from src.services.agent.events import AgentDone, TextDelta, ToolCallRequested, ToolCallResult
+from src.services.agent.loop import CodingAgentSession
+from src.services.agent.prompt import build_system_prompt
+from src.services.agent.tools import WorkspaceTools
+from src.services.agentic_artifacts import ensure_required_files, generate_fallback_artifact
 from src.services.artifacts import ArtifactError, _telegram_token
-from src.services.conversation import ConversationService
+from src.services.chat_context import build_llm_context
 from src.services.deployments import create_deployment_for_project
 from src.services.file_context import (
     attach_files_to_message,
@@ -40,6 +44,9 @@ from src.services.project_subdomain import (
     planned_public_url,
 )
 from src.services.prompt_guard import sanitize_user_message
+from src.services.provider.factory import resolve_model
+from src.services.system_settings import resolve_api_key_for_provider
+from src.services.workspace import project_dir
 
 router = APIRouter(prefix="/projects/{project_id}/chats", tags=["chat"])
 
@@ -93,21 +100,35 @@ def _validate_attachments(
         )
 
 
-def _compose_model_message(*, content: str, attachment_ids: list[UUID], db: Session) -> str:
+def _compose_user_message(*, content: str, attachment_ids: list[UUID], db: Session) -> str:
+    """Builds the raw text handed to the coding agent as this turn's user message.
+
+    Persona/behavior rules live in the system prompt (src/services/agent/prompt.py) now,
+    not here - this only assembles what the user actually said plus attachment context.
+    """
+
     attachment_context = build_attachment_context(db, attachment_ids, max_chars=40_000)
-    parts: list[str] = [
-        (
-            "Ты AIRuntime planner. Отвечай по-русски кратко и профессионально. "
-            "Не выдавай большие блоки кода в чате: код будет создан отдельным агентом. "
-            "Если задача недостаточно ясная, задай 2-4 уточняющих вопроса. "
-            "Если информации достаточно, сначала коротко опиши план разработки."
-        )
-    ]
+    parts: list[str] = []
     if content.strip():
         parts.append(content.strip())
     if attachment_context:
         parts.append(attachment_context)
-    return "\n\n".join(parts) if parts else "Review the attached project files."
+    return "\n\n".join(parts) if parts else "Пользователь прикрепил файлы без текста - изучи вложения."
+
+
+def _tool_status_label(name: str, arguments: dict) -> str:
+    path = arguments.get("path", "") if isinstance(arguments, dict) else ""
+    if name == "list_files":
+        return "Изучаю структуру проекта" + (f": {path}" if path and path != "." else "")
+    if name == "read_file":
+        return f"Читаю {path}"
+    if name == "write_file":
+        return f"Пишу {path}"
+    if name == "edit_file":
+        return f"Правлю {path}"
+    if name == "delete_file":
+        return f"Удаляю {path}"
+    return f"Инструмент: {name}"
 
 
 def _needs_clarification(project: Project, content: str, attachment_ids: list[UUID]) -> bool:
@@ -345,6 +366,8 @@ async def _stream_events(
     current_user: User,
     user_message: str,
     attachment_ids: list[UUID],
+    provider_override: str | None = None,
+    model_override: str | None = None,
 ) -> StreamingResponse:
     if current_user.credits_balance <= 0:
         raise HTTPException(
@@ -373,13 +396,21 @@ async def _stream_events(
             db.commit()
             db.refresh(project)
 
-    model_message = _compose_model_message(content=content, attachment_ids=attachment_ids, db=db)
+    user_agent_message = _compose_user_message(content=content, attachment_ids=attachment_ids, db=db)
     try:
-        safe_message = sanitize_user_message(model_message)
+        safe_message = sanitize_user_message(user_agent_message)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    conversation = ConversationService()
+    provider_name = provider_override or settings.provider_name
+    if provider_name not in {"openai", "anthropic", "gemini", "openrouter"}:
+        provider_name = settings.provider_name
+    model = model_override or resolve_model(provider_name)
+    api_key = (
+        resolve_api_key_for_provider(provider_name)
+        or getattr(settings, f"{provider_name}_api_key", None)
+        or ""
+    )
 
     async def event_source():
         assistant_full = ""
@@ -391,7 +422,7 @@ async def _stream_events(
 
         if _needs_clarification(project, content, attachment_ids):
             questions = _clarifying_questions(project, content)
-            yield _sse_status("questions", "Жду ответы на уточняющие вопросы", "done")
+            yield _sse_status("questions", "Жду ответы на уточняющие вопросы", "waiting")
             yield append_visible(questions)
             assistant_message = Message(
                 chat_id=chat_id, role="assistant", content_markdown=assistant_full
@@ -410,17 +441,66 @@ async def _stream_events(
                 "context",
                 f"Читаю вложения и готовлю контекст: {len(attachment_ids)} файл(ов)",
             )
-        async for chunk in conversation.stream_reply(
-            chat_id=str(chat_id), user_message=safe_message
-        ):
-            yield append_visible(chunk)
+
+        artifact_path = project_dir(project.id)
+        agent_error: str | None = None
+
+        if not api_key:
+            yield append_visible(
+                "AI-провайдер не настроен (нет API ключа). Но AIRuntime всё равно соберёт "
+                "проект по шаблону и отправит на деплой."
+            )
+        else:
+            history, summary = await build_llm_context(
+                db, chat_id, provider_name=provider_name, model=model, api_key=api_key
+            )
+            system_prompt = build_system_prompt(project)
+            if summary:
+                system_prompt += f"\n\nКонтекст более раннего диалога в этом чате:\n{summary}"
+
+            workspace = WorkspaceTools(artifact_path)
+            session = CodingAgentSession(
+                provider_name=provider_name,
+                model=model,
+                api_key=api_key,
+                workspace=workspace,
+                system_prompt=system_prompt,
+            )
+
+            async for event in session.run(history=history, user_message=safe_message):
+                if isinstance(event, TextDelta):
+                    yield append_visible(event.text)
+                elif isinstance(event, ToolCallRequested):
+                    yield _sse_status("tool", _tool_status_label(event.name, event.arguments))
+                elif isinstance(event, ToolCallResult):
+                    icon = "✓" if event.ok else "⚠"
+                    yield _sse_status(
+                        "tool", f"{icon} {event.summary}", "done" if event.ok else "error"
+                    )
+                elif isinstance(event, AgentDone) and event.reason == "error":
+                    agent_error = event.error
+
+            if agent_error:
+                lowered = (agent_error or "").lower()
+                if "api key" in lowered or "not configured" in lowered:
+                    yield append_visible(
+                        "\n\nAI-провайдер вернул ошибку авторизации. Но AIRuntime всё равно "
+                        "соберёт проект по шаблону и отправит на деплой."
+                    )
+                else:
+                    yield append_visible(f"\n\nАгент столкнулся с ошибкой: {agent_error}")
+
         try:
-            yield _sse_status("plan", "Проектирую структуру и модули")
-            yield _sse_status("artifact", "Генерирую файлы проекта")
-            yield append_visible("\n\nСоздаю файлы проекта и проверяю структуру...")
-            artifact_path = await generate_project_artifact_agentic(db, project, safe_message)
+            yield _sse_status("verify", "Проверяю готовые файлы проекта")
+            try:
+                ensure_required_files(project, artifact_path)
+            except ArtifactError:
+                yield _sse_status(
+                    "verify", "Не хватает обязательных файлов - собираю по шаблону"
+                )
+                artifact_path = generate_fallback_artifact(db, project, safe_message)
             for rel_path in _generated_files(artifact_path):
-                yield _sse_status("module", f"Модуль готов: {rel_path}")
+                yield _sse_status("module", f"Файл готов: {rel_path}")
             git_commit_hash: str | None = None
             try:
                 yield _sse_status("version", "Сохраняю версию проекта")
@@ -530,6 +610,8 @@ async def stream_reply_post(
         current_user=current_user,
         user_message=payload.content,
         attachment_ids=payload.attachment_ids,
+        provider_override=payload.provider,
+        model_override=payload.model,
     )
 
 

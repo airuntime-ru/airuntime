@@ -4,10 +4,11 @@ export function Badge({ children, className }: { children: React.ReactNode; clas
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full border border-black/15 bg-white px-2.5 py-0.5 text-xs font-semibold text-[var(--ar-mist)]",
+        "inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-black/[0.03] px-2.5 py-1 text-xs font-semibold text-[var(--ar-mist)]",
         className
       )}
     >
+      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--ar-accent-gradient)]" aria-hidden />
       {children}
     </span>
   );

@@ -7,27 +7,27 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from src.api.dependencies.auth import get_current_user
-from src.api.dto.project_versions import ProjectRollbackResponse, ProjectVersionResponse
+from src.api.dto.deployment import DeploymentResponse
 from src.api.dto.project_versions import (
+    ProjectRollbackResponse,
     ProjectVersionFileResponse,
+    ProjectVersionResponse,
     ProjectVersionTreeEntryResponse,
 )
-from src.api.dto.deployment import DeploymentResponse
-from src.db.models.deployment import Deployment
 from src.db.models.project import Project
 from src.db.models.user import User
 from src.db.session import get_db
 from src.services.deployments import create_deployment_for_project
-from src.services.project_runtime import RunningProjectLimitError
 from src.services.project_git import (
+    ProjectGitError,
     archive_version_stream,
+    list_version_tree,
     list_versions,
     project_repo_dir,
-    list_version_tree,
-    rollback_to,
-    ProjectGitError,
     read_version_file,
+    rollback_to,
 )
+from src.services.project_runtime import RunningProjectLimitError
 
 router = APIRouter(prefix="/projects/{project_id}/versions", tags=["versions"])
 
@@ -124,6 +124,10 @@ def list_project_version_tree(
         entries = list_version_tree(repo_dir, commit_hash=commit_hash, rel_path=path)
     except ProjectGitError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not path and project.type == "telegram_bot" and any(e.name == "app.py" for e in entries):
+        # Older fallback generations could leave website files in the same repo
+        # when a project changed type. Hide that stale website folder for bot projects.
+        entries = [e for e in entries if e.name != "public"]
     return [
         ProjectVersionTreeEntryResponse(
             name=e.name, entry_type=e.entry_type, size_bytes=e.size_bytes
@@ -147,4 +151,3 @@ def get_project_version_file(
     except ProjectGitError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return ProjectVersionFileResponse(path=path, **payload)
-

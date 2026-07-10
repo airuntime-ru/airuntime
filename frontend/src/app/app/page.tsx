@@ -33,14 +33,20 @@ export default function ProjectsPage() {
 
   return (
     <div className="space-y-6">
-      <section className="rounded-[var(--ar-radius-sm)] border border-black/10 bg-white p-5 sm:p-7">
-        <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr] lg:items-end">
+      <section className="accent-ring relative overflow-hidden rounded-[var(--ar-radius-lg)] border border-black/[0.06] bg-white p-5 sm:p-7">
+        <div
+          className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full opacity-[0.14] blur-3xl"
+          style={{ background: "var(--ar-accent-gradient)" }}
+          aria-hidden
+        />
+        <div className="relative grid gap-6 lg:grid-cols-[1.1fr_0.9fr] lg:items-end">
           <div>
-            <p className="inline-flex items-center rounded-full border border-black/10 bg-black/5 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ar-mist)]">
+            <p className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-black/[0.03] px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ar-mist)]">
+              <span className="h-1.5 w-1.5 rounded-full bg-[var(--ar-accent-gradient)]" aria-hidden />
               AIRuntime
             </p>
             <h1 className="mt-5 max-w-3xl text-[2.35rem] font-semibold leading-[1.04] tracking-normal text-[var(--ar-black)] sm:text-5xl xl:text-6xl">
-              Создайте проект и запустите его сегодня
+              Создайте <span className="accent-text">проект</span> и запустите его сегодня
             </h1>
             <p className="mt-5 max-w-2xl text-base leading-8 text-[var(--ar-mist)]">
               Опишите идею в чате, а AIRuntime соберет и задеплоит рабочую версию.
@@ -73,11 +79,13 @@ export default function ProjectsPage() {
             ].map((item) => (
               <div
                 key={item.label}
-                className="min-h-20 rounded-[var(--ar-radius-sm)] border border-black/10 bg-white p-3 sm:min-h-24 sm:p-4"
+                className="min-h-20 rounded-[var(--ar-radius-md)] border border-black/[0.06] bg-white p-3 shadow-[0_8px_22px_rgba(7,20,38,0.045)] sm:min-h-24 sm:p-4"
               >
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-[0.62rem] font-semibold uppercase tracking-[0.12em] text-[var(--ar-stone)] sm:text-xs sm:tracking-[0.16em]">{item.label}</p>
-                  <item.icon size={17} className="text-[var(--ar-black)]" />
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--ar-accent-gradient-soft)] text-[var(--ar-sky)]">
+                    <item.icon size={13} />
+                  </span>
                 </div>
                 <p className="mt-3 text-2xl font-semibold tabular-nums text-[var(--ar-black)] sm:text-3xl">{item.value}</p>
               </div>

@@ -513,22 +513,43 @@ def build_project_image(db: Session, project: Project, prompt: str = "") -> tupl
         try:
             _docker_build(path, tag)
         except DockerException as exc:
-            first_error = _build_error_message(exc)
-            try:
-                from src.services.agentic_artifacts import repair_artifact_with_fallback
+            last_error = _build_error_message(exc)
+            fixed = False
 
-                repaired_path = repair_artifact_with_fallback(db, project, first_error)
-                db.commit()
-                _docker_build(repaired_path, tag)
-            except DockerException as second_exc:
-                second_error = _build_error_message(second_exc)
-                raise ArtifactError(
-                    f"Docker image build failed after repair:\n{second_error}"
-                ) from second_exc
-            except Exception as repair_exc:
-                raise ArtifactError(
-                    f"Docker image build failed and repair did not complete:\n{first_error}\n{repair_exc}"
-                ) from repair_exc
+            from src.services.agentic_artifacts import (
+                REPAIR_ATTEMPTS,
+                repair_artifact_with_agent,
+                repair_artifact_with_fallback,
+            )
+
+            for _attempt in range(REPAIR_ATTEMPTS):
+                try:
+                    repaired_path = repair_artifact_with_agent(db, project, last_error)
+                    db.commit()
+                    _docker_build(repaired_path, tag)
+                    fixed = True
+                    break
+                except DockerException as retry_exc:
+                    last_error = _build_error_message(retry_exc)
+                except ArtifactError:
+                    # No AI provider configured, or the agent produced nothing usable -
+                    # stop retrying with AI and fall through to the deterministic template.
+                    break
+
+            if not fixed:
+                try:
+                    repaired_path = repair_artifact_with_fallback(db, project, last_error)
+                    db.commit()
+                    _docker_build(repaired_path, tag)
+                except DockerException as second_exc:
+                    second_error = _build_error_message(second_exc)
+                    raise ArtifactError(
+                        f"Docker image build failed after repair:\n{second_error}"
+                    ) from second_exc
+                except Exception as repair_exc:
+                    raise ArtifactError(
+                        f"Docker image build failed and repair did not complete:\n{last_error}\n{repair_exc}"
+                    ) from repair_exc
 
     environment: dict[str, str] = {}
     if project.type == "telegram_bot":

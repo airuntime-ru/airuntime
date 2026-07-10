@@ -27,14 +27,25 @@
   --background: #f7fbff;
   --foreground: var(--ar-black);
 
-  --ar-radius-sm: 0.5rem;
-  --ar-radius-md: 0.5rem;
-  --ar-radius-lg: 0.5rem;
-  --ar-radius-xl: 0.5rem;
+  --ar-radius-sm: 0.75rem;
+  --ar-radius-md: 1rem;
+  --ar-radius-lg: 1.375rem;
+  --ar-radius-xl: 1.875rem;
 
   --ar-blur: 24px;
   --ar-shadow: 0 24px 70px rgba(84, 123, 176, 0.13);
   --ar-transition: 320ms cubic-bezier(0.22, 1, 0.36, 1);
+
+  --ar-ink: #04050a;
+  --ar-ink-2: #0a0d18;
+  --ar-ink-surface: rgba(255, 255, 255, 0.045);
+  --ar-ink-surface-strong: rgba(255, 255, 255, 0.08);
+  --ar-ink-border: rgba(255, 255, 255, 0.08);
+  --ar-ink-border-strong: rgba(255, 255, 255, 0.16);
+  --ar-ink-text: rgba(255, 255, 255, 0.56);
+  --ar-ink-text-strong: #f4f8ff;
+  --ar-accent-gradient: linear-gradient(135deg, #2388ff 0%, #6975ff 55%, #b69cff 100%);
+  --ar-accent-gradient-soft: linear-gradient(135deg, rgba(35, 136, 255, 0.16), rgba(105, 117, 255, 0.14) 55%, rgba(182, 156, 255, 0.14));
 }
 
 @theme inline {
@@ -269,6 +280,78 @@ textarea {
 
 .heaven-line {
   background: linear-gradient(90deg, transparent, rgba(35, 136, 255, 0.45), rgba(100, 220, 168, 0.35), transparent);
+}
+
+.panel-ink {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(120% 70% at 12% -10%, rgba(35, 136, 255, 0.22), transparent 58%),
+    radial-gradient(90% 60% at 100% 110%, rgba(105, 117, 255, 0.16), transparent 60%),
+    linear-gradient(180deg, var(--ar-ink-2) 0%, var(--ar-ink) 100%);
+  border: 1px solid var(--ar-ink-border);
+  box-shadow: 0 24px 70px rgba(2, 4, 12, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.panel-ink::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 26px 26px;
+  mask-image: radial-gradient(80% 60% at 50% 0%, black, transparent 75%);
+  opacity: 0.5;
+}
+
+.nav-pill {
+  position: relative;
+  color: var(--ar-ink-text);
+  transition: color var(--ar-transition), background var(--ar-transition);
+}
+
+.nav-pill:hover {
+  color: var(--ar-ink-text-strong);
+  background: var(--ar-ink-surface);
+}
+
+.nav-pill-active {
+  color: var(--ar-ink-text-strong);
+  background: linear-gradient(120deg, rgba(35, 136, 255, 0.22), rgba(105, 117, 255, 0.16));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12), 0 8px 24px rgba(35, 136, 255, 0.18);
+}
+
+.nav-icon-active {
+  background: var(--ar-accent-gradient);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16), 0 6px 18px rgba(35, 136, 255, 0.45);
+}
+
+.grid-texture {
+  position: relative;
+}
+
+.grid-texture::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: linear-gradient(rgba(7, 20, 38, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(7, 20, 38, 0.05) 1px, transparent 1px);
+  background-size: 34px 34px;
+  mask-image: radial-gradient(85% 55% at 50% 0%, black, transparent 78%);
+}
+
+.accent-ring {
+  box-shadow: 0 0 0 1px rgba(35, 136, 255, 0.16), 0 18px 46px rgba(35, 136, 255, 0.1);
+}
+
+.accent-text {
+  background: var(--ar-accent-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 .text-gradient {

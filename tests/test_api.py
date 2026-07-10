@@ -4,10 +4,31 @@ from types import SimpleNamespace
 from tests.conftest import auth_tokens
 
 
-class _FakeConversationService:
-    async def stream_reply(self, *, chat_id: str, user_message: str):
-        yield "Готово: "
-        yield user_message[:20]
+def _fake_agent_session_class(calls: list, *, extra_text: str = ""):
+    """Builds a fake CodingAgentSession that skips real LLM/tool calls.
+
+    It doesn't write any workspace files, so the router's ensure_required_files
+    check fails and falls back to the deterministic template generator - which is
+    real code, so these tests still exercise the actual fallback/deploy pipeline.
+    """
+    from src.services.agent.events import AgentDone, TextDelta
+
+    class _FakeCodingAgentSession:
+        def __init__(self, *, provider_name, model, api_key, workspace, system_prompt):
+            self.provider_name = provider_name
+            self.workspace = workspace
+
+        async def run(self, *, history, user_message):
+            calls.append(
+                {"history": history, "user_message": user_message, "provider": self.provider_name}
+            )
+            yield TextDelta(text="Готово: ")
+            yield TextDelta(text=user_message[:20])
+            if extra_text:
+                yield TextDelta(text=extra_text)
+            yield AgentDone(reason="stop")
+
+    return _FakeCodingAgentSession
 
 
 def test_health(client):
@@ -472,22 +493,17 @@ def test_stream_prompt_generates_artifact_and_queues_deployment(
     client, monkeypatch, tmp_path
 ):
     from src.api.routers import chat as chat_router
+    from src.core.config import settings
 
-    generated = []
+    monkeypatch.setattr(settings, "generated_projects_dir", str(tmp_path))
+    calls: list = []
     deployments = []
-
-    async def fake_generate_project_artifact(db, project, prompt):
-        generated.append((project.id, prompt))
-        return tmp_path / "artifact"
 
     def fake_create_deployment(db, project):
         deployments.append(project.id)
         return None
 
-    monkeypatch.setattr(chat_router, "ConversationService", _FakeConversationService)
-    monkeypatch.setattr(
-        chat_router, "generate_project_artifact_agentic", fake_generate_project_artifact
-    )
+    monkeypatch.setattr(chat_router, "CodingAgentSession", _fake_agent_session_class(calls))
     monkeypatch.setattr(chat_router, "create_deployment_for_project", fake_create_deployment)
 
     headers = auth_tokens(client, "stream@airuntime.dev")
@@ -512,12 +528,12 @@ def test_stream_prompt_generates_artifact_and_queues_deployment(
     ]
     chunks = [payload["chunk"] for payload in payloads if "chunk" in payload]
     statuses = [payload["status"]["phase"] for payload in payloads if "status" in payload]
-    assert "artifact" in statuses
+    assert "verify" in statuses
     assert "deploy" in statuses
     assert any("Сайт собран и поставлен в очередь на запуск" in chunk for chunk in chunks)
     assert "data: [DONE]" in response.text
-    assert generated
-    assert deployments == [generated[0][0]]
+    assert calls
+    assert deployments == [project["id"]]
 
     messages = client.get(
         f"/api/v1/projects/{project['id']}/chats/{chat['id']}/messages",
@@ -534,24 +550,15 @@ def test_stream_prompt_generates_artifact_and_queues_deployment(
 
 def test_stream_accepts_files_already_linked_to_user_message(client, monkeypatch, tmp_path):
     from src.api.routers import chat as chat_router
+    from src.core.config import settings
 
-    captured_prompts = []
-
-    class FakeConversationService:
-        async def stream_reply(self, *, chat_id: str, user_message: str):
-            captured_prompts.append(user_message)
-            yield "Принял файл"
-
-    async def fake_generate_project_artifact(db, project, prompt):
-        return tmp_path
+    monkeypatch.setattr(settings, "generated_projects_dir", str(tmp_path))
+    calls: list = []
 
     def fake_create_deployment(db, project):
         return None
 
-    monkeypatch.setattr(chat_router, "ConversationService", FakeConversationService)
-    monkeypatch.setattr(
-        chat_router, "generate_project_artifact_agentic", fake_generate_project_artifact
-    )
+    monkeypatch.setattr(chat_router, "CodingAgentSession", _fake_agent_session_class(calls))
     monkeypatch.setattr(chat_router, "create_deployment_for_project", fake_create_deployment)
 
     headers = auth_tokens(client, "stream-file@airuntime.dev")
@@ -586,27 +593,24 @@ def test_stream_accepts_files_already_linked_to_user_message(client, monkeypatch
     assert response.status_code == 200
     assert "data: [DONE]" in response.text
     assert "context" in response.text
-    assert captured_prompts
-    assert "Attachment: brief.txt" in captured_prompts[0]
-    assert "hero must say hello from attachment" in captured_prompts[0]
+    assert calls
+    assert "Attachment: brief.txt" in calls[0]["user_message"]
+    assert "hero must say hello from attachment" in calls[0]["user_message"]
 
 
 def test_stream_subdomain_from_prompt_sets_deploy_subdomain(client, monkeypatch, tmp_path):
     from src.api.routers import chat as chat_router
+    from src.core.config import settings
 
+    monkeypatch.setattr(settings, "generated_projects_dir", str(tmp_path))
+    calls: list = []
     deployments: list[str | None] = []
-
-    async def fake_generate_project_artifact(db, project, prompt):
-        return tmp_path / "artifact"
 
     def fake_create_deployment(db, project):
         deployments.append(project.deploy_subdomain)
         return None
 
-    monkeypatch.setattr(chat_router, "ConversationService", _FakeConversationService)
-    monkeypatch.setattr(
-        chat_router, "generate_project_artifact_agentic", fake_generate_project_artifact
-    )
+    monkeypatch.setattr(chat_router, "CodingAgentSession", _fake_agent_session_class(calls))
     monkeypatch.setattr(chat_router, "create_deployment_for_project", fake_create_deployment)
 
     headers = auth_tokens(client, "subdomain@airuntime.dev")
@@ -630,18 +634,13 @@ def test_stream_subdomain_from_prompt_sets_deploy_subdomain(client, monkeypatch,
 
 def test_stream_prompt_reclassifies_project_before_generation(client, monkeypatch, tmp_path):
     from src.api.routers import chat as chat_router
+    from src.core.config import settings
 
-    generated_types = []
+    monkeypatch.setattr(settings, "generated_projects_dir", str(tmp_path))
+    calls: list = []
     deployments = []
 
-    async def fake_generate_project_artifact(db, project, prompt):
-        generated_types.append(project.type)
-        return tmp_path / "artifact"
-
-    monkeypatch.setattr(chat_router, "ConversationService", _FakeConversationService)
-    monkeypatch.setattr(
-        chat_router, "generate_project_artifact_agentic", fake_generate_project_artifact
-    )
+    monkeypatch.setattr(chat_router, "CodingAgentSession", _fake_agent_session_class(calls))
     monkeypatch.setattr(chat_router, "commit_snapshot", lambda artifact_path, message: "abc123")
     monkeypatch.setattr(
         chat_router,
@@ -665,8 +664,10 @@ def test_stream_prompt_reclassifies_project_before_generation(client, monkeypatc
     )
 
     assert response.status_code == 200
-    assert generated_types == ["telegram_bot"]
     assert deployments == []
+
+    updated = client.get(f"/api/v1/projects/{project['id']}", headers=headers).json()
+    assert updated["type"] == "telegram_bot"
     assert "TELEGRAM_BOT_TOKEN" in response.text
     updated = client.get(f"/api/v1/projects/{project['id']}", headers=headers).json()
     assert updated["type"] == "telegram_bot"

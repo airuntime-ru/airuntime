@@ -1,48 +1,18 @@
 import asyncio
-import json
 import uuid
+from collections.abc import AsyncIterator
+from pathlib import Path
 
 import pytest
 
 from src.core.config import settings
 from src.db.models.project import Project
-from src.services import agentic_artifacts
-from src.services.agentic_artifacts import (
-    ArtifactError,
-    generate_agentic_artifact,
-    generate_project_artifact_agentic,
-)
-
-
-class FakeProvider:
-    def __init__(self, text: str) -> None:
-        self.text = text
-
-    async def stream(self, *, messages, model, tools):
-        assert messages
-        assert model
-        assert tools == []
-        midpoint = max(1, len(self.text) // 2)
-        yield self.text[:midpoint]
-        yield self.text[midpoint:]
-
-
-class DummyDb:
-    def add(self, item) -> None:
-        self.item = item
-
-
-class EmptyQuery:
-    def filter(self, *args, **kwargs):
-        return self
-
-    def all(self) -> list:
-        return []
-
-
-class TokenlessDb(DummyDb):
-    def query(self, model):
-        return EmptyQuery()
+from src.services.agent.events import TextDelta, ToolCallRequested, ToolCallResult, TurnFinished
+from src.services.agent.loop import CodingAgentSession
+from src.services.agent.tools import WorkspaceTools
+from src.services.agentic_artifacts import ensure_required_files, generate_fallback_artifact
+from src.services.artifacts import ArtifactError
+from src.services.workspace import WorkspaceError, project_dir
 
 
 def _project(project_type: str = "website") -> Project:
@@ -55,89 +25,220 @@ def _project(project_type: str = "website") -> Project:
     )
 
 
-def test_agentic_website_manifest_writes_project_files(tmp_path, monkeypatch):
-    monkeypatch.setattr(settings, "generated_projects_dir", str(tmp_path))
-    manifest = {
-        "summary": "Generated site",
-        "files": [
-            {
-                "path": "public/index.html",
-                "content": "<!doctype html><html><body><h1>Demo</h1></body></html>",
-            },
-            {"path": "public/styles.css", "content": "body{font-family:sans-serif}"},
-        ],
-    }
-    monkeypatch.setattr(
-        agentic_artifacts, "get_provider", lambda provider_name: FakeProvider(json.dumps(manifest))
+class DummyDb:
+    def add(self, item) -> None:
+        self.item = item
+
+
+def test_workspace_tools_write_then_read_roundtrip(tmp_path):
+    tools = WorkspaceTools(tmp_path)
+    result = tools.call("write_file", {"path": "public/index.html", "content": "<h1>hi</h1>"})
+    assert result.ok
+    assert "public/index.html" in tools.touched_files
+
+    read = tools.call("read_file", {"path": "public/index.html"})
+    assert read.ok
+    assert read.content == "<h1>hi</h1>"
+
+
+def test_workspace_tools_edit_file_requires_unique_match(tmp_path):
+    (tmp_path / "app.py").write_text("print('a')\nprint('a')\n", encoding="utf-8")
+    tools = WorkspaceTools(tmp_path)
+
+    ambiguous = tools.call(
+        "edit_file", {"path": "app.py", "old_text": "print('a')", "new_text": "print('b')"}
     )
+    assert not ambiguous.ok
+    assert "not unique" in ambiguous.summary
 
-    path = asyncio.run(generate_agentic_artifact(DummyDb(), _project("website"), "Build a site"))
-
-    assert (path / "public" / "index.html").exists()
-    assert (path / "public" / "styles.css").exists()
-    assert (path / "Dockerfile").read_text(encoding="utf-8").startswith("FROM nginx")
-    meta = json.loads((path / ".airuntime" / "manifest.json").read_text(encoding="utf-8"))
-    assert meta["source"].startswith("ai:")
-
-
-def test_agentic_manifest_rejects_unsafe_paths(tmp_path, monkeypatch):
-    monkeypatch.setattr(settings, "generated_projects_dir", str(tmp_path))
-    manifest = {
-        "files": [
-            {"path": "../escape.txt", "content": "bad"},
-            {"path": "public/index.html", "content": "ok"},
-        ]
-    }
-    monkeypatch.setattr(
-        agentic_artifacts, "get_provider", lambda provider_name: FakeProvider(json.dumps(manifest))
+    (tmp_path / "app.py").write_text("print('unique')\n", encoding="utf-8")
+    ok = tools.call(
+        "edit_file", {"path": "app.py", "old_text": "print('unique')", "new_text": "print('changed')"}
     )
+    assert ok.ok
+    assert (tmp_path / "app.py").read_text(encoding="utf-8") == "print('changed')\n"
 
-    with pytest.raises(ArtifactError, match="Blocked|Unsafe"):
-        asyncio.run(generate_agentic_artifact(DummyDb(), _project("website"), "Build a site"))
+
+def test_workspace_tools_rejects_path_escape(tmp_path):
+    tools = WorkspaceTools(tmp_path)
+    result = tools.call("write_file", {"path": "../escape.txt", "content": "bad"})
+    assert not result.ok
+
+    from src.services.workspace import resolve_in_workspace
+
+    with pytest.raises(WorkspaceError):
+        resolve_in_workspace(tmp_path, "../../etc/passwd")
 
 
-def test_agentic_generation_falls_back_when_provider_fails(tmp_path, monkeypatch):
-    monkeypatch.setattr(settings, "generated_projects_dir", str(tmp_path))
+def test_workspace_tools_list_files(tmp_path):
+    tools = WorkspaceTools(tmp_path)
+    tools.call("write_file", {"path": "public/index.html", "content": "hi"})
+    tools.call("write_file", {"path": "public/styles.css", "content": "body{}"})
+    listing = tools.call("list_files", {"path": "."})
+    assert listing.ok
+    assert "public/index.html" in listing.content
+    assert "public/styles.css" in listing.content
 
-    class FailingProvider:
-        async def stream(self, *, messages, model, tools):
-            raise RuntimeError("provider down")
-            yield ""
 
-    monkeypatch.setattr(agentic_artifacts, "get_provider", lambda provider_name: FailingProvider())
+def test_ensure_required_files_injects_default_dockerfile(tmp_path):
     project = _project("website")
+    (tmp_path / "public").mkdir()
+    (tmp_path / "public" / "index.html").write_text("<h1>hi</h1>", encoding="utf-8")
 
-    path = asyncio.run(generate_project_artifact_agentic(DummyDb(), project, "Build a site"))
+    ensure_required_files(project, tmp_path)
 
-    assert (path / "public" / "index.html").exists()
-    assert "fallback" in (path / ".airuntime" / "manifest.json").read_text(encoding="utf-8")
-    assert "fallback used" in project.logs
+    assert (tmp_path / "Dockerfile").read_text(encoding="utf-8").startswith("FROM nginx")
 
 
-def test_agentic_telegram_manifest_requires_token_env(tmp_path, monkeypatch):
+def test_ensure_required_files_raises_when_entry_file_missing(tmp_path):
+    project = _project("website")
+    with pytest.raises(ArtifactError):
+        ensure_required_files(project, tmp_path)
+
+
+def test_ensure_required_files_telegram_requires_token_env_read(tmp_path):
+    project = _project("telegram_bot")
+    (tmp_path / "app.py").write_text("print('missing env')", encoding="utf-8")
+    with pytest.raises(ArtifactError, match="TELEGRAM_BOT_TOKEN"):
+        ensure_required_files(project, tmp_path)
+
+
+def test_generate_fallback_artifact_produces_required_files(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "generated_projects_dir", str(tmp_path))
-    manifest = {"files": [{"path": "app.py", "content": "print('missing env')"}]}
-    monkeypatch.setattr(
-        agentic_artifacts, "get_provider", lambda provider_name: FakeProvider(json.dumps(manifest))
+    project = _project("website")
+    path = generate_fallback_artifact(DummyDb(), project, "Build a site")
+    assert (path / "public" / "index.html").exists()
+    assert path == project_dir(project.id)
+
+
+class FakeProvider:
+    def __init__(self, turns):
+        self._turns = turns
+        self.call_count = 0
+
+    def supports_tools(self):
+        return True
+
+    def build_messages(self, history, user_message):
+        return [*history, {"role": "user", "content": user_message}]
+
+    def build_tool_result_messages(self, results):
+        return [{"role": "tool", "content": r.content} for r in results]
+
+    async def stream_turn(self, *, system_prompt, messages, tools, model, api_key):
+        events = self._turns[self.call_count]
+        self.call_count += 1
+        for event in events:
+            yield event
+
+
+def _patch_provider(monkeypatch, fake):
+    monkeypatch.setattr("src.services.agent.loop.get_agent_provider", lambda name: fake)
+
+
+def test_agent_session_writes_a_file_then_stops(tmp_path, monkeypatch):
+    turn_one = [
+        TextDelta(text="Creating page. "),
+        TurnFinished(
+            stop_reason="tool_use",
+            wire_message={"role": "assistant", "content": "..."},
+            tool_calls=[
+                ToolCallRequested(
+                    call_id="call_1",
+                    name="write_file",
+                    arguments={"path": "public/index.html", "content": "<h1>Hi</h1>"},
+                )
+            ],
+        ),
+    ]
+    turn_two = [
+        TextDelta(text="Done!"),
+        TurnFinished(stop_reason="stop", wire_message={"role": "assistant", "content": "Done!"}),
+    ]
+    fake = FakeProvider([turn_one, turn_two])
+    _patch_provider(monkeypatch, fake)
+
+    workspace = WorkspaceTools(tmp_path)
+    session = CodingAgentSession(
+        provider_name="openai",
+        model="gpt-4o-mini",
+        api_key="test-key",
+        workspace=workspace,
+        system_prompt="test",
     )
 
-    with pytest.raises(ArtifactError, match="TELEGRAM_BOT_TOKEN"):
-        asyncio.run(generate_agentic_artifact(DummyDb(), _project("telegram_bot"), "Build bot"))
+    async def _run():
+        events = []
+        async for event in session.run(history=[], user_message="Build a site"):
+            events.append(event)
+        return events
+
+    events = asyncio.run(_run())
+
+    assert (tmp_path / "public" / "index.html").exists()
+    assert any(isinstance(e, ToolCallResult) and e.ok for e in events)
+    text = "".join(e.text for e in events if isinstance(e, TextDelta))
+    assert "Done" in text
+    assert fake.call_count == 2
 
 
-def test_agentic_telegram_generation_can_create_files_before_token_is_added(tmp_path, monkeypatch):
-    monkeypatch.setattr(settings, "generated_projects_dir", str(tmp_path))
+def test_agent_session_stops_at_max_iterations(tmp_path, monkeypatch):
+    looping_turn = [
+        TurnFinished(
+            stop_reason="tool_use",
+            wire_message={"role": "assistant", "content": "..."},
+            tool_calls=[ToolCallRequested(call_id="c", name="list_files", arguments={"path": "."})],
+        )
+    ]
+    fake = FakeProvider([looping_turn for _ in range(20)])
+    _patch_provider(monkeypatch, fake)
 
-    class FailingProvider:
-        async def stream(self, *, messages, model, tools):
-            raise RuntimeError("provider down")
-            yield ""
+    workspace = WorkspaceTools(tmp_path)
+    session = CodingAgentSession(
+        provider_name="openai",
+        model="gpt-4o-mini",
+        api_key="test-key",
+        workspace=workspace,
+        system_prompt="test",
+    )
 
-    monkeypatch.setattr(agentic_artifacts, "get_provider", lambda provider_name: FailingProvider())
-    project = _project("telegram_bot")
+    async def _run():
+        last = None
+        async for event in session.run(history=[], user_message="Build a site"):
+            last = event
+        return last
 
-    path = asyncio.run(generate_project_artifact_agentic(TokenlessDb(), project, "Build bot"))
+    final_event = asyncio.run(_run())
 
-    assert (path / "app.py").exists()
-    assert (path / "requirements.txt").exists()
-    assert "fallback used" in project.logs
+    from src.services.agent.events import AgentDone
+
+    assert isinstance(final_event, AgentDone)
+    assert final_event.reason == "max_iterations"
+
+
+def test_agent_session_surfaces_provider_error(tmp_path, monkeypatch):
+    fake = FakeProvider([[TurnFinished(stop_reason="error", error="API key is not configured")]])
+    _patch_provider(monkeypatch, fake)
+
+    workspace = WorkspaceTools(tmp_path)
+    session = CodingAgentSession(
+        provider_name="openai",
+        model="gpt-4o-mini",
+        api_key="",
+        workspace=workspace,
+        system_prompt="test",
+    )
+
+    async def _run():
+        events = []
+        async for event in session.run(history=[], user_message="Build a site"):
+            events.append(event)
+        return events
+
+    events = asyncio.run(_run())
+
+    from src.services.agent.events import AgentDone
+
+    done = [e for e in events if isinstance(e, AgentDone)][0]
+    assert done.reason == "error"
+    assert "API key" in done.error

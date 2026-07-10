@@ -268,11 +268,18 @@ export function streamChat(
   projectId: string,
   chatId: string,
   content: string,
-  attachmentIds: string[] = []
+  attachmentIds: string[] = [],
+  options: { provider?: string | null; model?: string | null; signal?: AbortSignal } = {}
 ): Promise<Response> {
   return rawRequest(`/projects/${projectId}/chats/${chatId}/stream`, {
     method: "POST",
-    body: JSON.stringify({ content, attachment_ids: attachmentIds }),
+    body: JSON.stringify({
+      content,
+      attachment_ids: attachmentIds,
+      provider: options.provider || undefined,
+      model: options.model || undefined,
+    }),
+    signal: options.signal,
   });
 }
 
