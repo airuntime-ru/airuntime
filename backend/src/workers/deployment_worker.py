@@ -9,8 +9,21 @@ from src.services.artifacts import build_project_image
 from src.services.cloudflare_dns import CloudflareDnsError, sync_dns_for_website_deploy
 from src.services.deployment.docker_adapter import DeployRequest, DockerDeploymentAdapter
 from src.services.deployment_queue import pop_deployment_job
+from src.services.docker_control_queue import pop_control_job, push_control_result
 from src.services.project_subdomain import resolve_deploy_subdomain
 from src.services.telegram_profile import TelegramProfileError, fetch_bot_profile
+
+
+def process_control_job(job: dict) -> None:
+    job_id = job.get("job_id", "")
+    action = job.get("action")
+    project_id = job.get("project_id")
+    try:
+        if action in ("stop", "cleanup") and project_id:
+            DockerDeploymentAdapter().stop_project(str(project_id))
+        push_control_result(job_id, {"ok": True})
+    except Exception as exc:  # noqa: BLE001 - always report back, never crash the worker loop
+        push_control_result(job_id, {"ok": False, "error": str(exc)})
 
 
 def process_job(job: dict) -> None:
@@ -107,7 +120,11 @@ def process_job(job: dict) -> None:
 
 def run() -> None:
     while True:
-        job = pop_deployment_job(timeout_seconds=10)
+        control_job = pop_control_job(timeout_seconds=2)
+        if control_job:
+            process_control_job(control_job)
+            continue
+        job = pop_deployment_job(timeout_seconds=2)
         if not job:
             continue
         process_job(job)

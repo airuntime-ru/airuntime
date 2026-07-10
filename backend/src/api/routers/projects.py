@@ -1,3 +1,4 @@
+import shutil
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -11,6 +12,7 @@ from src.db.models.chat import Chat
 from src.db.models.project import Project
 from src.db.models.user import User
 from src.db.session import get_db
+from src.services.docker_control_queue import submit_control_job
 from src.services.project_intent import infer_project_type
 from src.services.project_logs import read_project_logs
 from src.services.project_runtime import (
@@ -20,6 +22,7 @@ from src.services.project_runtime import (
     stop_project_runtime,
 )
 from src.services.project_subdomain import assert_subdomain_available, normalize_deploy_subdomain
+from src.services.workspace import project_dir
 from src.core.config import settings
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -162,6 +165,26 @@ def get_project_logs(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return read_project_logs(db, project)
+
+
+@router.delete("/{project_id}")
+def delete_project(
+    project_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    project = (
+        db.query(Project)
+        .filter(Project.id == project_id, Project.user_id == current_user.id)
+        .first()
+    )
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    submit_control_job(action="cleanup", project_id=str(project.id))
+    shutil.rmtree(project_dir(project.id), ignore_errors=True)
+    db.delete(project)
+    db.commit()
+    return {"status": "deleted"}
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)

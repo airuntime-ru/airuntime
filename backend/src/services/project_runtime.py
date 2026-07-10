@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from src.core.config import settings
 from src.db.models.deployment import Deployment
 from src.db.models.project import Project
-from src.services.deployment.docker_adapter import DockerDeploymentAdapter
+from src.services.docker_control_queue import submit_control_job
 
 
 class RunningProjectLimitError(RuntimeError):
@@ -65,7 +65,11 @@ def stop_project_runtime(db: Session, project: Project) -> Project:
     if project.status not in RUNNING_STATUSES:
         raise ValueError("Проект не запущен")
 
-    DockerDeploymentAdapter().stop_project(str(project.id))
+    result = submit_control_job(action="stop", project_id=str(project.id))
+    if result is None:
+        raise ValueError("Не удалось остановить проект: сервис деплоя не отвечает, попробуйте ещё раз")
+    if not result.get("ok"):
+        raise ValueError(f"Не удалось остановить проект: {result.get('error', 'неизвестная ошибка')}")
     _cancel_active_deployments(db, project.id)
     project.status = "stopped"
     note = "Проект остановлен пользователем."
@@ -77,10 +81,7 @@ def stop_project_runtime(db: Session, project: Project) -> Project:
 
 
 def block_project(db: Session, project: Project, *, reason: str) -> Project:
-    try:
-        DockerDeploymentAdapter().stop_project(str(project.id))
-    except Exception:  # noqa: BLE001 - blocking must succeed even if Docker is unreachable
-        pass
+    submit_control_job(action="stop", project_id=str(project.id))
     _cancel_active_deployments(db, project.id)
     project.status = "blocked"
     project.blocked_reason = reason
