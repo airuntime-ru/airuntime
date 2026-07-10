@@ -1,4 +1,4 @@
-from core.models import AppUser, Deployment, ModerationEvent, Project, Secret
+from core.models import AppUser, CreditTopUp, Deployment, ModerationEvent, Plan, Project, Secret
 
 
 class DomainAppUser(AppUser):
@@ -41,3 +41,17 @@ class DomainDeployment(Deployment):
         proxy = True
         verbose_name = "Деплой"
         verbose_name_plural = "Деплои"
+
+
+class DomainPlan(Plan):
+    class Meta:
+        proxy = True
+        verbose_name = "Тариф"
+        verbose_name_plural = "Тарифы"
+
+
+class DomainCreditTopUp(CreditTopUp):
+    class Meta:
+        proxy = True
+        verbose_name = "Пополнение баланса"
+        verbose_name_plural = "Пополнения баланса"

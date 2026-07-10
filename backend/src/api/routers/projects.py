@@ -18,6 +18,7 @@ from src.services.project_logs import read_project_logs
 from src.services.project_runtime import (
     RunningProjectLimitError,
     count_running_projects,
+    get_running_limit,
     start_project_runtime,
     stop_project_runtime,
 )
@@ -105,7 +106,7 @@ def get_runtime_limits(
 ) -> ProjectRuntimeLimitsResponse:
     return ProjectRuntimeLimitsResponse(
         running=count_running_projects(db, current_user.id),
-        max_running=settings.max_running_projects_per_user,
+        max_running=get_running_limit(db, current_user.id),
     )
 
 

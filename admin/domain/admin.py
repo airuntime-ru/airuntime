@@ -5,8 +5,10 @@ from core.models import ModerationEvent
 from domain.models import (
     BlockedProject,
     DomainAppUser,
+    DomainCreditTopUp,
     DomainDeployment,
     DomainModerationEvent,
+    DomainPlan,
     DomainProject,
     DomainSecret,
 )
@@ -17,15 +19,17 @@ class DomainAppUserAdmin(admin.ModelAdmin):
     list_display = (
         "email",
         "role",
+        "plan",
+        "credits_balance",
+        "billing_period_end",
         "is_verified",
         "is_banned",
-        "credits_balance",
         "flagged_count",
         "deleted_count",
         "created_at",
     )
     search_fields = ("email",)
-    list_filter = ("role", "is_verified", "is_banned")
+    list_filter = ("role", "plan", "is_verified", "is_banned")
     readonly_fields = ("id", "password_hash", "created_at", "updated_at")
     actions = ["ban_users", "unban_users"]
 
@@ -149,3 +153,52 @@ class DomainSecretAdmin(admin.ModelAdmin):
 class DomainDeploymentAdmin(admin.ModelAdmin):
     list_display = ("project", "status", "started_at", "finished_at")
     list_filter = ("status",)
+
+
+@admin.register(DomainPlan)
+class DomainPlanAdmin(admin.ModelAdmin):
+    list_display = (
+        "name",
+        "key",
+        "monthly_credits",
+        "max_concurrent_projects",
+        "price_rub",
+        "is_default",
+        "is_active",
+        "sort_order",
+    )
+    list_filter = ("is_active", "is_default")
+    search_fields = ("name", "key")
+    readonly_fields = ("id", "created_at", "updated_at")
+    ordering = ("sort_order",)
+
+
+@admin.register(DomainCreditTopUp)
+class DomainCreditTopUpAdmin(admin.ModelAdmin):
+    list_display = ("user", "credits", "amount_rub", "status", "created_at", "paid_at")
+    list_filter = ("status",)
+    search_fields = ("user__email",)
+    readonly_fields = ("id", "user", "credits", "amount_rub", "created_at", "credited_at")
+    actions = ["mark_paid", "mark_cancelled"]
+
+    @admin.action(description="Отметить как оплаченные")
+    def mark_paid(self, request, queryset):
+        from django.utils import timezone
+
+        updated = 0
+        for invoice in queryset.filter(status="pending"):
+            invoice.status = "paid"
+            invoice.paid_at = timezone.now()
+            invoice.save(update_fields=["status", "paid_at"])
+            updated += 1
+        self.message_user(
+            request,
+            f"Отмечено оплаченными: {updated}. Кредиты будут начислены и письмо отправлено "
+            "при следующем цикле обработки биллинга (в течение нескольких минут).",
+            messages.SUCCESS,
+        )
+
+    @admin.action(description="Отменить выбранные счета")
+    def mark_cancelled(self, request, queryset):
+        updated = queryset.filter(status="pending").update(status="cancelled")
+        self.message_user(request, f"Отменено счетов: {updated}", messages.SUCCESS)

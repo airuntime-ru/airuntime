@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from src.core.config import settings
 
@@ -130,6 +131,71 @@ def verify_email(*, verify_url: str) -> EmailContent:
         title="Подтверждение почты",
         body_html=body,
         footer="Ссылка действует 24 часа.",
+    )
+    return EmailContent(subject=subject, plain=plain, html=html)
+
+
+def credits_topup_paid_email(*, credits: int, amount_rub: int) -> EmailContent:
+    subject = "Баланс пополнен"
+    credits_str = f"{credits:,}".replace(",", " ")
+    plain = f"Ваш платёж на {amount_rub} ₽ подтверждён. Начислено {credits} кредитов."
+    body = (
+        f"<p style='margin:0 0 8px;text-align:center;'>Платёж на <strong style='color:{_COLORS['ink']};'>{amount_rub} ₽</strong> подтверждён.</p>"
+        f"<p style='margin:0;text-align:center;'>На баланс начислено <strong style='color:{_COLORS['ink']};'>{credits_str} кредитов</strong>.</p>"
+    )
+    html = _layout(title="Баланс пополнен", body_html=body, footer="Спасибо, что пользуетесь AIRuntime.")
+    return EmailContent(subject=subject, plain=plain, html=html)
+
+
+def low_credits_email(*, credits_balance: int) -> EmailContent:
+    subject = "Кредиты почти закончились"
+    plain = (
+        f"На вашем балансе осталось {credits_balance} кредитов. "
+        "Пополните баланс, чтобы агент продолжил работать над проектами без перерыва."
+    )
+    body = (
+        f"<p style='margin:0 0 8px;text-align:center;'>На балансе осталось "
+        f"<strong style='color:{_COLORS['ink']};'>{credits_balance}</strong> кредитов.</p>"
+        "<p style='margin:0;text-align:center;'>Пополните баланс в личном кабинете, чтобы не потерять доступ к чату с агентом.</p>"
+    )
+    html = _layout(
+        title="Кредиты почти закончились",
+        body_html=body,
+        footer="Кредиты обновятся автоматически в начале следующего периода.",
+    )
+    return EmailContent(subject=subject, plain=plain, html=html)
+
+
+def period_ending_email(*, period_end: datetime) -> EmailContent:
+    date_str = period_end.strftime("%d.%m.%Y")
+    subject = "Тарифный период скоро закончится"
+    plain = f"Ваш текущий тарифный период заканчивается {date_str}. Кредиты будут обновлены автоматически."
+    body = (
+        f"<p style='margin:0 0 8px;text-align:center;'>Текущий тарифный период заканчивается "
+        f"<strong style='color:{_COLORS['ink']};'>{date_str}</strong>.</p>"
+        "<p style='margin:0;text-align:center;'>Кредиты обновятся автоматически по вашему тарифу — ничего делать не нужно.</p>"
+    )
+    html = _layout(
+        title="Тарифный период скоро закончится",
+        body_html=body,
+        footer="Хотите сменить тариф — сделайте это в личном кабинете.",
+    )
+    return EmailContent(subject=subject, plain=plain, html=html)
+
+
+def period_renewed_email(*, plan_name: str, credits: int) -> EmailContent:
+    subject = "Тарифный период обновлён"
+    credits_str = f"{credits:,}".replace(",", " ")
+    plain = f"Начался новый тарифный период по плану «{plan_name}». Начислено {credits} кредитов."
+    body = (
+        f"<p style='margin:0 0 8px;text-align:center;'>Начался новый период по тарифу "
+        f"<strong style='color:{_COLORS['ink']};'>{plan_name}</strong>.</p>"
+        f"<p style='margin:0;text-align:center;'>На баланс начислено <strong style='color:{_COLORS['ink']};'>{credits_str}</strong> кредитов.</p>"
+    )
+    html = _layout(
+        title="Тарифный период обновлён",
+        body_html=body,
+        footer="Спасибо, что пользуетесь AIRuntime.",
     )
     return EmailContent(subject=subject, plain=plain, html=html)
 

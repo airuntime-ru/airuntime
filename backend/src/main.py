@@ -6,7 +6,18 @@ from fastapi.responses import Response
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from src.api.dependencies.rate_limit import enforce_rate_limit
-from src.api.routers import auth, chat, deployments, files, projects, providers, secrets, telegram, project_versions
+from src.api.routers import (
+    auth,
+    billing,
+    chat,
+    deployments,
+    files,
+    project_versions,
+    projects,
+    providers,
+    secrets,
+    telegram,
+)
 from src.core.config import settings
 from src.services.storage import storage_service
 
@@ -54,6 +65,7 @@ app.include_router(deployments.router, prefix=settings.api_prefix)
 app.include_router(providers.router, prefix=settings.api_prefix)
 app.include_router(secrets.router, prefix=settings.api_prefix)
 app.include_router(telegram.router, prefix=settings.api_prefix)
+app.include_router(billing.router, prefix=settings.api_prefix)
 
 
 @app.get("/health")

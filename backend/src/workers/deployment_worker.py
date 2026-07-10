@@ -1,3 +1,4 @@
+import time
 from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
@@ -6,12 +7,23 @@ from src.db.models.deployment import Deployment
 from src.db.models.project import Project
 from src.db.session import SessionLocal
 from src.services.artifacts import build_project_image
+from src.services.billing import run_billing_maintenance
 from src.services.cloudflare_dns import CloudflareDnsError, sync_dns_for_website_deploy
 from src.services.deployment.docker_adapter import DeployRequest, DockerDeploymentAdapter
 from src.services.deployment_queue import pop_deployment_job
 from src.services.docker_control_queue import pop_control_job, push_control_result
 from src.services.project_subdomain import resolve_deploy_subdomain
 from src.services.telegram_profile import TelegramProfileError, fetch_bot_profile
+
+BILLING_SWEEP_INTERVAL_SECONDS = 300
+
+
+def process_billing_sweep() -> None:
+    db: Session = SessionLocal()
+    try:
+        run_billing_maintenance(db)
+    finally:
+        db.close()
 
 
 def process_control_job(job: dict) -> None:
@@ -119,15 +131,23 @@ def process_job(job: dict) -> None:
 
 
 def run() -> None:
+    last_billing_sweep = 0.0
     while True:
         control_job = pop_control_job(timeout_seconds=2)
         if control_job:
             process_control_job(control_job)
             continue
         job = pop_deployment_job(timeout_seconds=2)
-        if not job:
-            continue
-        process_job(job)
+        if job:
+            process_job(job)
+
+        now = time.monotonic()
+        if now - last_billing_sweep >= BILLING_SWEEP_INTERVAL_SECONDS:
+            last_billing_sweep = now
+            try:
+                process_billing_sweep()
+            except Exception:  # noqa: BLE001 - never let a billing hiccup kill the worker loop
+                pass
 
 
 if __name__ == "__main__":

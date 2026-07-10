@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 from src.core.config import settings
 from src.db.models.deployment import Deployment
 from src.db.models.project import Project
+from src.db.models.user import User
+from src.services.billing import concurrent_project_limit
 from src.services.docker_control_queue import submit_control_job
 
 
@@ -36,10 +38,17 @@ def count_running_projects(
     return query.count()
 
 
+def get_running_limit(db: Session, user_id: UUID) -> int:
+    user = db.get(User, user_id)
+    if not user:
+        return settings.max_running_projects_per_user
+    return concurrent_project_limit(db, user, fallback=settings.max_running_projects_per_user)
+
+
 def assert_can_start_project(
     db: Session, user_id: UUID, *, exclude_project_id: UUID | None = None
 ) -> None:
-    limit = settings.max_running_projects_per_user
+    limit = get_running_limit(db, user_id)
     running = count_running_projects(db, user_id, exclude_project_id=exclude_project_id)
     if running >= limit:
         raise RunningProjectLimitError(running=running, limit=limit)

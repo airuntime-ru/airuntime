@@ -38,6 +38,30 @@ class AdminUser(AbstractBaseUser, PermissionsMixin):
         verbose_name_plural = "Системные пользователи"
 
 
+class Plan(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    key = models.CharField(max_length=50, unique=True)
+    name = models.CharField(max_length=100)
+    description = models.TextField(null=True, blank=True)
+    monthly_credits = models.IntegerField()
+    max_concurrent_projects = models.IntegerField()
+    price_rub = models.IntegerField(default=0)
+    is_default = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+    sort_order = models.IntegerField(default=0)
+    created_at = models.DateTimeField()
+    updated_at = models.DateTimeField()
+
+    class Meta:
+        managed = False
+        db_table = "plans"
+        verbose_name = "Тариф"
+        verbose_name_plural = "Тарифы"
+
+    def __str__(self) -> str:
+        return self.name
+
+
 class AppUser(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     email = models.EmailField(unique=True)
@@ -48,6 +72,13 @@ class AppUser(models.Model):
     onboarding_completed = models.BooleanField(default=False)
     is_banned = models.BooleanField(default=False)
     banned_reason = models.CharField(max_length=500, null=True, blank=True)
+    plan = models.ForeignKey(
+        Plan, on_delete=models.DO_NOTHING, db_column="plan_id", null=True, blank=True
+    )
+    billing_period_start = models.DateTimeField(null=True, blank=True)
+    billing_period_end = models.DateTimeField(null=True, blank=True)
+    low_credits_notified_at = models.DateTimeField(null=True, blank=True)
+    period_ending_notified_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField()
     updated_at = models.DateTimeField()
 
@@ -212,6 +243,33 @@ class ModerationEvent(models.Model):
 
     def __str__(self) -> str:
         return f"{self.get_action_display()} - {self.project_name}"
+
+
+class CreditTopUp(models.Model):
+    STATUSES = [
+        ("pending", "Ожидает оплаты"),
+        ("paid", "Оплачен"),
+        ("cancelled", "Отменён"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(AppUser, on_delete=models.DO_NOTHING, db_column="user_id")
+    credits = models.IntegerField()
+    amount_rub = models.IntegerField()
+    status = models.CharField(max_length=20, choices=STATUSES, default="pending")
+    note = models.TextField(null=True, blank=True)
+    created_at = models.DateTimeField()
+    paid_at = models.DateTimeField(null=True, blank=True)
+    credited_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        managed = False
+        db_table = "credit_topups"
+        verbose_name = "Пополнение баланса"
+        verbose_name_plural = "Пополнения баланса"
+
+    def __str__(self) -> str:
+        return f"{self.user.email} - {self.credits} кредитов"
 
 
 class SystemSetting(models.Model):

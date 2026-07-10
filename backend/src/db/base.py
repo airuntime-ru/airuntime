@@ -1,11 +1,29 @@
-from src.db.models import chat, deployment, message, project, refresh_token, secret, user
+from src.db.models import (
+    chat,
+    chat_file,
+    credit_topup,
+    deployment,
+    message,
+    moderation_event,
+    plan,
+    project,
+    refresh_token,
+    secret,
+    system_setting,
+    user,
+)
 
 __all__ = [
     "user",
     "refresh_token",
     "project",
     "chat",
+    "chat_file",
     "message",
     "deployment",
     "secret",
+    "system_setting",
+    "moderation_event",
+    "plan",
+    "credit_topup",
 ]

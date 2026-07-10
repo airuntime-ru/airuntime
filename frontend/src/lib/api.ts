@@ -476,3 +476,48 @@ export async function getProjectVersionFile(
   }
   return (await response.json()) as ProjectVersionFileType;
 }
+
+export type PlanType = {
+  id: string;
+  key: string;
+  name: string;
+  description: string | null;
+  monthly_credits: number;
+  max_concurrent_projects: number;
+  price_rub: number;
+};
+
+export type BillingSummaryType = {
+  credits_balance: number;
+  billing_period_start: string | null;
+  billing_period_end: string | null;
+  plan: PlanType | null;
+};
+
+export type CreditTopUpType = {
+  id: string;
+  credits: number;
+  amount_rub: number;
+  status: "pending" | "paid" | "cancelled";
+  created_at: string;
+  paid_at: string | null;
+};
+
+export async function listPlans(): Promise<PlanType[]> {
+  return requestJson<PlanType[]>("/billing/plans");
+}
+
+export async function getBillingSummary(): Promise<BillingSummaryType> {
+  return requestJson<BillingSummaryType>("/billing/me");
+}
+
+export async function createTopUp(credits: number): Promise<CreditTopUpType> {
+  return requestJson<CreditTopUpType>("/billing/topups", {
+    method: "POST",
+    body: JSON.stringify({ credits }),
+  });
+}
+
+export async function listTopUps(): Promise<CreditTopUpType[]> {
+  return requestJson<CreditTopUpType[]>("/billing/topups");
+}

@@ -31,6 +31,7 @@ from src.core.security import (
 from src.db.models.refresh_token import RefreshToken
 from src.db.models.user import User
 from src.db.session import get_db
+from src.services.billing import assign_default_plan
 from src.services.email import send_branded_email
 from src.services.email_templates import (
     login_code_email,
@@ -102,8 +103,8 @@ def verify_code(payload: VerifyCodeRequest, db: Session = Depends(get_db)) -> To
             email=payload.email,
             password_hash=None,
             is_verified=True,
-            credits_balance=settings.default_user_credits,
         )
+        assign_default_plan(db, user)
         db.add(user)
         db.commit()
         db.refresh(user)
@@ -124,8 +125,8 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> TokenPa
     user = User(
         email=payload.email,
         password_hash=password_hash,
-        credits_balance=settings.default_user_credits,
     )
+    assign_default_plan(db, user)
     db.add(user)
     db.commit()
     db.refresh(user)
