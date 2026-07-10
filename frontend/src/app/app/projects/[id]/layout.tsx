@@ -1,17 +1,37 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
+import { KeyRound, Settings } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Modal } from "@/components/ui/modal";
 import { Tabs } from "@/components/ui/tabs";
 import { PageLoader } from "@/components/ui/loader";
 import { getProject, type ProjectType } from "@/lib/api";
+import { projectStatusLabel } from "@/lib/project-status";
+
+const STATUS_GUIDANCE: Record<
+  string,
+  (project: ProjectType) => { title: string; body: string; cta: string }
+> = {
+  needs_configuration: (project) => ({
+    title: "Нужна настройка",
+    body:
+      project.type === "telegram_bot"
+        ? "Файлы бота уже собраны, но запустить его пока нельзя: не хватает токена. Откройте настройки проекта, вставьте TELEGRAM_BOT_TOKEN (его выдаёт @BotFather в Telegram после команды /newbot) и запуск продолжится автоматически."
+        : "Проекту не хватает данных для запуска - откройте настройки проекта и заполните то, что запрашивается в разделе «Защищённый контур».",
+    cta: "Перейти в настройки",
+  }),
+};
 
 export default function ProjectLayout({ children }: { children: React.ReactNode }) {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const projectId = params.id;
   const [project, setProject] = useState<ProjectType | null>(null);
+  const [statusModalOpen, setStatusModalOpen] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -43,6 +63,8 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
     { href: `${base}/settings`, label: "Настройки" },
   ];
 
+  const guidance = STATUS_GUIDANCE[project.status]?.(project);
+
   return (
     <div className="space-y-5">
       <header className="relative overflow-hidden rounded-[var(--ar-radius-lg)] border border-black/[0.06] bg-white p-5">
@@ -58,7 +80,15 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
                 <span className="h-1.5 w-1.5 rounded-full bg-[image:var(--ar-accent-gradient)]" aria-hidden />
                 AIRuntime project
               </span>
-              <Badge>{project.status}</Badge>
+              {guidance ? (
+                <button type="button" onClick={() => setStatusModalOpen(true)}>
+                  <Badge className="cursor-pointer border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100">
+                    {projectStatusLabel(project.status)}
+                  </Badge>
+                </button>
+              ) : (
+                <Badge>{projectStatusLabel(project.status)}</Badge>
+              )}
             </div>
             <h1 className="mt-4 text-3xl font-semibold tracking-normal text-[var(--ar-black)] sm:text-5xl">
               {project.name}
@@ -68,6 +98,35 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
       </header>
       <Tabs items={tabs} />
       {children}
+
+      {guidance ? (
+        <Modal
+          open={statusModalOpen}
+          onClose={() => setStatusModalOpen(false)}
+          title={guidance.title}
+        >
+          <div className="space-y-5">
+            <div className="flex items-start gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--ar-radius-sm)] bg-amber-50 text-amber-600">
+                <KeyRound size={18} />
+              </span>
+              <p className="text-sm leading-7 text-[var(--ar-mist)]">{guidance.body}</p>
+            </div>
+            <div className="flex justify-end">
+              <Button
+                variant="accent"
+                onClick={() => {
+                  setStatusModalOpen(false);
+                  router.push(`${base}/settings`);
+                }}
+              >
+                <Settings size={16} />
+                {guidance.cta}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
     </div>
   );
 }
