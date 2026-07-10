@@ -42,19 +42,22 @@
     margin: 10px 0 0;
   }
 
-  .airuntime-admin-links a {
-    border: 1px solid var(--hairline-color);
+  /* Scoped to #branding (always a dark bar, regardless of the admin's light/dark
+     theme) so these pills need their own fixed light-on-dark colors rather than
+     the body-content vars (--body-bg/--link-fg), which would blend into invisibility. */
+  #branding .airuntime-admin-links a {
+    border: 1px solid rgba(255, 255, 255, 0.4);
     border-radius: 999px;
     padding: 6px 12px;
-    background: var(--body-bg);
-    color: var(--link-fg);
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
     font-size: 12px;
     font-weight: 600;
     text-decoration: none;
   }
 
-  .airuntime-admin-links a:hover {
-    background: var(--selected-bg);
+  #branding .airuntime-admin-links a:hover {
+    background: rgba(255, 255, 255, 0.24);
   }
 </style>
 {% endblock %}
