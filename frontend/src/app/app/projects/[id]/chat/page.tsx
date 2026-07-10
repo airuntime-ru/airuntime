@@ -61,6 +61,12 @@ type ToolActivityItem = {
   state: "running" | "done" | "error";
 };
 
+type QueuedMessage = {
+  id: string;
+  text: string;
+  attachments: ChatFileType[];
+};
+
 const PINNED_KEY = "airuntime_pinned_chats";
 const PROVIDER_KEY = "airuntime_selected_provider";
 
@@ -259,6 +265,7 @@ export default function ProjectChatPage() {
   const [pendingFiles, setPendingFiles] = useState<ChatFileType[]>([]);
   const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [queue, setQueue] = useState<QueuedMessage[]>([]);
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
   const [bootstrapping, setBootstrapping] = useState(true);
   const [bootstrapError, setBootstrapError] = useState("");
@@ -405,20 +412,16 @@ export default function ProjectChatPage() {
     abortControllerRef.current?.abort();
   };
 
-  const onSubmit = async (event?: { preventDefault?: () => void }) => {
-    event?.preventDefault?.();
-    if ((!input.trim() && pendingFiles.length === 0) || !projectId || !chatId) return;
-    const userMessage = input;
-    const attachmentIds = pendingFiles.map((file) => file.id);
-    setInput("");
-    setPendingFiles([]);
+  const runTurn = async (userMessage: string, attachments: ChatFileType[]) => {
+    if ((!userMessage.trim() && attachments.length === 0) || !projectId || !chatId) return;
+    const attachmentIds = attachments.map((file) => file.id);
     setLoading(true);
     setChatError("");
     setToolActivity([]);
     updateAgentStatus({ phase: "thinking", label: "AIRuntime осмысляет задачу", state: "running" });
     setMessages((prev) => [
       ...prev,
-      { role: "user", content: userMessage || "Прикреплены файлы", attachments: pendingFiles },
+      { role: "user", content: userMessage || "Прикреплены файлы", attachments },
       { role: "assistant", content: "" },
     ]);
 
@@ -515,6 +518,46 @@ export default function ProjectChatPage() {
       abortControllerRef.current = null;
       setLoading(false);
     }
+  };
+
+  useEffect(() => {
+    if (loading || queue.length === 0) return;
+    const [next, ...rest] = queue;
+    const timer = window.setTimeout(() => {
+      setQueue(rest);
+      void runTurn(next.text, next.attachments);
+    }, 0);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, queue]);
+
+  const onSubmit = async (event?: { preventDefault?: () => void }) => {
+    event?.preventDefault?.();
+    if ((!input.trim() && pendingFiles.length === 0) || !chatId) return;
+    const userMessage = input;
+    const attachments = pendingFiles;
+    setInput("");
+    setPendingFiles([]);
+    if (loading) {
+      setQueue((prev) => [...prev, { id: crypto.randomUUID(), text: userMessage, attachments }]);
+      return;
+    }
+    await runTurn(userMessage, attachments);
+  };
+
+  const onRemoveQueued = (id: string) => {
+    setQueue((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const onEditQueued = (id: string) => {
+    setQueue((prev) => {
+      const item = prev.find((row) => row.id === id);
+      if (item) {
+        setInput(item.text);
+        setPendingFiles(item.attachments);
+      }
+      return prev.filter((row) => row.id !== id);
+    });
   };
 
   const canSend = Boolean(chatId) && (input.trim().length > 0 || pendingFiles.length > 0);
@@ -681,6 +724,41 @@ export default function ProjectChatPage() {
               </p>
             ) : null}
 
+            {queue.length > 0 ? (
+              <div className="mb-2 space-y-1.5 rounded-xl border border-black/10 bg-[#fafafa] p-2">
+                <p className="px-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--ar-stone)]">
+                  В очереди - {queue.length}
+                </p>
+                {queue.map((item, index) => (
+                  <div
+                    key={item.id}
+                    className="flex items-center gap-2 rounded-lg border border-black/8 bg-white px-2.5 py-1.5"
+                  >
+                    <span className="shrink-0 text-xs font-medium text-[var(--ar-stone)]">{index + 1}.</span>
+                    <span className="min-w-0 flex-1 truncate text-sm text-[var(--ar-black)]">
+                      {item.text || `Файлы: ${item.attachments.length}`}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onEditQueued(item.id)}
+                      className="shrink-0 rounded-md px-1.5 py-1 text-xs text-[var(--ar-mist)] hover:bg-black/5 hover:text-[var(--ar-black)]"
+                      aria-label="Изменить"
+                    >
+                      Изменить
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onRemoveQueued(item.id)}
+                      className="shrink-0 rounded-md p-1 text-[var(--ar-stone)] hover:bg-black/5 hover:text-rose-600"
+                      aria-label="Убрать из очереди"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
             <form
               onSubmit={onSubmit}
               className={cn(
@@ -715,7 +793,7 @@ export default function ProjectChatPage() {
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
-                    if (canSend && !loading) void onSubmit(event);
+                    if (canSend) void onSubmit(event);
                   }
                 }}
               />
@@ -792,21 +870,20 @@ export default function ProjectChatPage() {
                     >
                       <Square size={13} strokeWidth={2.5} fill="currentColor" />
                     </button>
-                  ) : (
-                    <button
-                      type="submit"
-                      disabled={bootstrapping || loading || uploading || !canSend}
-                      className={cn(
-                        "flex h-8 w-8 items-center justify-center rounded-full transition-all",
-                        canSend && !loading && !bootstrapping
-                          ? "bg-[image:var(--ar-accent-gradient)] text-white shadow-[0_6px_18px_rgba(35,136,255,0.32)] hover:brightness-[1.06]"
-                          : "bg-black/10 text-[var(--ar-stone)]"
-                      )}
-                      aria-label="Отправить"
-                    >
-                      <ArrowUp size={16} strokeWidth={2.5} />
-                    </button>
-                  )}
+                  ) : null}
+                  <button
+                    type="submit"
+                    disabled={bootstrapping || uploading || !canSend}
+                    className={cn(
+                      "flex h-8 w-8 items-center justify-center rounded-full transition-all",
+                      canSend && !bootstrapping
+                        ? "bg-[image:var(--ar-accent-gradient)] text-white shadow-[0_6px_18px_rgba(35,136,255,0.32)] hover:brightness-[1.06]"
+                        : "bg-black/10 text-[var(--ar-stone)]"
+                    )}
+                    aria-label={loading ? "Добавить в очередь" : "Отправить"}
+                  >
+                    {loading ? <Plus size={16} strokeWidth={2.5} /> : <ArrowUp size={16} strokeWidth={2.5} />}
+                  </button>
                 </div>
               </div>
             </form>
