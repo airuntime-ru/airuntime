@@ -23,13 +23,11 @@ x-traefik-labels: &traefik-labels
 
 services:
   traefik:
-    image: traefik:v3.5
+    # traefik:v3.5's Docker client hardcodes API 1.24, which Docker Engine 29+ rejects outright
+    # ("client version 1.24 is too old") - no env var can work around this since the daemon
+    # itself refuses the client's declared version. 3.6.1+ added real API version negotiation.
+    image: traefik:v3.6
     restart: unless-stopped
-    environment:
-      # traefik:v3.5's bundled Docker client can't always auto-negotiate against very new
-      # Engine versions and falls back to a hardcoded old API version the daemon then refuses
-      # ("client version 1.24 is too old"). Pin it explicitly within the daemon's supported range.
-      DOCKER_API_VERSION: "1.45"
     ports:
       - "80:80"
       - "443:443"
