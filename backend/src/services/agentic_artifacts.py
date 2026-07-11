@@ -88,8 +88,22 @@ def ensure_required_files(project: Project, root: Path) -> None:
         app_py = (root / TELEGRAM_REQUIRED).read_text(encoding="utf-8")
         if "TELEGRAM_BOT_TOKEN" not in app_py:
             raise ArtifactError("app.py must read TELEGRAM_BOT_TOKEN from the environment")
-        if not (root / "requirements.txt").exists():
-            (root / "requirements.txt").write_text("python-telegram-bot==21.10\n", encoding="utf-8")
+        uses_job_queue = "job_queue" in app_py
+        requirements_path = root / "requirements.txt"
+        if not requirements_path.exists():
+            default_pkg = "python-telegram-bot[job-queue]==21.10" if uses_job_queue else "python-telegram-bot==21.10"
+            requirements_path.write_text(f"{default_pkg}\n", encoding="utf-8")
+        elif uses_job_queue:
+            # app.py uses JobQueue but the agent may have listed the bare package - without the
+            # [job-queue] extra (APScheduler) this raises RuntimeError at process startup.
+            requirements_text = requirements_path.read_text(encoding="utf-8")
+            if "python-telegram-bot" in requirements_text and "job-queue" not in requirements_text:
+                requirements_path.write_text(
+                    requirements_text.replace(
+                        "python-telegram-bot", "python-telegram-bot[job-queue]", 1
+                    ),
+                    encoding="utf-8",
+                )
         if not (root / "Dockerfile").exists():
             (root / "Dockerfile").write_text(_DEFAULT_TELEGRAM_DOCKERFILE, encoding="utf-8")
     else:

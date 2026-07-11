@@ -139,12 +139,39 @@ def _tool_status_label(name: str, arguments: dict) -> str:
     return f"Инструмент: {name}"
 
 
+# Phrases that explicitly hand the decision to the agent - once a user says this, asking more
+# clarifying questions contradicts what they just said, no matter how short the message is.
+_FREEFORM_MARKERS = (
+    "на свой вкус",
+    "на твой вкус",
+    "на ваш вкус",
+    "как хочешь",
+    "как хотите",
+    "как считаешь нужным",
+    "как думаешь лучше",
+    "сам реши",
+    "сам решай",
+    "сама реши",
+    "на твое усмотрение",
+    "на ваше усмотрение",
+    "делай как лучше",
+    "что посчитаешь нужным",
+    "удиви меня",
+    "surprise me",
+    "your choice",
+    "up to you",
+    "your call",
+)
+
+
 def _needs_clarification(project: Project, content: str, attachment_ids: list[UUID]) -> bool:
     if attachment_ids:
         return False
     text = content.strip().lower()
     if not text:
         return True
+    if any(marker in text for marker in _FREEFORM_MARKERS):
+        return False
     vague_phrases = (
         "сделай сайт",
         "сделай лендинг",
@@ -166,7 +193,7 @@ def _needs_clarification(project: Project, content: str, attachment_ids: list[UU
             "стиль",
             "целевая",
         )
-    )
+    ) or _extract_deploy_subdomain(text) is not None
     if len(text) < 26:
         return True
     return any(phrase in text for phrase in vague_phrases) and not has_context and not project.description
@@ -426,7 +453,10 @@ async def _stream_events(
         db.commit()
         db.refresh(project)
 
-    if project.type == "website" and content:
+    # Not gated on project.type == "website": a domain mention is deliberate user intent that
+    # must never be silently dropped, even if the project's current type classification (set
+    # from an earlier message, or about to change) doesn't happen to be "website" right now.
+    if content:
         extracted_subdomain = _extract_deploy_subdomain(content)
         if extracted_subdomain:
             normalized = normalize_deploy_subdomain(extracted_subdomain)
