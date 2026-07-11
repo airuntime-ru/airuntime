@@ -389,6 +389,19 @@ export async function createDeployment(projectId: string): Promise<DeploymentTyp
   return requestJson<DeploymentType>(`/projects/${projectId}/deployments`, { method: "POST" });
 }
 
+export type DeploymentCheckResultType = {
+  checked: boolean;
+  found_errors: boolean;
+  fixed: boolean;
+  summary: string;
+};
+
+export async function checkDeployment(projectId: string): Promise<DeploymentCheckResultType> {
+  return requestJson<DeploymentCheckResultType>(`/projects/${projectId}/check-deployment`, {
+    method: "POST",
+  });
+}
+
 export async function getMe(): Promise<MeType> {
   return requestJson<MeType>("/auth/me");
 }

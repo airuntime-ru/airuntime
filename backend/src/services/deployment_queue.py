@@ -14,12 +14,17 @@ def _redis() -> Redis:
 
 
 def enqueue_deployment(
-    *, deployment_id: str, project_id: str, image_ref: str | None = None
+    *,
+    deployment_id: str,
+    project_id: str,
+    image_ref: str | None = None,
+    skip_auto_check: bool = False,
 ) -> bool:
     job = {
         "deployment_id": deployment_id,
         "project_id": project_id,
         "image_ref": image_ref,
+        "skip_auto_check": skip_auto_check,
         "queued_at": datetime.now(UTC).isoformat(),
     }
     try:

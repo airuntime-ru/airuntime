@@ -17,6 +17,7 @@ from src.db.models.chat import Chat
 from src.db.models.project import Project
 from src.db.models.user import User
 from src.db.session import get_db
+from src.services.deployment_check import check_and_repair_deployment
 from src.services.docker_control_queue import submit_control_job
 from src.services.project_intent import infer_project_type
 from src.services.project_logs import read_project_logs
@@ -185,6 +186,25 @@ def get_project_logs(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return read_project_logs(db, project)
+
+
+@router.post("/{project_id}/check-deployment")
+def check_project_deployment(
+    project_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """On-demand version of the automatic post-deploy check: re-reads the running container's
+    current logs and has the agent fix anything broken. Useful after real usage has produced
+    log lines an immediate post-deploy check couldn't have seen yet."""
+    project = (
+        db.query(Project)
+        .filter(Project.id == project_id, Project.user_id == current_user.id)
+        .first()
+    )
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return check_and_repair_deployment(db, project)
 
 
 @router.delete("/{project_id}")

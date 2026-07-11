@@ -16,7 +16,7 @@ from src.services.agent.providers import get_agent_provider
 from src.services.agent.tools import TOOL_DEFS, WorkspaceTools
 from src.services.file_context import ImageAttachment
 
-MAX_ITERATIONS = 14
+MAX_ITERATIONS = 30
 
 
 @dataclass

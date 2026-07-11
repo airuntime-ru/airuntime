@@ -2,13 +2,14 @@
 
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { Pause, Play, Rocket } from "lucide-react";
+import { Pause, Play, Rocket, ShieldCheck } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState, PageLoader } from "@/components/ui/loader";
 import {
+  checkDeployment,
   createDeployment,
   getProject,
   getProjectRuntimeLimits,
@@ -61,6 +62,8 @@ export default function ProjectDeploymentsPage() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const [checkLoading, setCheckLoading] = useState(false);
+  const [checkResult, setCheckResult] = useState("");
 
   const loadPage = useCallback(async (options?: { silent?: boolean; limit?: number }) => {
     if (!projectId) return;
@@ -125,6 +128,22 @@ export default function ProjectDeploymentsPage() {
       setError(err instanceof Error ? err.message : "Не удалось поставить деплой в очередь");
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const onCheckDeployment = async () => {
+    if (!projectId) return;
+    setCheckLoading(true);
+    setCheckResult("");
+    setError("");
+    try {
+      const result = await checkDeployment(projectId);
+      setCheckResult(result.summary);
+      await loadPage({ silent: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось проверить деплой");
+    } finally {
+      setCheckLoading(false);
     }
   };
 
@@ -197,6 +216,18 @@ export default function ProjectDeploymentsPage() {
               Запустить
             </Button>
           ) : null}
+          {project && isProjectRunning(project.status) ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full sm:w-auto"
+              disabled={checkLoading}
+              onClick={() => void onCheckDeployment()}
+            >
+              <ShieldCheck size={15} />
+              {checkLoading ? "Проверяем…" : "Проверить деплой на ошибки"}
+            </Button>
+          ) : null}
           <Button variant="accent" size="sm" className="w-full sm:w-auto" disabled={actionLoading || startDisabled} onClick={onDeploy}>
             <Rocket size={15} />
             Собрать и запустить
@@ -204,6 +235,14 @@ export default function ProjectDeploymentsPage() {
         </div>
       </div>
       {error ? <p className="text-sm text-rose-600">{error}</p> : null}
+      {checkResult ? (
+        <Card hover={false} className="border-[var(--ar-sky)]/20 bg-[var(--ar-sky)]/5">
+          <p className="flex items-start gap-2 text-sm text-[var(--ar-black)]">
+            <ShieldCheck size={16} className="mt-0.5 shrink-0 text-[var(--ar-sky)]" />
+            {checkResult}
+          </p>
+        </Card>
+      ) : null}
       {deployments.map((item) => (
         <Card key={item.id} className="space-y-3" hover={false}>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

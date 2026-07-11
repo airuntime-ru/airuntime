@@ -10,6 +10,7 @@ from src.services.artifacts import build_project_image
 from src.services.billing import run_billing_maintenance
 from src.services.cloudflare_dns import CloudflareDnsError, sync_dns_for_website_deploy
 from src.services.deployment.docker_adapter import DeployRequest, DockerDeploymentAdapter
+from src.services.deployment_check import check_and_repair_deployment
 from src.services.deployment_queue import pop_deployment_job
 from src.services.docker_control_queue import pop_control_job, push_control_result
 from src.services.project_subdomain import resolve_deploy_subdomain
@@ -122,6 +123,18 @@ def process_job(job: dict) -> None:
                 project.logs = f"{project.logs}\n{dns_note}".strip() if project.logs else dns_note
         db.add(project)
         db.commit()
+
+        if not job.get("skip_auto_check"):
+            # Give the container a moment to finish starting up and emit its first log lines
+            # before checking - catches immediate startup crashes (bad imports, syntax errors
+            # that survived to runtime, wrong paths). Bugs that only surface once a real user
+            # interacts with the bot/site won't show here yet - that's what the manual
+            # "check deployment" action is for, run any time after real usage.
+            time.sleep(3)
+            try:
+                check_and_repair_deployment(db, project)
+            except Exception:  # noqa: BLE001 - a broken self-check must never fail the deploy
+                pass
     except Exception as exc:
         if deployment := db.get(Deployment, job.get("deployment_id")):
             deployment.status = "failed"
