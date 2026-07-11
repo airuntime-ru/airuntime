@@ -46,6 +46,26 @@ def get_system_setting_value(setting_key: str) -> str | None:
         db.close()
 
 
+def get_system_setting_number(setting_key: str) -> int | None:
+    now = time.monotonic()
+    cache_key = f"number:{setting_key}"
+    cached = _cache.get(cache_key)
+    if cached:
+        value, expires_at = cached
+        if now < expires_at:
+            return value
+
+    db = SessionLocal()
+    try:
+        stmt = select(SystemSetting).where(SystemSetting.key == setting_key)
+        setting = db.execute(stmt).scalar_one_or_none()
+        value = setting.value_number if setting and setting.is_enabled else None
+        _cache[cache_key] = (value, now + _TTL_SECONDS)
+        return value
+    finally:
+        db.close()
+
+
 def resolve_api_key_for_provider(provider_name: str) -> str | None:
     # Priority list: keys that are likely to be set in admin.
     # User mentioned key "gpt", we also support the earlier seed "openai_api_key".

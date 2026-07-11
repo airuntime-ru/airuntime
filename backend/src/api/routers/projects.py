@@ -28,6 +28,7 @@ from src.services.project_runtime import (
     stop_project_runtime,
 )
 from src.services.project_subdomain import assert_subdomain_available, normalize_deploy_subdomain
+from src.services.system_settings import get_system_setting_number
 from src.services.workspace import project_dir
 from src.core.config import settings
 
@@ -60,6 +61,16 @@ def create_project(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ProjectResponse:
+    max_projects = get_system_setting_number("max_projects_per_user")
+    if max_projects is not None:
+        existing_count = db.query(Project).filter(Project.user_id == current_user.id).count()
+        if existing_count >= max_projects:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Достигнут лимит проектов на аккаунт ({max_projects}). "
+                "Удалите неиспользуемый проект, чтобы создать новый.",
+            )
+
     project_type = payload.type or infer_project_type(f"{payload.name}\n{payload.description}")
     project = Project(
         user_id=current_user.id,
