@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -70,6 +71,22 @@ def _write_manifest(project: Project, root: Path, *, source: str) -> None:
     )
 
 
+_JOB_QUEUE_CALL = re.compile(r"\b(run_repeating|run_once|run_daily)\s*\([^\n]*\)")
+
+
+def _fix_job_queue_v13_api(app_py: str) -> str:
+    """LLMs frequently fall back to python-telegram-bot's old (pre-v20) JobQueue signature,
+    where the per-job payload argument was named `context`. In 21.x it's `data`, and the old
+    name raises TypeError at the call site (the job silently never gets scheduled) rather than
+    at import time, so it's easy to ship without noticing."""
+
+    def _fix_call(match: re.Match[str]) -> str:
+        return re.sub(r"\bcontext\s*=", "data=", match.group(0))
+
+    fixed = _JOB_QUEUE_CALL.sub(_fix_call, app_py)
+    return fixed.replace("context.job.context", "context.job.data")
+
+
 def ensure_required_files(project: Project, root: Path) -> None:
     """Fill in a default Dockerfile if missing; raise if the entry file is missing."""
 
@@ -89,6 +106,11 @@ def ensure_required_files(project: Project, root: Path) -> None:
         if "TELEGRAM_BOT_TOKEN" not in app_py:
             raise ArtifactError("app.py must read TELEGRAM_BOT_TOKEN from the environment")
         uses_job_queue = "job_queue" in app_py
+        if uses_job_queue:
+            fixed_app_py = _fix_job_queue_v13_api(app_py)
+            if fixed_app_py != app_py:
+                app_py = fixed_app_py
+                (root / TELEGRAM_REQUIRED).write_text(app_py, encoding="utf-8")
         requirements_path = root / "requirements.txt"
         if not requirements_path.exists():
             default_pkg = "python-telegram-bot[job-queue]==21.10" if uses_job_queue else "python-telegram-bot==21.10"
