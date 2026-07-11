@@ -68,6 +68,15 @@ def looks_like_telegram_token(value: str) -> bool:
     return bool(re.fullmatch(r"\d{6,}:[A-Za-z0-9_-]{20,}", value.strip()))
 
 
+def all_secrets_filled(db: Session, project: Project) -> bool:
+    missing = (
+        db.query(Secret)
+        .filter(Secret.project_id == project.id, Secret.encrypted_value.is_(None))
+        .first()
+    )
+    return missing is None
+
+
 def ensure_secret_placeholder(
     db: Session, project: Project, key: str, reason: str = ""
 ) -> tuple[Secret, bool]:

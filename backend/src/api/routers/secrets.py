@@ -9,8 +9,10 @@ from src.db.models.project import Project
 from src.db.models.secret import Secret
 from src.db.models.user import User
 from src.db.session import get_db
+from src.services.project_runtime import RunningProjectLimitError, start_project_runtime
 from src.services.secrets import (
     TELEGRAM_BOT_TOKEN_KEY,
+    all_secrets_filled,
     encrypt_secret,
     ensure_secret_placeholder,
     looks_like_telegram_token,
@@ -121,6 +123,20 @@ def set_secret_value(
     db.add(secret)
     db.add(project)
     db.commit()
+
+    # If this was the last missing secret and the project was only stuck waiting for
+    # configuration, resume the deployment automatically instead of leaving the user to guess
+    # they need to go back to chat and say something to unstick it.
+    if project.status == "needs_configuration" and all_secrets_filled(db, project):
+        try:
+            start_project_runtime(db, project)
+        except RunningProjectLimitError:
+            project.status = "ready"
+            db.add(project)
+            db.commit()
+        except ValueError:
+            pass
+
     return _secret_response(secret, url=url)
 
 
