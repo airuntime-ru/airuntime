@@ -176,16 +176,19 @@ function AiTypingIndicator() {
 function AgentStatusPanel({
   status,
   projectId,
+  onContinue,
 }: {
   status: AgentStatus;
   projectId: string;
+  onContinue: () => void;
 }) {
   const waiting = status.state === "waiting" || status.phase === "questions";
   const done = status.state === "done" && !waiting;
   const error = status.state === "error";
   const steps = ["thinking", "context", "tool", "verify", "module", "version", "deploy", "done"];
   const currentIndex = Math.max(0, steps.indexOf(status.phase));
-  const needsToken = error && status.label.includes("TELEGRAM_BOT_TOKEN");
+  const needsSecret = status.phase === "needs_configuration";
+  const needsToken = needsSecret && status.label.includes("TELEGRAM_BOT_TOKEN");
   const secretsHref = `/app/projects/${projectId}/settings#secrets`;
   const helpHref = `/help/telegram-token?projectId=${encodeURIComponent(projectId)}`;
 
@@ -247,7 +250,7 @@ function AgentStatusPanel({
         </div>
       ) : null}
 
-      {needsToken ? (
+      {needsSecret ? (
         <div className="mt-3 flex flex-wrap gap-2">
           <a
             href={secretsHref}
@@ -255,12 +258,21 @@ function AgentStatusPanel({
           >
             В секреты
           </a>
-          <a
-            href={helpHref}
-            className="inline-flex items-center rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50"
+          {needsToken ? (
+            <a
+              href={helpHref}
+              className="inline-flex items-center rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50"
+            >
+              Как получить токен
+            </a>
+          ) : null}
+          <button
+            type="button"
+            onClick={onContinue}
+            className="inline-flex items-center rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
           >
-            Как получить токен
-          </a>
+            Настроил секрет, продолжай
+          </button>
         </div>
       ) : null}
     </div>
@@ -744,7 +756,13 @@ export default function ProjectChatPage() {
               </div>
             )}
             {loading && toolActivity.length > 0 ? <ToolActivityFeed items={toolActivity} /> : null}
-            {agentStatus ? <AgentStatusPanel status={agentStatus} projectId={projectId} /> : null}
+            {agentStatus ? (
+              <AgentStatusPanel
+                status={agentStatus}
+                projectId={projectId}
+                onContinue={() => void runTurn("Настроил секрет, можешь продолжать.", [])}
+              />
+            ) : null}
             <div ref={bottomRef} className="h-4" />
           </div>
         </div>

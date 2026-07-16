@@ -111,8 +111,9 @@ def update_project(
     if payload.status is not None:
         project.status = payload.status
     if "deploy_subdomain" in payload.model_fields_set:
-        if project.type not in ("website", "mixed"):
-            raise HTTPException(status_code=400, detail="Поддомен доступен только для сайтов")
+        # Not gated on project.type - harmless to set for a bot-only project (simply unused at
+        # deploy time), and gating it here was a recurring source of confusing 400s whenever
+        # classification lagged behind what the project actually contains.
         normalized = normalize_deploy_subdomain(payload.deploy_subdomain)
         if normalized:
             assert_subdomain_available(db, normalized, exclude_project_id=str(project.id))

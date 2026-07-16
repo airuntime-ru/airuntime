@@ -402,7 +402,7 @@ _TELEGRAM_DOCKERFILE = "\n".join(
         "WORKDIR /app",
         "COPY requirements.txt .",
         "RUN pip install --no-cache-dir -r requirements.txt",
-        "COPY app.py .",
+        "COPY . .",
         'CMD ["python", "app.py"]',
         "",
     ]
@@ -414,9 +414,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends nginx \\
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY app.py .
-COPY public/ /var/www/html/
-RUN rm -f /etc/nginx/sites-enabled/default \\
+COPY . .
+RUN mkdir -p /var/www/html \\
+    && if [ -d public ]; then cp -a public/. /var/www/html/; fi \\
+    && rm -f /etc/nginx/sites-enabled/default \\
     && printf 'server {\\n    listen 80;\\n    root /var/www/html;\\n    index index.html;\\n}\\n' > /etc/nginx/conf.d/site.conf
 RUN printf '#!/bin/sh\\nset -e\\nnginx\\nexec python app.py\\n' > /docker-entrypoint.sh \\
     && chmod +x /docker-entrypoint.sh
@@ -426,6 +427,8 @@ ENTRYPOINT ["/docker-entrypoint.sh"]
 
 def _write_telegram_content(project: Project, prompt: str, path: Path) -> None:
     safe_name = json.dumps(project.name, ensure_ascii=False)
+    # Last-resort stub only - never preferred over agent-written code. Kept minimal and honest
+    # so a failed generation is obvious instead of pretending to implement the user's scenario.
     app_py = f"""
 import logging
 import os
@@ -437,16 +440,16 @@ BOT_NAME = {safe_name}
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_name = update.effective_user.first_name if update.effective_user else None
-    greeting = f"Привет, {{user_name}}!" if user_name else "Привет!"
     await update.message.reply_text(
-        f"{{greeting}} Я {{BOT_NAME}}. Уже на связи и готов помогать - просто напишите сообщение."
+        f"Бот {{BOT_NAME}} запущен в режиме заглушки: полноценный сценарий не собрался. "
+        "Откройте чат проекта в AIRuntime и повторите запрос, чтобы агент пересобрал логику."
     )
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        "Спасибо! Я получил сообщение и передам его в рабочий сценарий проекта."
+        "Это временная заглушка платформы, а не ваш сценарий. "
+        "Пересоберите бота в чате AIRuntime."
     )
 
 
@@ -584,6 +587,16 @@ def build_project_image(
                     break
 
             if not fixed:
+                from src.services.agentic_artifacts import workspace_has_agent_code
+
+                # Never silently replace a real agent-built project with the stub template -
+                # that is how user scenarios (facts bot, postgres, leaderboard, …) get wiped
+                # and replaced with "заглушка платформы".
+                if workspace_has_agent_code(path, project):
+                    raise ArtifactError(
+                        "Docker image build failed after repair attempts; agent code was kept "
+                        f"(not replaced with a placeholder):\n{last_error}"
+                    )
                 used_fallback = True
                 try:
                     repaired_path = repair_artifact_with_fallback(db, project, last_error)

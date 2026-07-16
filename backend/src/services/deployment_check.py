@@ -53,7 +53,7 @@ async def _run_runtime_repair(project: Project, root, error_log: str) -> str:
     if not api_key:
         raise ArtifactError("No AI provider key configured for automatic repair")
 
-    workspace = WorkspaceTools(root)
+    workspace = WorkspaceTools(root, project_id=str(project.id))
     session = CodingAgentSession(
         provider_name=provider_name,
         model=model,

@@ -28,7 +28,8 @@ MANIFEST_VERSION = 2
 WEBSITE_REQUIRED = "public/index.html"
 TELEGRAM_REQUIRED = "app.py"
 
-REPAIR_ATTEMPTS = 2
+# How many times to hand a build failure back to the AI before giving up.
+REPAIR_ATTEMPTS = 5
 
 _DEFAULT_WEBSITE_DOCKERFILE = "FROM nginx:1.27-alpine\nCOPY public/ /usr/share/nginx/html/\n"
 _DEFAULT_TELEGRAM_DOCKERFILE = "\n".join(
@@ -41,6 +42,17 @@ _DEFAULT_TELEGRAM_DOCKERFILE = "\n".join(
         'CMD ["python", "app.py"]',
         "",
     ]
+)
+
+_STUB_MARKERS = (
+    "временная заглушка платформы",
+    "передам его в рабочий сценарий проекта",
+    "режим заглушки",
+)
+
+
+_TOKEN_ENV_RE = re.compile(
+    r"TELEGRAM_BOT_TOKEN|getenv\(\s*[\"']TELEGRAM_BOT_TOKEN|environ(?:\.get)?\(\s*[\"']TELEGRAM_BOT_TOKEN"
 )
 
 
@@ -73,25 +85,63 @@ def _write_manifest(project: Project, root: Path, *, source: str) -> None:
     )
 
 
-_JOB_QUEUE_CALL = re.compile(r"\b(run_repeating|run_once|run_daily)\s*\([^\n]*\)")
+def workspace_has_agent_code(root: Path, project: Project) -> bool:
+    """True when the agent already wrote real project files we must not wipe with a stub."""
+    needs_website = project.type in ("website", "mixed")
+    needs_bot = project.type in ("telegram_bot", "mixed")
+
+    if needs_bot and (root / TELEGRAM_REQUIRED).exists():
+        text = (root / TELEGRAM_REQUIRED).read_text(encoding="utf-8", errors="ignore")
+        if not any(marker in text for marker in _STUB_MARKERS) and len(text.strip()) > 80:
+            return True
+        # Multi-module bot: entrypoint may be thin, other files hold logic.
+        py_files = [p for p in root.rglob("*.py") if ".airuntime" not in p.parts]
+        if len(py_files) > 1 and not any(marker in text for marker in _STUB_MARKERS):
+            return True
+
+    if needs_website and (root / WEBSITE_REQUIRED).exists():
+        text = (root / WEBSITE_REQUIRED).read_text(encoding="utf-8", errors="ignore")
+        if len(text.strip()) > 40:
+            return True
+
+    return False
 
 
-def _fix_job_queue_v13_api(app_py: str) -> str:
-    """LLMs frequently fall back to python-telegram-bot's old (pre-v20) JobQueue signature,
-    where the per-job payload argument was named `context`. In 21.x it's `data`, and the old
-    name raises TypeError at the call site (the job silently never gets scheduled) rather than
-    at import time, so it's easy to ship without noticing."""
+def _reads_telegram_token(root: Path) -> bool:
+    for path in root.rglob("*.py"):
+        if ".airuntime" in path.parts:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if _TOKEN_ENV_RE.search(text):
+            return True
+    return False
 
-    def _fix_call(match: re.Match[str]) -> str:
-        return re.sub(r"\bcontext\s*=", "data=", match.group(0))
 
-    fixed = _JOB_QUEUE_CALL.sub(_fix_call, app_py)
-    return fixed.replace("context.job.context", "context.job.data")
+def ensure_dockerfile(project: Project, root: Path) -> bool:
+    """Write a default Dockerfile if missing. Returns True when a file was created."""
+    dockerfile = root / "Dockerfile"
+    if dockerfile.exists():
+        return False
+    needs_website = project.type in ("website", "mixed")
+    needs_bot = project.type in ("telegram_bot", "mixed")
+    if needs_website and needs_bot:
+        dockerfile.write_text(MIXED_DOCKERFILE, encoding="utf-8")
+    elif needs_website:
+        dockerfile.write_text(_DEFAULT_WEBSITE_DOCKERFILE, encoding="utf-8")
+    else:
+        dockerfile.write_text(_DEFAULT_TELEGRAM_DOCKERFILE, encoding="utf-8")
+    return True
 
 
 def ensure_required_files(project: Project, root: Path) -> None:
-    """Fill in a default Dockerfile if missing; raise if a required entry file is missing for
-    whichever capability(ies) this project has - website, telegram_bot, or "mixed" (both)."""
+    """Fill in a default Dockerfile if missing; raise if a required entry file is missing.
+
+    Does not force a Telegram framework (aiogram / python-telegram-bot / …) — only the
+    platform entrypoint contract: app.py + token from env + requirements.txt present.
+    """
 
     needs_website = project.type in ("website", "mixed")
     needs_bot = project.type in ("telegram_bot", "mixed")
@@ -108,47 +158,22 @@ def ensure_required_files(project: Project, root: Path) -> None:
             raise ArtifactError(
                 f"Agent did not produce the required {TELEGRAM_REQUIRED} - bot has no code"
             )
-        app_py = (root / TELEGRAM_REQUIRED).read_text(encoding="utf-8")
-        if "TELEGRAM_BOT_TOKEN" not in app_py:
-            raise ArtifactError("app.py must read TELEGRAM_BOT_TOKEN from the environment")
-        uses_job_queue = "job_queue" in app_py
-        if uses_job_queue:
-            fixed_app_py = _fix_job_queue_v13_api(app_py)
-            if fixed_app_py != app_py:
-                app_py = fixed_app_py
-                (root / TELEGRAM_REQUIRED).write_text(app_py, encoding="utf-8")
+        if not _reads_telegram_token(root):
+            raise ArtifactError(
+                "Bot code must read TELEGRAM_BOT_TOKEN from the environment "
+                "(os.environ / os.getenv)"
+            )
         requirements_path = root / "requirements.txt"
         if not requirements_path.exists():
-            default_pkg = (
-                "python-telegram-bot[job-queue]==21.10"
-                if uses_job_queue
-                else "python-telegram-bot==21.10"
+            raise ArtifactError(
+                "requirements.txt is missing - list the bot framework and other dependencies"
             )
-            requirements_path.write_text(f"{default_pkg}\n", encoding="utf-8")
-        elif uses_job_queue:
-            # app.py uses JobQueue but the agent may have listed the bare package - without the
-            # [job-queue] extra (APScheduler) this raises RuntimeError at process startup.
-            requirements_text = requirements_path.read_text(encoding="utf-8")
-            if "python-telegram-bot" in requirements_text and "job-queue" not in requirements_text:
-                requirements_path.write_text(
-                    requirements_text.replace(
-                        "python-telegram-bot", "python-telegram-bot[job-queue]", 1
-                    ),
-                    encoding="utf-8",
-                )
 
-    if not (root / "Dockerfile").exists():
-        if needs_website and needs_bot:
-            (root / "Dockerfile").write_text(MIXED_DOCKERFILE, encoding="utf-8")
-        elif needs_website:
-            (root / "Dockerfile").write_text(_DEFAULT_WEBSITE_DOCKERFILE, encoding="utf-8")
-        else:
-            (root / "Dockerfile").write_text(_DEFAULT_TELEGRAM_DOCKERFILE, encoding="utf-8")
+    ensure_dockerfile(project, root)
 
 
 def generate_fallback_artifact(db: Session, project: Project, prompt: str = "") -> Path:
-    """Deterministic, non-AI template. Last-resort safety net when the agent can't produce
-    anything usable (no API key configured, provider outage, etc.)."""
+    """Deterministic, non-AI template. Last-resort only when the workspace has no agent code."""
 
     if project.type == "website":
         path = generate_website_artifact(project, prompt)
@@ -180,7 +205,7 @@ async def _run_agent_repair(project: Project, root: Path, build_error: str) -> s
     if not api_key:
         raise ArtifactError("No AI provider key configured for automatic repair")
 
-    workspace = WorkspaceTools(root)
+    workspace = WorkspaceTools(root, project_id=str(project.id))
     session = CodingAgentSession(
         provider_name=provider_name,
         model=model,
@@ -191,7 +216,8 @@ async def _run_agent_repair(project: Project, root: Path, build_error: str) -> s
     user_message = (
         "Сборка Docker-образа этого проекта упала с ошибкой:\n\n"
         f"{build_error[:4000]}\n\n"
-        "Найди причину, прочитай нужные файлы и исправь их так, чтобы сборка прошла."
+        "Найди причину, прочитай нужные файлы и исправь их так, чтобы сборка прошла. "
+        "Не заменяй проект шаблоном и не удаляй реализованную логику пользователя."
     )
     final_text = ""
     from src.services.agent.events import AgentDone, TextDelta

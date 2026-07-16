@@ -175,7 +175,29 @@ def test_ensure_required_files_raises_when_entry_file_missing(tmp_path):
 def test_ensure_required_files_telegram_requires_token_env_read(tmp_path):
     project = _project("telegram_bot")
     (tmp_path / "app.py").write_text("print('missing env')", encoding="utf-8")
+    (tmp_path / "requirements.txt").write_text("aiogram>=3.0\n", encoding="utf-8")
     with pytest.raises(ArtifactError, match="TELEGRAM_BOT_TOKEN"):
+        ensure_required_files(project, tmp_path)
+
+
+def test_ensure_required_files_accepts_aiogram_stack(tmp_path):
+    project = _project("telegram_bot")
+    (tmp_path / "app.py").write_text(
+        "import os\nfrom aiogram import Bot\ntoken = os.getenv('TELEGRAM_BOT_TOKEN')\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "requirements.txt").write_text("aiogram>=3.13\nasyncpg\n", encoding="utf-8")
+    ensure_required_files(project, tmp_path)
+    assert "COPY . ." in (tmp_path / "Dockerfile").read_text(encoding="utf-8")
+
+
+def test_ensure_required_files_requires_requirements_txt(tmp_path):
+    project = _project("telegram_bot")
+    (tmp_path / "app.py").write_text(
+        "import os\nos.environ['TELEGRAM_BOT_TOKEN']\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ArtifactError, match="requirements.txt"):
         ensure_required_files(project, tmp_path)
 
 
@@ -195,6 +217,7 @@ def test_ensure_required_files_mixed_requires_both_entry_files(tmp_path):
         ensure_required_files(project, tmp_path)
 
     (tmp_path / "app.py").write_text("os.environ['TELEGRAM_BOT_TOKEN']", encoding="utf-8")
+    (tmp_path / "requirements.txt").write_text("aiogram\n", encoding="utf-8")
     ensure_required_files(project, tmp_path)
 
     dockerfile = (tmp_path / "Dockerfile").read_text(encoding="utf-8")

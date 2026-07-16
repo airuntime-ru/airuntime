@@ -28,7 +28,12 @@ from src.services.agent.events import AgentDone, TextDelta, ToolCallRequested, T
 from src.services.agent.loop import CodingAgentSession
 from src.services.agent.prompt import build_system_prompt
 from src.services.agent.tools import WorkspaceTools
-from src.services.agentic_artifacts import ensure_required_files, generate_fallback_artifact
+from src.services.agentic_artifacts import (
+    ensure_dockerfile,
+    ensure_required_files,
+    generate_fallback_artifact,
+    workspace_has_agent_code,
+)
 from src.services.artifacts import ArtifactError, _telegram_token
 from src.services.billing import record_usage
 from src.services.chat_context import build_llm_context
@@ -564,9 +569,19 @@ async def _stream_events(
             yield _sse_status("verify", "Проверяю готовые файлы проекта")
             try:
                 ensure_required_files(project, artifact_path)
-            except ArtifactError:
-                yield _sse_status("verify", "Не хватает обязательных файлов - собираю по шаблону")
-                artifact_path = generate_fallback_artifact(db, project, safe_message)
+            except ArtifactError as verify_exc:
+                if workspace_has_agent_code(artifact_path, project):
+                    # Keep the agent's implementation. Never wipe real code with the stub bot.
+                    ensure_dockerfile(project, artifact_path)
+                    yield append_visible(
+                        f"\n\nПроверка entrypoint неполная ({verify_exc}), но код агента сохранён "
+                        "без замены на шаблон. Если бот ведёт себя не так - напишите в чат, что поправить."
+                    )
+                else:
+                    yield _sse_status(
+                        "verify", "Не хватает обязательных файлов - собираю по шаблону"
+                    )
+                    artifact_path = generate_fallback_artifact(db, project, safe_message)
             for rel_path in _generated_files(artifact_path):
                 yield _sse_status("module", f"Файл готов: {rel_path}")
             git_commit_hash: str | None = None
