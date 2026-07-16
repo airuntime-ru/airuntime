@@ -65,11 +65,12 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
     };
   }, [projectId]);
 
-  // While waiting on configuration (e.g. a secret the user hasn't filled in yet), poll so the
-  // badge updates itself once they save it elsewhere - filling the secret resumes the
-  // deployment server-side, but nothing here would otherwise know to refetch.
+  // Poll while status can change server-side without navigation (deploy in flight, waiting on secrets).
   useEffect(() => {
-    if (!projectId || project?.status !== "needs_configuration") return undefined;
+    if (!projectId) return undefined;
+    if (project?.status !== "needs_configuration" && project?.status !== "deploying") {
+      return undefined;
+    }
     const timer = window.setInterval(() => {
       void getProject(projectId).then(setProject).catch(() => {});
     }, 4000);

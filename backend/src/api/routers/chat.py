@@ -1,5 +1,8 @@
+import asyncio
 import json
 import re
+import time
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
@@ -18,6 +21,7 @@ from src.api.mappers.chat_files import chat_file_to_response
 from src.core.config import settings
 from src.db.models.chat import Chat
 from src.db.models.chat_file import ChatFile
+from src.db.models.deployment import Deployment
 from src.db.models.message import Message
 from src.db.models.moderation_event import ModerationEvent
 from src.db.models.project import Project
@@ -37,7 +41,7 @@ from src.services.agentic_artifacts import (
 from src.services.artifacts import ArtifactError, _telegram_token
 from src.services.billing import record_usage
 from src.services.chat_context import build_llm_context
-from src.services.deployments import create_deployment_for_project
+from src.services.deployments import create_deployment_for_project, truncate_logs_ref
 from src.services.file_context import (
     attach_files_to_message,
     build_attachment_context,
@@ -60,7 +64,6 @@ from src.services.project_services import (
 from src.services.project_subdomain import (
     assert_subdomain_available,
     normalize_deploy_subdomain,
-    planned_public_url,
 )
 from src.services.prompt_guard import sanitize_user_message
 from src.services.provider.factory import resolve_model
@@ -217,10 +220,20 @@ def _extract_deploy_subdomain(text: str) -> str | None:
     return None
 
 
-def _queue_deployment_or_notify_limit(db: Session, project: Project) -> str | None:
+_DEPLOYMENT_TERMINAL = frozenset({"completed", "failed", "cancelled", "stopped"})
+_DEPLOY_WAIT_SECONDS = 300
+_DEPLOY_POLL_SECONDS = 2.0
+# Post-deploy auto-check sleeps ~3s then may start a repair redeploy - wait past that
+# before declaring success so chat doesn't claim "live" while the follow-up fails.
+_DEPLOY_SETTLE_SECONDS = 6.0
+
+
+def _queue_deployment_or_notify_limit(
+    db: Session, project: Project
+) -> tuple[Deployment | None, str | None]:
     try:
-        create_deployment_for_project(db, project)
-        return None
+        deployment = create_deployment_for_project(db, project)
+        return deployment, None
     except RunningProjectLimitError as exc:
         project.status = "ready"
         note = (
@@ -230,7 +243,53 @@ def _queue_deployment_or_notify_limit(db: Session, project: Project) -> str | No
         )
         project.logs = f"{project.logs}\n{note}".strip() if project.logs else note
         db.add(project)
-        return str(exc)
+        return None, str(exc)
+
+
+def _deploy_status_label(deployment_status: str) -> str:
+    if deployment_status == "queued":
+        return "В очереди на запуск"
+    if deployment_status == "running":
+        return "Собираю образ и запускаю контейнер"
+    if deployment_status == "completed":
+        return "Контейнер запущен"
+    if deployment_status == "failed":
+        return "Запуск не удался"
+    return f"Статус деплоя: {deployment_status}"
+
+
+def _launch_success_message(project: Project, *, has_website: bool, has_bot: bool) -> str:
+    url = (project.deployment_url or "").strip()
+    if has_website and has_bot:
+        if url:
+            return f"\n\nСайт и бот запущены и работают. Сайт: {url}"
+        return "\n\nСайт и бот запущены и работают."
+    if has_website:
+        if url:
+            return f"\n\nСайт запущен и доступен: {url}"
+        return "\n\nСайт запущен и работает."
+    if url:
+        return f"\n\nБот запущен и работает: {url}"
+    return "\n\nБот запущен и работает."
+
+
+def _launch_failure_message(deployment: Deployment | None, project: Project) -> str:
+    detail = ""
+    if deployment and deployment.logs_ref:
+        detail = deployment.logs_ref.strip()
+    elif project.logs:
+        # Prefer the last deployment-related note from project logs.
+        for line in reversed(project.logs.strip().splitlines()):
+            if "Deployment failed" in line or "failed" in line.lower():
+                detail = line.strip()
+                break
+        if not detail:
+            detail = project.logs.strip().splitlines()[-1][:500]
+    if detail:
+        return f"\n\nНе удалось запустить проект: {detail}"
+    return (
+        "\n\nНе удалось запустить проект. Подробности — во вкладках «Деплои» и «Логи»."
+    )
 
 
 def _message_response(db: Session, message: Message) -> MessageResponse:
@@ -633,43 +692,167 @@ async def _stream_events(
                 yield append_visible(f"\n\n{token_note}")
                 raise _StopDeployment
             if has_website and has_bot:
-                yield _sse_status("deploy", "Ставлю сайт и бота в очередь запуска")
-                planned_url = planned_public_url(project)
-                limit_message = _queue_deployment_or_notify_limit(db, project)
-                if limit_message:
-                    yield _sse_status("limit", limit_message, "error")
-                    yield append_visible(f"\n\n{limit_message}")
-                elif planned_url:
-                    yield append_visible(
-                        "\n\nСайт и бот собраны в один проект и поставлены в очередь на "
-                        f"запуск. URL сайта: {planned_url}"
-                    )
-                else:
-                    yield append_visible(
-                        "\n\nСайт и бот собраны в один проект и поставлены в очередь на запуск."
-                    )
+                yield _sse_status("deploy", "Ставлю сайт и бота в очередь запуска", "running")
+                deployment, limit_message = _queue_deployment_or_notify_limit(db, project)
             elif has_website and settings.auto_deploy_websites:
-                yield _sse_status("deploy", "Ставлю сайт в очередь запуска")
-                planned_url = planned_public_url(project)
-                limit_message = _queue_deployment_or_notify_limit(db, project)
-                if limit_message:
-                    yield _sse_status("limit", limit_message, "error")
-                    yield append_visible(f"\n\n{limit_message}")
-                elif planned_url:
-                    yield append_visible(
-                        f"\n\nСайт собран и поставлен в очередь на запуск. URL: {planned_url}"
-                    )
-                else:
-                    yield append_visible("\n\nСайт собран и поставлен в очередь на запуск.")
+                yield _sse_status("deploy", "Ставлю сайт в очередь запуска", "running")
+                deployment, limit_message = _queue_deployment_or_notify_limit(db, project)
             elif has_bot:
-                yield _sse_status("deploy", "Ставлю бота в очередь запуска")
-                limit_message = _queue_deployment_or_notify_limit(db, project)
-                if limit_message:
-                    yield _sse_status("limit", limit_message, "error")
-                    yield append_visible(f"\n\n{limit_message}")
+                yield _sse_status("deploy", "Ставлю бота в очередь запуска", "running")
+                deployment, limit_message = _queue_deployment_or_notify_limit(db, project)
+            else:
+                deployment, limit_message = None, None
+
+            if limit_message:
+                yield _sse_status("limit", limit_message, "error")
+                yield append_visible(f"\n\n{limit_message}")
+            elif deployment is not None:
+                last_label = ""
+                watched_id = deployment.id
+                deadline = time.monotonic() + _DEPLOY_WAIT_SECONDS
+
+                # Emit an immediate status from the current row (sync path may already be done).
+                db.refresh(deployment)
+                label = _deploy_status_label(deployment.status)
+                if label != last_label:
+                    state = (
+                        "done"
+                        if deployment.status == "completed"
+                        else "error"
+                        if deployment.status == "failed"
+                        else "running"
+                    )
+                    yield _sse_status("deploy", label, state)
+                    last_label = label
+
+                if deployment.status not in _DEPLOYMENT_TERMINAL:
+                    while time.monotonic() < deadline:
+                        await asyncio.sleep(_DEPLOY_POLL_SECONDS)
+                        db.expire_all()
+                        deployment = db.get(Deployment, watched_id)
+                        if deployment is None:
+                            break
+                        label = _deploy_status_label(deployment.status)
+                        if label != last_label:
+                            state = (
+                                "done"
+                                if deployment.status == "completed"
+                                else "error"
+                                if deployment.status == "failed"
+                                else "running"
+                            )
+                            yield _sse_status("deploy", label, state)
+                            last_label = label
+                        if deployment.status in _DEPLOYMENT_TERMINAL:
+                            break
+
+                db.expire_all()
+                db.refresh(project)
+                if deployment is not None:
+                    db.refresh(deployment)
+
+                # If the first deploy looked successful, wait for post-deploy auto-check /
+                # possible repair redeploy before celebrating in chat.
+                if (
+                    deployment is not None
+                    and deployment.status == "completed"
+                    and project.status == "live"
+                ):
+                    await asyncio.sleep(_DEPLOY_SETTLE_SECONDS)
+                    db.expire_all()
+                    db.refresh(project)
+                    newer = (
+                        db.query(Deployment)
+                        .filter(
+                            Deployment.project_id == project.id,
+                            Deployment.id != watched_id,
+                        )
+                        .order_by(Deployment.started_at.desc().nullslast())
+                        .first()
+                    )
+                    if newer is not None and newer.started_at is not None:
+                        watched = db.get(Deployment, watched_id)
+                        if watched and watched.started_at and newer.started_at >= watched.started_at:
+                            if newer.status not in _DEPLOYMENT_TERMINAL:
+                                yield _sse_status(
+                                    "deploy",
+                                    "Проверяю запуск и при необходимости пересобираю",
+                                    "running",
+                                )
+                                while time.monotonic() < deadline:
+                                    await asyncio.sleep(_DEPLOY_POLL_SECONDS)
+                                    db.expire_all()
+                                    newer = db.get(Deployment, newer.id)
+                                    if newer is None:
+                                        break
+                                    label = _deploy_status_label(newer.status)
+                                    if label != last_label:
+                                        state = (
+                                            "done"
+                                            if newer.status == "completed"
+                                            else "error"
+                                            if newer.status == "failed"
+                                            else "running"
+                                        )
+                                        yield _sse_status("deploy", label, state)
+                                        last_label = label
+                                    if newer.status in _DEPLOYMENT_TERMINAL:
+                                        break
+                            if newer is not None:
+                                deployment = newer
+                                watched_id = newer.id
+                    db.expire_all()
+                    db.refresh(project)
+                    if deployment is not None:
+                        db.refresh(deployment)
+
+                if (
+                    deployment is not None
+                    and deployment.status == "completed"
+                    and project.status == "live"
+                ):
+                    yield append_visible(
+                        _launch_success_message(
+                            project, has_website=has_website, has_bot=has_bot
+                        )
+                    )
+                    yield _sse_status("done", "Проект запущен и работает", "done")
+                elif deployment is not None and deployment.status == "failed":
+                    yield append_visible(_launch_failure_message(deployment, project))
+                    yield _sse_status("error", "Запуск не удался", "error")
+                elif deployment is not None and deployment.status in {"cancelled", "stopped"}:
+                    yield append_visible("\n\nЗапуск остановлен.")
+                    yield _sse_status("error", "Запуск остановлен", "error")
                 else:
-                    yield append_visible("\n\nБот собран и поставлен в очередь на запуск.")
-            yield _sse_status("done", "Готово: проект передан на запуск", "done")
+                    # Still queued/running past the wait window - fail the row so UI can't stick.
+                    if deployment is not None and deployment.status not in _DEPLOYMENT_TERMINAL:
+                        deployment.status = "failed"
+                        deployment.logs_ref = truncate_logs_ref(
+                            f"Timed out waiting for deployment after {_DEPLOY_WAIT_SECONDS}s"
+                        )
+                        deployment.finished_at = datetime.now(UTC)
+                        db.add(deployment)
+                        if project.status == "deploying":
+                            project.status = "ready"
+                            note = f"Deployment timed out in chat wait: {deployment.id}"
+                            project.logs = (
+                                f"{project.logs}\n{note}".strip() if project.logs else note
+                            )
+                            db.add(project)
+                        db.commit()
+                        yield append_visible(_launch_failure_message(deployment, project))
+                        yield _sse_status("error", "Запуск не удался (таймаут)", "error")
+                    else:
+                        yield append_visible(
+                            "\n\nЗапуск ещё не завершён. Итог смотрите во вкладках «Деплои» и «Логи» — "
+                            "сообщение «запущено» появится только когда контейнер реально станет live."
+                        )
+                        yield _sse_status("deploy", "Запуск ещё идёт", "running")
+            elif has_website or has_bot:
+                # Queued path requested but no deployment object (shouldn't happen without limit).
+                yield _sse_status("error", "Не удалось поставить деплой в очередь", "error")
+            else:
+                yield _sse_status("done", "Файлы сохранены", "done")
         except _StopDeployment:
             pass
         except RunningProjectLimitError as exc:

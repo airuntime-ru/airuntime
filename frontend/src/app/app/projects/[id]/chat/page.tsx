@@ -226,12 +226,14 @@ function AgentStatusPanel({
                 ? "Добавьте токен в секреты проекта — после этого запуск продолжится"
                 : waiting
                   ? "Ответьте в чат, и агент продолжит сборку"
-                  : "Статус сборки обновляется в реальном времени"}
+                  : done
+                    ? "Статус подтверждён по деплою"
+                    : "Статус сборки обновляется в реальном времени"}
             </p>
           </div>
         </div>
         <span className="hidden rounded-full border border-white/70 bg-white/70 px-2.5 py-1 text-xs font-medium text-[var(--ar-mist)] sm:inline-flex">
-          {needsToken ? "нужен токен" : waiting ? "ожидание" : "агент работает"}
+          {needsToken ? "нужен токен" : waiting ? "ожидание" : done ? "готово" : "агент работает"}
         </span>
       </div>
 
@@ -525,10 +527,19 @@ export default function ProjectChatPage() {
           const payload = line.replace("data: ", "");
           if (payload === "[DONE]") {
             const latestStatus = agentStatusRef.current;
-            if (latestStatus && (latestStatus.state !== "running" || latestStatus.phase === "questions")) {
+            // Keep terminal statuses from the server (live / failed / waiting for input).
+            if (latestStatus && latestStatus.state !== "running") {
               continue;
             }
-            updateAgentStatus({ phase: "done", label: "Изменения сохранены - проект собирается и запускается", state: "done" });
+            // Deploy still in progress at stream end - do not claim success.
+            if (latestStatus?.phase === "deploy") {
+              continue;
+            }
+            updateAgentStatus({
+              phase: "done",
+              label: "Изменения сохранены",
+              state: "done",
+            });
             continue;
           }
           const parsed = JSON.parse(payload) as { chunk?: string; status?: AgentStatus };

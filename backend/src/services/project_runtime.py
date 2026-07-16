@@ -70,6 +70,11 @@ def _cancel_active_deployments(db: Session, project_id: UUID) -> None:
         db.add(deployment)
 
 
+def cancel_active_deployments(db: Session, project_id: UUID) -> None:
+    """Cancel queued/running deployments for a project (e.g. before starting a new one)."""
+    _cancel_active_deployments(db, project_id)
+
+
 def stop_project_runtime(db: Session, project: Project) -> Project:
     if project.status not in RUNNING_STATUSES:
         raise ValueError("Проект не запущен")
@@ -111,11 +116,22 @@ def start_project_runtime(db: Session, project: Project) -> Project:
     # Import here to avoid circular imports.
     from src.services.deployments import create_deployment_for_project
 
+    previous_status = project.status
     assert_can_start_project(db, project.user_id, exclude_project_id=project.id)
     project.status = "deploying"
     db.add(project)
     db.commit()
     db.refresh(project)
-    create_deployment_for_project(db, project)
+    try:
+        create_deployment_for_project(db, project)
+    except Exception:
+        # Roll back the optimistic "deploying" if enqueue/create failed (e.g. limit race).
+        db.refresh(project)
+        if project.status == "deploying":
+            project.status = previous_status
+            db.add(project)
+            db.commit()
+            db.refresh(project)
+        raise
     db.refresh(project)
     return project

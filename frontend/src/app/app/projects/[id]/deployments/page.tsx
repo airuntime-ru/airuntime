@@ -2,7 +2,7 @@
 
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { Pause, Play, Rocket, ShieldCheck } from "lucide-react";
+import { Pause, Rocket, ShieldCheck } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,14 +14,13 @@ import {
   getProject,
   getProjectRuntimeLimits,
   listDeployments,
-  startProject,
   stopProject,
   type DeploymentType,
   type ProjectRuntimeLimitsType,
   type ProjectType,
 } from "@/lib/api";
 import {
-  canStartProject,
+  canCheckDeployment,
   canStopProject,
   deploymentStatusLabel,
   isProjectRunning,
@@ -162,25 +161,15 @@ export default function ProjectDeploymentsPage() {
     }
   };
 
-  const onStart = async () => {
-    if (!projectId) return;
-    setActionLoading(true);
-    setError("");
-    try {
-      setProject(await startProject(projectId));
-      setLimits(await getProjectRuntimeLimits());
-      await loadPage({ silent: true });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось запустить проект");
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
   if (loading) return <PageLoader />;
 
   const atLimit = limits ? limits.running >= limits.max_running : false;
-  const startDisabled = actionLoading || !project || (atLimit && !isProjectRunning(project.status));
+  // Redeploy of the currently running project is always allowed; starting another
+  // while at the concurrent limit is not.
+  const deployDisabled =
+    actionLoading ||
+    !project ||
+    (atLimit && !isProjectRunning(project.status));
 
   return (
     <div className="space-y-4">
@@ -202,7 +191,9 @@ export default function ProjectDeploymentsPage() {
       ) : null}
 
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm leading-7 text-[var(--ar-mist)]">История запусков проекта и его текущее состояние.</p>
+        <p className="text-sm leading-7 text-[var(--ar-mist)]">
+          Каждый запуск заново собирает Docker-образ из текущего кода, затем поднимает контейнер.
+        </p>
         <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
           {project && canStopProject(project.status) ? (
             <Button variant="outline" size="sm" className="w-full sm:w-auto" disabled={actionLoading} onClick={onStop}>
@@ -210,13 +201,7 @@ export default function ProjectDeploymentsPage() {
               Остановить
             </Button>
           ) : null}
-          {project && canStartProject(project.status) ? (
-            <Button variant="outline" size="sm" className="w-full sm:w-auto" disabled={startDisabled} onClick={onStart}>
-              <Play size={15} />
-              Запустить
-            </Button>
-          ) : null}
-          {project && isProjectRunning(project.status) ? (
+          {project && canCheckDeployment(project.status, deployments) ? (
             <Button
               variant="outline"
               size="sm"
@@ -225,12 +210,18 @@ export default function ProjectDeploymentsPage() {
               onClick={() => void onCheckDeployment()}
             >
               <ShieldCheck size={15} />
-              {checkLoading ? "Проверяем…" : "Проверить деплой на ошибки"}
+              {checkLoading ? "Проверяем…" : "Проверить и исправить"}
             </Button>
           ) : null}
-          <Button variant="accent" size="sm" className="w-full sm:w-auto" disabled={actionLoading || startDisabled} onClick={onDeploy}>
+          <Button
+            variant="accent"
+            size="sm"
+            className="w-full sm:w-auto"
+            disabled={deployDisabled}
+            onClick={() => void onDeploy()}
+          >
             <Rocket size={15} />
-            Собрать и запустить
+            {actionLoading ? "Запускаем…" : "Собрать и запустить"}
           </Button>
         </div>
       </div>
@@ -277,7 +268,7 @@ export default function ProjectDeploymentsPage() {
           title="Деплоев пока нет"
           description="Запустите первую сборку, чтобы получить рабочий runtime."
           action={
-            <Button variant="accent" disabled={startDisabled} onClick={onDeploy}>
+            <Button variant="accent" disabled={deployDisabled} onClick={() => void onDeploy()}>
               <Rocket size={16} />
               Собрать и запустить
             </Button>

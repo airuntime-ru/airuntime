@@ -1,8 +1,32 @@
 import json
 import uuid
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from tests.conftest import auth_tokens
+
+
+def _fake_live_deployment(db, project):
+    """Mark project live and return a completed Deployment row for stream wait-logic."""
+    from src.db.models.deployment import Deployment
+
+    project.status = "live"
+    if not project.deployment_url:
+        project.deployment_url = "https://example.airuntime.ru"
+    deployment = Deployment(
+        project_id=project.id,
+        status="completed",
+        image_ref="test:latest",
+        container_id="ctr-test",
+        logs_ref=None,
+        started_at=datetime.now(UTC),
+        finished_at=datetime.now(UTC),
+    )
+    db.add(project)
+    db.add(deployment)
+    db.commit()
+    db.refresh(deployment)
+    return deployment
 
 
 def _fake_agent_session_class(
@@ -547,7 +571,7 @@ def test_stream_prompt_generates_artifact_and_queues_deployment(client, monkeypa
 
     def fake_create_deployment(db, project):
         deployments.append(project.id)
-        return None
+        return _fake_live_deployment(db, project)
 
     monkeypatch.setattr(chat_router, "CodingAgentSession", _fake_agent_session_class(calls))
     monkeypatch.setattr(chat_router, "create_deployment_for_project", fake_create_deployment)
@@ -576,7 +600,8 @@ def test_stream_prompt_generates_artifact_and_queues_deployment(client, monkeypa
     statuses = [payload["status"]["phase"] for payload in payloads if "status" in payload]
     assert "verify" in statuses
     assert "deploy" in statuses
-    assert any("Сайт собран и поставлен в очередь на запуск" in chunk for chunk in chunks)
+    assert any("Сайт запущен" in chunk for chunk in chunks)
+    assert not any("поставлен в очередь на запуск" in chunk for chunk in chunks)
     assert "data: [DONE]" in response.text
     assert calls
     assert deployments == [uuid.UUID(project["id"])]
@@ -585,13 +610,10 @@ def test_stream_prompt_generates_artifact_and_queues_deployment(client, monkeypa
         f"/api/v1/projects/{project['id']}/chats/{chat['id']}/messages",
         headers=headers,
     ).json()
-    assert any(
-        "Сайт собран и поставлен в очередь на запуск" in message["content_markdown"]
-        for message in messages
-    )
+    assert any("Сайт запущен" in message["content_markdown"] for message in messages)
 
     updated = client.get(f"/api/v1/projects/{project['id']}", headers=headers).json()
-    assert updated["status"] == "ready"
+    assert updated["status"] == "live"
 
 
 def test_request_service_tool_creates_project_service_row(client, monkeypatch, tmp_path, db):
@@ -605,7 +627,7 @@ def test_request_service_tool_creates_project_service_row(client, monkeypatch, t
     calls: list = []
 
     def fake_create_deployment(db, project):
-        return None
+        return _fake_live_deployment(db, project)
 
     monkeypatch.setattr(
         chat_router,
@@ -656,7 +678,7 @@ def test_requesting_service_credential_as_secret_is_suppressed(client, monkeypat
     calls: list = []
 
     def fake_create_deployment(db, project):
-        return None
+        return _fake_live_deployment(db, project)
 
     monkeypatch.setattr(
         chat_router,
@@ -703,7 +725,7 @@ def test_stream_accepts_files_already_linked_to_user_message(client, monkeypatch
     calls: list = []
 
     def fake_create_deployment(db, project):
-        return None
+        return _fake_live_deployment(db, project)
 
     monkeypatch.setattr(chat_router, "CodingAgentSession", _fake_agent_session_class(calls))
     monkeypatch.setattr(chat_router, "create_deployment_for_project", fake_create_deployment)
@@ -755,7 +777,9 @@ def test_stream_subdomain_from_prompt_sets_deploy_subdomain(client, monkeypatch,
 
     def fake_create_deployment(db, project):
         deployments.append(project.deploy_subdomain)
-        return None
+        if project.deploy_subdomain:
+            project.deployment_url = f"https://{project.deploy_subdomain}.airuntime.ru"
+        return _fake_live_deployment(db, project)
 
     monkeypatch.setattr(chat_router, "CodingAgentSession", _fake_agent_session_class(calls))
     monkeypatch.setattr(chat_router, "create_deployment_for_project", fake_create_deployment)
@@ -775,7 +799,8 @@ def test_stream_subdomain_from_prompt_sets_deploy_subdomain(client, monkeypatch,
     )
 
     assert response.status_code == 200
-    assert any("URL: https://test.airuntime.ru" in line for line in response.text.splitlines())
+    assert "https://test.airuntime.ru" in response.text
+    assert "Сайт запущен" in response.text
     assert deployments == ["test"]
 
 
@@ -789,11 +814,12 @@ def test_stream_prompt_reclassifies_project_before_generation(client, monkeypatc
 
     monkeypatch.setattr(chat_router, "CodingAgentSession", _fake_agent_session_class(calls))
     monkeypatch.setattr(chat_router, "commit_snapshot", lambda artifact_path, message: "abc123")
-    monkeypatch.setattr(
-        chat_router,
-        "create_deployment_for_project",
-        lambda db, project: deployments.append(project.id),
-    )
+
+    def fake_create_deployment(db, project):
+        deployments.append(project.id)
+        return _fake_live_deployment(db, project)
+
+    monkeypatch.setattr(chat_router, "create_deployment_for_project", fake_create_deployment)
 
     headers = auth_tokens(client, "reclassify@airuntime.dev")
     project = client.post(

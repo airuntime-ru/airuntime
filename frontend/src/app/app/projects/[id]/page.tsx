@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ExternalLink, MessageSquare, Play, Settings, Sparkles, Square } from "lucide-react";
+import { ExternalLink, MessageSquare, Rocket, Settings, Sparkles, Square } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -10,9 +10,9 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { PageLoader } from "@/components/ui/loader";
 import {
+  createDeployment,
   getProject,
   getProjectRuntimeLimits,
-  startProject,
   stopProject,
   type ProjectRuntimeLimitsType,
   type ProjectType,
@@ -75,8 +75,8 @@ export default function ProjectOverviewPage() {
     setActionLoading(true);
     setError("");
     try {
-      setProject(await startProject(project.id));
-      setLimits(await getProjectRuntimeLimits());
+      await createDeployment(project.id);
+      await loadProject();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось запустить проект");
     } finally {
@@ -90,7 +90,8 @@ export default function ProjectOverviewPage() {
   const startDisabled = actionLoading || (atLimit && !isProjectRunning(project.status));
   const chatHref = `/app/projects/${project.id}/chat`;
 
-  const running = isProjectRunning(project.status);
+  const isLive = project.status === "live";
+  const isDeploying = project.status === "deploying";
   const needsConfig = project.status === "needs_configuration";
   const canRun = canStartProject(project.status) && !needsConfig;
 
@@ -107,7 +108,7 @@ export default function ProjectOverviewPage() {
   );
   let secondaryAction: React.ReactNode = null;
 
-  if (running) {
+  if (isLive) {
     heading = "Проект в эфире";
     description = "Дальнейшие правки вносите через чат - платформа пересоберёт и перезапустит проект сама.";
     primaryAction = project.deployment_url ? (
@@ -118,6 +119,25 @@ export default function ProjectOverviewPage() {
         </Button>
       </a>
     ) : null;
+  } else if (isDeploying) {
+    heading = "Проект запускается";
+    description =
+      "Сборка и запуск уже идут. Статус обновится сам — итог также во вкладках «Деплои» и «Логи».";
+    primaryAction = (
+      <Link href={`/app/projects/${project.id}/deployments`} className="w-full">
+        <Button variant="accent" className="w-full">
+          Смотреть деплои
+        </Button>
+      </Link>
+    );
+    secondaryAction = (
+      <Link href={chatHref} className="w-full">
+        <Button variant="outline" className="w-full">
+          <MessageSquare size={16} />
+          Открыть чат
+        </Button>
+      </Link>
+    );
   } else if (needsConfig) {
     heading = "Нужна настройка";
     description = "Заполните недостающие данные в настройках проекта, и запуск продолжится автоматически.";
@@ -139,11 +159,11 @@ export default function ProjectOverviewPage() {
     );
   } else if (canRun) {
     heading = "Можно запускать";
-    description = "Файлы собраны - запустите проект, когда будете готовы.";
+    description = "Файлы собраны — каждый запуск заново собирает образ и поднимает контейнер.";
     primaryAction = (
-      <Button variant="accent" className="w-full" disabled={startDisabled} onClick={onStart}>
-        <Play size={16} />
-        Запустить
+      <Button variant="accent" className="w-full" disabled={startDisabled} onClick={() => void onStart()}>
+        <Rocket size={16} />
+        {actionLoading ? "Запускаем…" : "Собрать и запустить"}
       </Button>
     );
     secondaryAction = (

@@ -198,9 +198,8 @@ def check_project_deployment(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    """On-demand version of the automatic post-deploy check: re-reads the running container's
-    current logs and has the agent fix anything broken. Useful after real usage has produced
-    log lines an immediate post-deploy check couldn't have seen yet."""
+    """Inspect the latest completed or failed deployment, repair code if an error is found,
+    and queue a redeploy. Works for crashed/failed launches as well as live containers."""
     project = (
         db.query(Project)
         .filter(Project.id == project_id, Project.user_id == current_user.id)

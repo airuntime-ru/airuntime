@@ -42,3 +42,11 @@ export function canStartProject(status: string): boolean {
     status === "telegram_ready"
   );
 }
+
+export function canCheckDeployment(
+  projectStatus: string,
+  deployments: { status: string }[]
+): boolean {
+  if (isProjectRunning(projectStatus)) return true;
+  return deployments.some((item) => item.status === "failed" || item.status === "completed");
+}
