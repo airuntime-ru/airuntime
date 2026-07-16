@@ -35,6 +35,7 @@ from src.services.agent.tools import WorkspaceTools
 from src.services.agentic_artifacts import (
     ensure_dockerfile,
     ensure_required_files,
+    thin_bot_architecture_warning,
     workspace_has_agent_code,
 )
 from src.services.artifacts import ArtifactError, _telegram_token
@@ -68,7 +69,7 @@ from src.services.project_subdomain import (
     normalize_deploy_subdomain,
 )
 from src.services.prompt_guard import sanitize_user_message
-from src.services.provider.factory import resolve_model
+from src.services.provider.factory import resolve_provider_and_model
 from src.services.secrets import capture_telegram_tokens_from_text, ensure_secret_placeholder
 from src.services.system_settings import resolve_api_key_for_provider
 from src.services.workspace import project_dir
@@ -498,10 +499,10 @@ async def _stream_events(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     image_attachments = extract_image_attachments(db, attachment_ids)
 
-    provider_name = provider_override or settings.provider_name
-    if provider_name not in {"openai", "anthropic", "gemini", "openrouter"}:
-        provider_name = settings.provider_name
-    model = model_override or resolve_model(provider_name)
+    provider_name, model = resolve_provider_and_model(
+        provider_override=provider_override,
+        model_override=model_override,
+    )
     api_key = (
         resolve_api_key_for_provider(provider_name)
         or getattr(settings, f"{provider_name}_api_key", None)
@@ -672,7 +673,11 @@ async def _stream_events(
                     )
                     raise _StopDeployment
             for rel_path in _generated_files(artifact_path):
-                yield _sse_status("module", f"Файл готов: {rel_path}")
+                yield _sse_status("module", f"В проекте: {rel_path}")
+            thin_arch = thin_bot_architecture_warning(artifact_path, project)
+            if thin_arch:
+                yield _sse_status("verify", "Архитектура выглядит слишком тонкой", "error")
+                yield append_visible(f"\n\n{thin_arch}")
             git_commit_hash: str | None = None
             try:
                 yield _sse_status("version", "Сохраняю версию проекта")
@@ -711,7 +716,7 @@ async def _stream_events(
                         f"?projectId={project.id}"
                     )
                     token_note = (
-                        "Файлы бота созданы, но запуск остановлен: добавьте секрет "
+                        "Entrypoint бота (app.py) на месте, но запуск остановлен: добавьте секрет "
                         "TELEGRAM_BOT_TOKEN в настройках проекта и повторите запуск.\n\n"
                         "Как получить токен: откройте @BotFather в Telegram, выполните /newbot "
                         f"и скопируйте выданный token. [Подробная инструкция]({token_help_url})"

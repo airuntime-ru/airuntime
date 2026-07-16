@@ -84,6 +84,10 @@ export type ProvidersType = {
   active: string;
   supported: string[];
   configured: Record<string, boolean>;
+  auto_provider?: string;
+  auto_model?: string;
+  defaults?: Record<string, string>;
+  top_models?: Record<string, string[]>;
 };
 
 export type ProjectRuntimeLimitsType = {

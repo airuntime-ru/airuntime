@@ -19,7 +19,7 @@ from src.services.artifacts import (
     ArtifactError,
 )
 from src.services.project_git import commit_snapshot
-from src.services.provider.factory import resolve_model
+from src.services.provider.factory import resolve_provider_and_model
 from src.services.system_settings import resolve_api_key_for_provider
 from src.services.workspace import project_dir as _project_dir
 
@@ -179,8 +179,7 @@ def unpin_missing_pip_versions(root: Path, build_error: str) -> list[str]:
 
 
 def _resolve_provider_and_key(provider_name: str | None = None) -> tuple[str, str, str]:
-    name = provider_name or settings.provider_name
-    model = resolve_model(name)
+    name, model = resolve_provider_and_model(provider_override=provider_name)
     key_field = f"{name}_api_key"
     api_key = resolve_api_key_for_provider(name) or getattr(settings, key_field, None) or ""
     return name, model, api_key
@@ -242,6 +241,47 @@ def _reads_telegram_token(root: Path) -> bool:
     return False
 
 
+def _bot_python_files(root: Path) -> list[Path]:
+    return [
+        p
+        for p in root.rglob("*.py")
+        if ".airuntime" not in p.parts and "__pycache__" not in p.parts and ".git" not in p.parts
+    ]
+
+
+# Soft signal: a single huge app.py almost never matches a feature-rich user request.
+_THIN_BOT_APP_LINES = 80
+
+
+def thin_bot_architecture_warning(root: Path, project: Project) -> str | None:
+    """Warn when a non-trivial bot was collapsed into a single app.py monolith.
+
+    Does not fail the deploy contract (hello-world may be one file). Used for chat
+    verify messaging and mid-loop build_project hints so the agent is not rewarded
+    for "app.py + requirements.txt + Dockerfile" on real products.
+    """
+    if project.type not in ("telegram_bot", "mixed"):
+        return None
+    py_files = _bot_python_files(root)
+    if len(py_files) > 1:
+        return None
+    app_path = root / TELEGRAM_REQUIRED
+    if not app_path.exists():
+        return None
+    try:
+        lines = len(app_path.read_text(encoding="utf-8", errors="ignore").splitlines())
+    except OSError:
+        return None
+    if lines < _THIN_BOT_APP_LINES:
+        return None
+    return (
+        "Архитектура слишком тонкая: почти вся логика в одном app.py "
+        f"(~{lines} строк) без отдельных модулей. Для нетривиальных фич разнеси код "
+        "(handlers/, services/, db/ и т.п.), оставь app.py тонким entrypoint и "
+        "убедись, что Dockerfile делает `COPY . .`."
+    )
+
+
 def ensure_dockerfile(project: Project, root: Path) -> bool:
     """Write a default Dockerfile if missing. Returns True when a file was created."""
     dockerfile = root / "Dockerfile"
@@ -259,10 +299,14 @@ def ensure_dockerfile(project: Project, root: Path) -> bool:
 
 
 def ensure_required_files(project: Project, root: Path) -> None:
-    """Fill in a default Dockerfile if missing; raise if a required entry file is missing.
+    """Ensure deploy contract files exist; raise if a required entry file is missing.
 
-    Does not force a Telegram framework (aiogram / python-telegram-bot / …) — only the
-    platform entrypoint contract: app.py + token from env + requirements.txt present.
+    Platform contract for bots: entrypoint app.py (Docker CMD), TELEGRAM_BOT_TOKEN
+    read from env somewhere in the tree, requirements.txt, and a Dockerfile that
+    copies the whole project (`COPY . .`). This does NOT mean «one-file bot is
+    enough» — architecture quality is steered by the system prompt and soft
+    warnings from thin_bot_architecture_warning / build_project hints. Hello-world
+    may be a small app.py; feature-rich bots should be multi-module.
     """
 
     needs_website = project.type in ("website", "mixed")
@@ -278,7 +322,8 @@ def ensure_required_files(project: Project, root: Path) -> None:
     if needs_bot:
         if not (root / TELEGRAM_REQUIRED).exists():
             raise ArtifactError(
-                f"Agent did not produce the required {TELEGRAM_REQUIRED} - bot has no code"
+                f"Agent did not produce the required entrypoint {TELEGRAM_REQUIRED} "
+                "(thin launcher that Docker runs - not a license to put all logic in one file)"
             )
         if not _reads_telegram_token(root):
             raise ArtifactError(
@@ -292,6 +337,17 @@ def ensure_required_files(project: Project, root: Path) -> None:
             )
 
     ensure_dockerfile(project, root)
+    if needs_bot:
+        dockerfile = root / "Dockerfile"
+        if dockerfile.exists():
+            text = dockerfile.read_text(encoding="utf-8", errors="ignore")
+            if re.search(r"^\s*COPY\s+app\.py\b", text, re.MULTILINE) and "COPY . ." not in text:
+                # Agent wrote a monolith-only Docker layer - rewrite to full-tree copy so
+                # any modules they add later actually ship in the image.
+                if needs_website:
+                    dockerfile.write_text(MIXED_DOCKERFILE, encoding="utf-8")
+                else:
+                    dockerfile.write_text(_DEFAULT_TELEGRAM_DOCKERFILE, encoding="utf-8")
 
 
 async def _run_agent_repair(project: Project, root: Path, build_error: str, *, attempt: int) -> str:

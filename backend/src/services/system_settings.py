@@ -65,6 +65,31 @@ def get_system_setting_number(setting_key: str) -> int | None:
         db.close()
 
 
+def get_system_setting_json(setting_key: str) -> Any | None:
+    """Return ``value_json`` for an enabled setting, or None."""
+    now = time.monotonic()
+    cache_key = f"json:{setting_key}"
+    cached = _cache.get(cache_key)
+    if cached:
+        value, expires_at = cached
+        if now < expires_at:
+            return value
+
+    db = SessionLocal()
+    try:
+        stmt = select(SystemSetting).where(SystemSetting.key == setting_key)
+        setting = db.execute(stmt).scalar_one_or_none()
+        value = setting.value_json if setting and setting.is_enabled else None
+        _cache[cache_key] = (value, now + _TTL_SECONDS)
+        return value
+    except Exception:
+        # Prefer curated defaults over failing chat when admin DB is unreachable.
+        _cache[cache_key] = (None, now + _TTL_SECONDS)
+        return None
+    finally:
+        db.close()
+
+
 def resolve_api_key_for_provider(provider_name: str) -> str | None:
     # Priority list: keys that are likely to be set in admin.
     # User mentioned key "gpt", we also support the earlier seed "openai_api_key".

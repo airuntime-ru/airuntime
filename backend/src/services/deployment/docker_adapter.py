@@ -35,6 +35,26 @@ class DockerDeploymentAdapter:
             raise RuntimeError(f"Container {container_id} was not found.") from exc
         return raw_logs.decode("utf-8", errors="replace")
 
+    def _logs_tail_for_error(self, container, *, tail: int = 400, max_chars: int = 8000) -> str:
+        """Best-effort stdout/stderr from an exited/unhealthy container for deploy error_text."""
+        try:
+            # Prefer the live object (still present after exit) so we never race a NotFound
+            # from a parallel cleanup before the error is recorded.
+            raw_logs = container.logs(tail=tail, timestamps=True)
+            text = raw_logs.decode("utf-8", errors="replace").strip()
+        except Exception:  # noqa: BLE001 - never mask the status failure with a log fetch error
+            try:
+                text = self.fetch_container_logs(container.id, tail=tail).strip()
+            except Exception as log_exc:  # noqa: BLE001
+                return f"(could not fetch container logs: {log_exc})"
+        if not text:
+            return "(container produced no stdout/stderr)"
+        return text[-max_chars:]
+
+    def _not_running_error(self, container, *, status: str, preface: str) -> RuntimeError:
+        logs = self._logs_tail_for_error(container)
+        return RuntimeError(f"{preface} (status: {status}).\n{logs}")
+
     def ensure_private_network(self, project_id: str) -> str:
         """Idempotently create the per-project bridge network used by sidecar services, so the
         app container and any Postgres/Redis sidecar can reach each other by container name."""
@@ -117,11 +137,24 @@ class DockerDeploymentAdapter:
             try:
                 self.attach_to_network(container.id, request.service_network)
             except DockerException as exc:
+                container.reload()
+                if container.status != "running":
+                    raise self._not_running_error(
+                        container,
+                        status=container.status,
+                        preface="Container is not running",
+                    ) from exc
                 raise RuntimeError(str(exc)) from exc
 
+        # Do not remove the container on failure — exited containers keep their logs, and
+        # the next deploy / stop_project cleans them up. Capture logs *before* any remove.
         container.reload()
         if container.status != "running":
-            raise RuntimeError(f"Container is not running (status: {container.status})")
+            raise self._not_running_error(
+                container,
+                status=container.status,
+                preface="Container is not running",
+            )
 
         container_id = container.id
         logs_ref = f"docker://{container_id}"
@@ -152,13 +185,18 @@ class DockerDeploymentAdapter:
 
         if settle_seconds > 0:
             time.sleep(settle_seconds)
-        status = self.container_status(container_id)
-        logs = self.fetch_container_logs(container_id, tail=400)
-        if status != "running":
-            raise RuntimeError(
-                f"Container exited shortly after start (status: {status}).\n{logs[-8000:]}"
+        try:
+            container = self._client.containers.get(container_id)
+            container.reload()
+        except NotFound as exc:
+            raise RuntimeError(f"Container {container_id} was not found.") from exc
+        if container.status != "running":
+            raise self._not_running_error(
+                container,
+                status=container.status,
+                preface="Container exited shortly after start",
             )
-        return logs
+        return self.fetch_container_logs(container_id, tail=400)
 
     def _allocate_port(self, project_id: str) -> int:
         base = settings.deployment_port_base

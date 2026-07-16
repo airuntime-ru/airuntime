@@ -26,10 +26,11 @@ class Settings(BaseSettings):
     anthropic_api_key: str | None = None
     gemini_api_key: str | None = None
     openrouter_api_key: str | None = None
-    default_model_openai: str = "gpt-4o-mini"
-    default_model_anthropic: str = "claude-3-5-haiku-latest"
-    default_model_gemini: str = "gemini-1.5-flash"
-    default_model_openrouter: str = "openai/gpt-4o-mini"
+    # Mid-tier+ coding defaults (never weaker than gpt-5.4-mini on OpenAI).
+    default_model_openai: str = "gpt-5.4-mini"
+    default_model_anthropic: str = "claude-sonnet-5"
+    default_model_gemini: str = "gemini-2.5-pro"
+    default_model_openrouter: str = "openai/gpt-5.4-mini"
 
     app_domain: str = "airuntime.ru"
     frontend_url: str = "http://localhost:3000"
@@ -124,3 +125,31 @@ class Settings(BaseSettings):
 
 settings = Settings()
 settings.validate_production()
+
+# OpenAI auto-select floor (product / API slug).
+OPENAI_MODEL_FLOOR = "gpt-5.4-mini"
+
+# Ranked allowlists for auto-select when admin has no preferred_models list.
+# Newest / strongest coding-capable models first; keep cost/latency reasonable
+# (Sonnet over Opus, mini over full frontier as the practical default band).
+CURATED_TOP_MODELS: dict[str, list[str]] = {
+    "openai": [
+        "gpt-5.4-mini",
+        "gpt-5.4",
+    ],
+    "anthropic": [
+        "claude-sonnet-5",
+        "claude-opus-4-8",
+    ],
+    "gemini": [
+        "gemini-2.5-pro",
+        "gemini-3.1-pro-preview",
+        "gemini-3.5-flash",
+    ],
+    "openrouter": [
+        "openai/gpt-5.4-mini",
+        "openai/gpt-5.4",
+        "anthropic/claude-sonnet-5",
+        "google/gemini-2.5-pro",
+    ],
+}

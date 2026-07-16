@@ -1038,7 +1038,11 @@ export default function ProjectChatPage() {
                     onClick={() => setProviderMenuOpen((prev) => !prev)}
                     className="inline-flex items-center gap-1 rounded-full border border-black/10 bg-[#fafafa] px-2.5 py-1 text-xs font-medium text-[var(--ar-mist)] hover:bg-black/5"
                   >
-                    {PROVIDER_LABELS[selectedProvider] ?? PROVIDER_LABELS[providers?.active ?? ""] ?? "AIRuntime"}
+                    {selectedProvider
+                      ? (PROVIDER_LABELS[selectedProvider] ?? selectedProvider)
+                      : providers?.auto_model
+                        ? `Авто · ${providers.auto_model}`
+                        : "Авто (топ модели)"}
                     <ChevronDown size={12} className="opacity-50" />
                   </button>
                   {providerMenuOpen ? (
@@ -1051,11 +1055,16 @@ export default function ProjectChatPage() {
                           setProviderMenuOpen(false);
                         }}
                         className={cn(
-                          "flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-black/5",
+                          "flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-sm hover:bg-black/5",
                           !selectedProvider && "font-medium text-[var(--ar-black)]"
                         )}
                       >
-                        Модель по умолчанию
+                        <span>Авто (топ модели)</span>
+                        <span className="text-[10px] font-normal text-[var(--ar-stone)]">
+                          {providers?.auto_model
+                            ? `${PROVIDER_LABELS[providers.auto_provider ?? ""] ?? providers.auto_provider ?? "AI"} · ${providers.auto_model}`
+                            : "gpt-5.4-mini+ по ключу"}
+                        </span>
                       </button>
                       {(providers?.supported ?? []).map((name) => {
                         const configured = providers?.configured?.[name];
@@ -1075,9 +1084,11 @@ export default function ProjectChatPage() {
                             )}
                           >
                             <span>{PROVIDER_LABELS[name] ?? name}</span>
-                            {!configured ? (
-                              <span className="text-[10px] text-[var(--ar-stone)]">нет ключа</span>
-                            ) : null}
+                            <span className="text-[10px] text-[var(--ar-stone)]">
+                              {!configured
+                                ? "нет ключа"
+                                : (providers?.defaults?.[name] ?? providers?.top_models?.[name]?.[0] ?? "")}
+                            </span>
                           </button>
                         );
                       })}

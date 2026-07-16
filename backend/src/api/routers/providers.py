@@ -2,8 +2,9 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from src.api.dependencies.auth import get_current_user
-from src.core.config import settings
+from src.core.config import CURATED_TOP_MODELS, settings
 from src.db.models.user import User
+from src.services.provider.factory import resolve_provider_and_model
 from src.services.system_settings import resolve_api_key_for_provider
 
 router = APIRouter(prefix="/providers", tags=["providers"])
@@ -13,6 +14,10 @@ class ProviderConfigResponse(BaseModel):
     active: str
     supported: list[str]
     configured: dict[str, bool]
+    auto_provider: str
+    auto_model: str
+    defaults: dict[str, str]
+    top_models: dict[str, list[str]]
 
 
 @router.get("", response_model=ProviderConfigResponse)
@@ -21,6 +26,7 @@ def list_providers(_: User = Depends(get_current_user)) -> ProviderConfigRespons
     anthropic_key = resolve_api_key_for_provider("anthropic") or settings.anthropic_api_key
     gemini_key = resolve_api_key_for_provider("gemini") or settings.gemini_api_key
     openrouter_key = resolve_api_key_for_provider("openrouter") or settings.openrouter_api_key
+    auto_provider, auto_model = resolve_provider_and_model()
     return ProviderConfigResponse(
         active=settings.provider_name,
         supported=["openai", "anthropic", "gemini", "openrouter"],
@@ -30,4 +36,13 @@ def list_providers(_: User = Depends(get_current_user)) -> ProviderConfigRespons
             "gemini": bool(gemini_key),
             "openrouter": bool(openrouter_key),
         },
+        auto_provider=auto_provider,
+        auto_model=auto_model,
+        defaults={
+            "openai": settings.default_model_openai,
+            "anthropic": settings.default_model_anthropic,
+            "gemini": settings.default_model_gemini,
+            "openrouter": settings.default_model_openrouter,
+        },
+        top_models=dict(CURATED_TOP_MODELS),
     )

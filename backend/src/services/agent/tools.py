@@ -57,7 +57,9 @@ TOOL_DEFS: list[dict[str, Any]] = [
         "description": (
             "Create a new file, or completely replace the contents of an existing file. "
             "Use this for new files or full rewrites; use edit_file for small, targeted changes "
-            "to an existing file so you don't have to resend the whole file."
+            "to an existing file so you don't have to resend the whole file. For non-trivial "
+            "Telegram bots prefer many small module files (handlers/, services/, db/, …) plus a "
+            "thin app.py entrypoint - do not dump an entire product into a single app.py."
         ),
         "parameters": {
             "type": "object",
@@ -388,9 +390,46 @@ class WorkspaceTools:
                 ok=False, summary="Build service did not respond - try again"
             )
         log = result.get("log", "")
+        arch_hint = self._thin_bot_architecture_hint()
         if result.get("ok"):
-            return ToolExecutionResult(ok=True, summary="Build succeeded", content=log)
-        return ToolExecutionResult(ok=False, summary="Build failed", content=log)
+            content = log + arch_hint if arch_hint else log
+            summary = "Build succeeded"
+            if arch_hint:
+                summary = (
+                    "Build succeeded, but architecture looks too thin - split into modules "
+                    "before finishing"
+                )
+            return ToolExecutionResult(ok=True, summary=summary, content=content)
+        content = log + arch_hint if arch_hint else log
+        return ToolExecutionResult(ok=False, summary="Build failed", content=content)
+
+    def _thin_bot_architecture_hint(self) -> str:
+        """Nudge mid-loop when the agent is about to ship a monolith app.py."""
+        py_files = [
+            p
+            for p in self.root.rglob("*.py")
+            if ".airuntime" not in p.parts
+            and "__pycache__" not in p.parts
+            and ".git" not in p.parts
+        ]
+        if len(py_files) > 1:
+            return ""
+        app_path = self.root / "app.py"
+        if not app_path.exists():
+            return ""
+        try:
+            lines = len(app_path.read_text(encoding="utf-8", errors="ignore").splitlines())
+        except OSError:
+            return ""
+        if lines < 80:
+            return ""
+        return (
+            "\n\nARCHITECTURE HINT: app.py is large (~"
+            f"{lines} lines) and is the only Python file. For non-trivial bots this is wrong - "
+            "split handlers/services/db into separate modules, keep app.py as a thin entrypoint, "
+            "ensure Dockerfile uses `COPY . .`, then call build_project again. Do not finish "
+            "with only app.py + requirements.txt + Dockerfile."
+        )
 
     def _request_secret(self, key: str, reason: str) -> ToolExecutionResult:
         key = key.strip()

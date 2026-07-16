@@ -1,4 +1,5 @@
 import asyncio
+import re
 import uuid
 
 import pytest
@@ -10,6 +11,7 @@ from src.services.agent.tools import WorkspaceTools
 from src.services.agentic_artifacts import (
     ensure_required_files,
     normalize_psycopg2_requirements,
+    thin_bot_architecture_warning,
     unpin_missing_pip_versions,
 )
 from src.services.artifacts import ArtifactError
@@ -213,6 +215,48 @@ def test_ensure_required_files_mixed_requires_both_entry_files(tmp_path):
     dockerfile = (tmp_path / "Dockerfile").read_text(encoding="utf-8")
     assert "nginx" in dockerfile
     assert "app.py" in dockerfile
+
+
+def test_ensure_required_files_rewrites_copy_app_py_only_dockerfile(tmp_path):
+    project = _project("telegram_bot")
+    (tmp_path / "app.py").write_text(
+        "import os\nos.environ['TELEGRAM_BOT_TOKEN']\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "requirements.txt").write_text("aiogram\n", encoding="utf-8")
+    (tmp_path / "Dockerfile").write_text(
+        "FROM python:3.12-slim\nCOPY app.py .\nCMD [\"python\", \"app.py\"]\n",
+        encoding="utf-8",
+    )
+    ensure_required_files(project, tmp_path)
+    assert "COPY . ." in (tmp_path / "Dockerfile").read_text(encoding="utf-8")
+    assert not re.search(
+        r"^\s*COPY\s+app\.py\b",
+        (tmp_path / "Dockerfile").read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )
+
+
+def test_thin_bot_architecture_warning_for_monolith_app_py(tmp_path):
+    project = _project("telegram_bot")
+    (tmp_path / "app.py").write_text(
+        "\n".join(f"line_{i} = {i}" for i in range(100)),
+        encoding="utf-8",
+    )
+    assert thin_bot_architecture_warning(tmp_path, project) is not None
+
+    (tmp_path / "handlers").mkdir()
+    (tmp_path / "handlers" / "start.py").write_text("def register():\n    pass\n", encoding="utf-8")
+    assert thin_bot_architecture_warning(tmp_path, project) is None
+
+
+def test_thin_bot_architecture_allows_small_hello_world(tmp_path):
+    project = _project("telegram_bot")
+    (tmp_path / "app.py").write_text(
+        "import os\ntoken = os.getenv('TELEGRAM_BOT_TOKEN')\nprint('hi')\n",
+        encoding="utf-8",
+    )
+    assert thin_bot_architecture_warning(tmp_path, project) is None
 
 
 def test_normalize_psycopg2_rewrites_bare_and_collapses_binary_binary(tmp_path):
