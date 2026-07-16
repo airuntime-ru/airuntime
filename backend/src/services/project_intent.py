@@ -14,23 +14,71 @@ _BOT_TERMS = (
     "polling",
 )
 
-# Avoid a bare "web" prefix: `\bweb\w*` matches "webhook" and incorrectly marks bot-only
-# prompts as mixed, which surfaces the subdomain settings card for projects without a site.
-_SITE_TERMS = (
-    "сайт",
+# Strong site-product terms: almost never appear when the user only wants a bot.
+_SITE_STRONG_TERMS = (
     "лендинг",
     "landing",
     "website",
-    "страниц",
-    "дашборд",
     "личный кабинет",
-    "лк",
+)
+
+# Weak terms: often incidental (парсинг сайта, дашборд в боте). Alone they must not flip
+# a clear bot request to mixed.
+_SITE_WEAK_TERMS = (
+    "сайт",
+    "дашборд",
 )
 
 _SITE_WHOLE_WORDS = (
     "web",
     "веб",
+    "лк",
     # "интерфейс" is too ambiguous (Telegram button UIs, bot menus) to count as a site signal.
+    # "страниц" / "страница" match Telegram menus ("страницы меню") — never count as site.
+)
+
+# Explicit "I want a hosted website" phrasing (RU/EN), including dual-product asks.
+_SITE_PRODUCT_INTENT = re.compile(
+    r"(?:"
+    r"(?:сделай|создай|хочу|нужен|нужна|нужно|сделать|разработай|напиши|добавь)\s+"
+    r"(?:(?:ещё|еще|также|тоже|отдельный|отдельную|простой|небольшой|новый|красивый)\s+)*"
+    r"(?:сайт|лендинг|landing|website|веб(?:сайт)?|web(?:site)?|лк|личный\s+кабинет)"
+    r"|"
+    r"(?:сайт|лендинг|landing|website)\s+(?:для|и\b)"
+    r"|"
+    r"\bи\s+(?:сайт|лендинг|landing|website)\b"
+    r"|"
+    r"(?:telegram|телеграм|тг|бот|bot).{0,60}(?:и|,)\s*"
+    r"(?:сайт|лендинг|landing|website)"
+    r")",
+    re.IGNORECASE,
+)
+
+# User explicitly declined a hosted site.
+_SITE_NEGATION = re.compile(
+    r"(?:"
+    r"(?:не\s+нужен|не\s+нужна|не\s+нужно|не\s+надо|не\s+требуется|без|только\s+бот)"
+    r".{0,40}(?:сайт|лендинг|landing|website)"
+    r"|"
+    r"(?:сайт|лендинг|landing|website).{0,40}"
+    r"(?:не\s+нужен|не\s+нужна|не\s+нужно|не\s+надо|не\s+требуется|не\s+делай)"
+    r")",
+    re.IGNORECASE,
+)
+
+# "сайт" as an external URL / scrape target, not a product to host on the platform.
+_SITE_AS_EXTERNAL_OBJECT = re.compile(
+    r"(?:"
+    r"(?:парс(?:ит|инг|ить|ер)?|скрап|scrape|монитор(?:ит|инг)?|ходит\s+на|"
+    r"открывает|читает|собирает|берёт|берет)\s+.{0,40}сайт"
+    r"|"
+    r"сайт(?:а|у|е|ом)?\s+.{0,40}(?:парс|конкурент|api|url|ссылк)"
+    r"|"
+    r"(?:с|со)\s+сайт(?:а|ов)\b"
+    r"|"
+    r"на\s+сайт(?:е|ах)?\b"
+    r")",
+    re.IGNORECASE,
 )
 
 
@@ -48,19 +96,39 @@ def _count_whole_word_matches(terms: tuple[str, ...], text: str) -> int:
 def detect_project_type_signals(text: str) -> tuple[int, int]:
     normalized = text.lower()
     bot_score = _count_word_matches(_BOT_TERMS, normalized)
-    site_score = _count_word_matches(_SITE_TERMS, normalized) + _count_whole_word_matches(
-        _SITE_WHOLE_WORDS, normalized
+
+    strong = _count_word_matches(_SITE_STRONG_TERMS, normalized)
+    weak = _count_word_matches(_SITE_WEAK_TERMS, normalized)
+    whole = _count_whole_word_matches(_SITE_WHOLE_WORDS, normalized)
+
+    suppress_weak = bool(
+        _SITE_NEGATION.search(normalized) or _SITE_AS_EXTERNAL_OBJECT.search(normalized)
     )
+    if suppress_weak:
+        weak = 0
+
+    site_score = strong + weak + whole
     return bot_score, site_score
 
 
 def infer_project_type(text: str) -> ProjectType:
     bot_score, site_score = detect_project_type_signals(text)
+    wants_site_product = bool(_SITE_PRODUCT_INTENT.search(text))
+    site_negated = bool(_SITE_NEGATION.search(text))
+
     if bot_score > 0 and site_score > 0:
-        return ProjectType.mixed
+        # Dual-product only when the user clearly asked to *host* a site, not merely mentioned
+        # "сайт"/"дашборд" in a bot context (parsing, menus, admin screens inside Telegram).
+        if site_negated:
+            return ProjectType.telegram_bot
+        strong = _count_word_matches(_SITE_STRONG_TERMS, text.lower())
+        if strong > 0 or wants_site_product:
+            return ProjectType.mixed
+        return ProjectType.telegram_bot
+
     if bot_score > site_score:
         return ProjectType.telegram_bot
-    if site_score > 0:
+    if site_score > 0 or wants_site_product:
         return ProjectType.website
     # No signal yet - keep the historical create default so empty names still get a type.
     return ProjectType.website
@@ -90,7 +158,8 @@ def can_update_project_type(project: Project) -> bool:
 
 def update_project_type_from_prompt(project: Project, prompt: str) -> bool:
     bot_score, site_score = detect_project_type_signals(prompt)
-    if bot_score == 0 and site_score == 0:
+    wants_site_product = bool(_SITE_PRODUCT_INTENT.search(prompt))
+    if bot_score == 0 and site_score == 0 and not wants_site_product:
         # A follow-up without type signals must not overwrite a correct bot/site classification
         # with the ambiguous website default.
         return False

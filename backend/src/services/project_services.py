@@ -4,9 +4,10 @@ The agent can request any Docker image via the request_service tool (src/service
 - kind is a free-form label (e.g. "rabbitmq", "queue", "search"), and image/env/data_path can be
 given explicitly for anything not in the small convenience-preset list below. Regardless of
 image, every sidecar stays hardened the same way: no published host ports (reachable only from
-the project's own app container over a private per-project network), project-scoped named
-volumes (never a host bind-mount), and the same resource caps as any other sidecar - so an
-unusual image can misbehave within its own box, but can't reach the host filesystem, the public
+the project's own app container over a private per-project network), project-scoped persistent
+data under `settings.deployment_volumes_dir` (host bind mounts that survive image rebuild and
+container recreate), and the same resource caps as any other sidecar - so an unusual image can
+misbehave within its own box, but can't reach the host filesystem outside its volume, the public
 internet-facing side, or exceed its resource budget.
 
 Bookkeeping (this module's DB-only functions) happens in the API request path; the functions
@@ -20,7 +21,11 @@ from __future__ import annotations
 import json
 import re
 import secrets as secrets_module
+import shutil
+import time
+from pathlib import Path
 from typing import Any
+from urllib.parse import quote_plus
 
 from sqlalchemy.orm import Session
 
@@ -94,7 +99,44 @@ def container_name_for(project_id: str, kind: str) -> str:
 
 
 def volume_name_for(project_id: str, kind: str) -> str:
+    """Stable logical volume id stored on ProjectService (legacy named-volume label key)."""
     return f"{container_name_for(project_id, kind)}-data"
+
+
+def host_volume_path(project_id: str, kind: str) -> str:
+    """Absolute host path for a service's durable data directory.
+
+    Layout: `{deployment_volumes_dir}/{project_id}/{kind}` — same path on every redeploy so
+    Postgres/Redis keep their files across image rebuilds and container recreate.
+    """
+    base = settings.deployment_volumes_dir.rstrip("/\\")
+    return str(Path(base) / str(project_id) / normalize_service_kind(kind))
+
+
+def project_volumes_root(project_id: str) -> str:
+    base = settings.deployment_volumes_dir.rstrip("/\\")
+    return str(Path(base) / str(project_id))
+
+
+def _ensure_host_volume_dir(host_path: str) -> None:
+    """Create the bind-mount directory when the worker can see the host path.
+
+    In production the worker bind-mounts `deployment_volumes_dir` from the host at the same
+    path so mkdir works. If the path is not visible (API-only process, odd test env), Docker
+    Engine still creates the host directory when the container starts on Linux.
+    """
+    try:
+        Path(host_path).mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+
+
+def _volume_binds(row: ProjectService) -> dict[str, dict[str, str]] | None:
+    if not row.data_path:
+        return None
+    host_path = host_volume_path(str(row.project_id), row.kind)
+    _ensure_host_volume_dir(host_path)
+    return {host_path: {"bind": row.data_path, "mode": "rw"}}
 
 
 def _service_labels(project_id: str) -> dict[str, str]:
@@ -161,24 +203,29 @@ def _preset_command(kind: str, creds: dict[str, str]) -> list[str] | None:
 
 def _preset_connection_env(kind: str, creds: dict[str, str], host: str) -> dict[str, str]:
     if kind == "postgres":
-        return {
-            "DATABASE_URL": f"postgresql://{creds['user']}:{creds['password']}@{host}:5432/"
-            f"{creds['database']}"
-        }
+        user = quote_plus(creds["user"])
+        password = quote_plus(creds["password"])
+        database = quote_plus(creds["database"])
+        return {"DATABASE_URL": f"postgresql://{user}:{password}@{host}:5432/{database}"}
     if kind == "redis":
-        return {"REDIS_URL": f"redis://:{creds['password']}@{host}:6379/0"}
+        password = quote_plus(creds["password"])
+        return {"REDIS_URL": f"redis://:{password}@{host}:6379/0"}
     if kind == "mysql":
-        return {
-            "DATABASE_URL": f"mysql://{creds['user']}:{creds['password']}@{host}:3306/"
-            f"{creds['database']}"
-        }
+        user = quote_plus(creds["user"])
+        password = quote_plus(creds["password"])
+        database = quote_plus(creds["database"])
+        return {"DATABASE_URL": f"mysql://{user}:{password}@{host}:3306/{database}"}
     if kind == "mongo":
+        user = quote_plus(creds["user"])
+        password = quote_plus(creds["password"])
+        database = quote_plus(creds["database"])
         return {
-            "MONGO_URL": f"mongodb://{creds['user']}:{creds['password']}@{host}:27017/"
-            f"{creds['database']}?authSource=admin"
+            "MONGO_URL": f"mongodb://{user}:{password}@{host}:27017/{database}?authSource=admin"
         }
     if kind == "rabbitmq":
-        return {"RABBITMQ_URL": f"amqp://{creds['user']}:{creds['password']}@{host}:5672/"}
+        user = quote_plus(creds["user"])
+        password = quote_plus(creds["password"])
+        return {"RABBITMQ_URL": f"amqp://{user}:{password}@{host}:5672/"}
     return {}
 
 
@@ -273,6 +320,27 @@ def build_connection_env(db: Session, project: Project) -> dict[str, str]:
     return env
 
 
+def _wait_postgres_ready(client: Any, container_name: str, *, timeout: float = 45.0) -> None:
+    """Best-effort wait until Postgres accepts connections inside its container."""
+    try:
+        container = client.containers.get(container_name)
+    except Exception:  # noqa: BLE001
+        return
+    if not hasattr(container, "exec_run"):
+        # Unit-test fakes often omit exec_run; skip rather than spinning for `timeout`.
+        return
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            result = container.exec_run(["pg_isready", "-U", "app", "-d", "app"])
+            exit_code = result[0] if isinstance(result, tuple) else getattr(result, "exit_code", 1)
+            if exit_code == 0:
+                return
+        except Exception:  # noqa: BLE001 - readiness is best-effort; deploy may still retry
+            pass
+        time.sleep(0.5)
+
+
 def ensure_service_containers(client: Any, project_id: str, services: list[ProjectService]) -> None:
     """Idempotent: ensures the private network + each sidecar container exist and are running.
 
@@ -292,46 +360,42 @@ def ensure_service_containers(client: Any, project_id: str, services: list[Proje
             existing = client.containers.get(row.container_name)
             if existing.status != "running":
                 existing.start()
-            continue
-        except NotFound:
-            pass
-
-        if row.volume_name and row.data_path:
+            # Ensure long-lived sidecars stay on the private project network (idempotent reconnect).
             try:
-                client.volumes.get(row.volume_name)
-            except NotFound:
-                client.volumes.create(name=row.volume_name, labels=_service_labels(project_id))
+                client.networks.get(net_name).connect(getattr(existing, "id", row.container_name))
+            except Exception:  # noqa: BLE001 - already connected is fine
+                pass
+        except NotFound:
+            stored = _stored(row)
+            credentials = stored.get("credentials") or {}
+            environment = dict(_preset_container_env(row.kind, credentials)) if credentials else {}
+            environment.update(stored.get("env") or {})
+            command = _preset_command(row.kind, credentials) if credentials else None
 
-        stored = _stored(row)
-        credentials = stored.get("credentials") or {}
-        environment = dict(_preset_container_env(row.kind, credentials)) if credentials else {}
-        environment.update(stored.get("env") or {})
-        command = _preset_command(row.kind, credentials) if credentials else None
+            client.containers.run(
+                row.image,
+                detach=True,
+                name=row.container_name,
+                command=command,
+                environment=environment or None,
+                volumes=_volume_binds(row),
+                network=net_name,
+                labels=_service_labels(project_id),
+                mem_limit=settings.deployment_service_memory_limit,
+                nano_cpus=int(float(settings.deployment_service_cpu_limit) * 1_000_000_000),
+            )
 
-        volumes = (
-            {row.volume_name: {"bind": row.data_path, "mode": "rw"}}
-            if row.volume_name and row.data_path
-            else None
-        )
-
-        client.containers.run(
-            row.image,
-            detach=True,
-            name=row.container_name,
-            command=command,
-            environment=environment or None,
-            volumes=volumes,
-            network=net_name,
-            labels=_service_labels(project_id),
-            mem_limit=settings.deployment_service_memory_limit,
-            nano_cpus=int(float(settings.deployment_service_cpu_limit) * 1_000_000_000),
-        )
+        if row.kind == "postgres":
+            _wait_postgres_ready(client, row.container_name)
 
 
 def teardown_service_containers(client: Any, project_id: str, *, remove_volumes: bool) -> None:
-    """Stops+removes sidecar containers for this project. If remove_volumes, also removes their
-    named volumes and the private network itself - called on project deletion, not on a plain
-    stop (which should leave data intact for a later restart)."""
+    """Stops+removes sidecar containers for this project.
+
+    If remove_volumes, also deletes host bind-mount data under deployment_volumes_dir,
+    any legacy Docker named volumes labeled for this project, and the private network —
+    called on project deletion/cleanup, not on a plain stop or redeploy (which must keep data).
+    """
     from docker.errors import NotFound
 
     net_name = network_name(project_id)
@@ -351,6 +415,10 @@ def teardown_service_containers(client: Any, project_id: str, *, remove_volumes:
     if not remove_volumes:
         return
 
+    # Durable host bind mounts (current design).
+    shutil.rmtree(project_volumes_root(project_id), ignore_errors=True)
+
+    # Legacy Docker named volumes from earlier releases — remove if still present.
     for volume in client.volumes.list(filters=role_filter):
         try:
             volume.remove(force=True)

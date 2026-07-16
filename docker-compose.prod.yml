@@ -13,6 +13,7 @@ x-common-env: &common-env
   ALLOWED_HOSTS: ${APP_DOMAIN},www.${APP_DOMAIN},api.${APP_DOMAIN},backend
   DEPLOYMENT_PUBLIC_NETWORK: airuntime_public
   DEPLOYMENT_EXPOSE_HOST_PORTS: "false"
+  DEPLOYMENT_VOLUMES_DIR: ${DEPLOYMENT_VOLUMES_DIR:-/var/lib/airuntime/volumes}
   CF_ZONE_ID: ${CF_ZONE_ID:-}
   CF_API_TOKEN: ${CF_API_TOKEN:-}
   SERVER_IP: ${SERVER_IP:-}
@@ -204,6 +205,9 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - airruntime_projects_data:/data/airruntime-projects
+      # Same path on host and in worker so bind-mount dirs for project Postgres/etc. persist
+      # across rebuilds and can be created via mkdir from the worker process.
+      - ${DEPLOYMENT_VOLUMES_DIR:-/var/lib/airuntime/volumes}:${DEPLOYMENT_VOLUMES_DIR:-/var/lib/airuntime/volumes}
     depends_on:
       postgres:
         condition: service_healthy

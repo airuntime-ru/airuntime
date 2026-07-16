@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     deployment_default_image: str = "nginx:alpine"
     # Persist generated project sources so they survive container restarts.
     generated_projects_dir: str = "/data/airruntime-projects"
+    # Host directory for project sidecar data (Postgres/Redis/…). Bind-mounted into
+    # service containers so rebuild/redeploy keeps data. Env: DEPLOYMENT_VOLUMES_DIR
+    # (also accepts AIRUNTIME_VOLUMES_DIR). Default is durable on the server, not /tmp.
+    deployment_volumes_dir: str = "/var/lib/airuntime/volumes"
     auto_deploy_websites: bool = True
     max_running_projects_per_user: int = 3
     deployment_public_network: str | None = None
@@ -120,7 +124,11 @@ class Settings(BaseSettings):
         if not self.app_encryption_key:
             raise RuntimeError("APP_ENCRYPTION_KEY must be set for production")
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
 
 settings = Settings()

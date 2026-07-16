@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -14,8 +15,10 @@ from src.services.project_services import (
     build_connection_env,
     ensure_service_containers,
     ensure_service_request,
+    host_volume_path,
     is_likely_service_credential_key,
     network_name,
+    project_volumes_root,
     teardown_service_containers,
 )
 from src.services.secrets import encrypt_secret
@@ -36,6 +39,7 @@ def _project(db, client, *, email: str, project_type: str = "website") -> Projec
 class _FakeContainer:
     def __init__(self, name: str) -> None:
         self.name = name
+        self.id = name
         self.status = "running"
         self.started = False
         self.stopped = False
@@ -104,6 +108,10 @@ class _FakeVolumes:
 class _FakeNetwork:
     def __init__(self, name: str) -> None:
         self.name = name
+        self.connected: list[str] = []
+
+    def connect(self, container_id: str) -> None:
+        self.connected.append(container_id)
 
     def remove(self) -> None:
         pass
@@ -219,6 +227,7 @@ def test_build_connection_env_postgres_and_redis(client, db):
 
 def _fake_row(
     *,
+    project_id: str,
     kind: str,
     container_name: str,
     volume_name: str,
@@ -227,7 +236,7 @@ def _fake_row(
     credentials: dict,
 ) -> ProjectService:
     return ProjectService(
-        project_id=uuid4(),
+        project_id=project_id,
         kind=kind,
         image=image,
         data_path=data_path,
@@ -241,6 +250,7 @@ def test_ensure_service_containers_creates_network_and_container():
     client_fake = _FakeDockerClient()
     project_id = "44444444-4444-4444-8444-444444444444"
     row = _fake_row(
+        project_id=project_id,
         kind="postgres",
         container_name="airuntime-44444444-postgres",
         volume_name="airuntime-44444444-postgres-data",
@@ -257,12 +267,19 @@ def test_ensure_service_containers_creates_network_and_container():
     assert run_call["name"] == "airuntime-44444444-postgres"
     assert "ports" not in run_call
     assert run_call["network"] == network_name(project_id)
+    assert run_call["volumes"] == {
+        host_volume_path(project_id, "postgres"): {
+            "bind": "/var/lib/postgresql/data",
+            "mode": "rw",
+        }
+    }
 
 
 def test_ensure_service_containers_supports_arbitrary_image():
     client_fake = _FakeDockerClient()
     project_id = "77777777-7777-4777-8777-777777777777"
     row = _fake_row(
+        project_id=project_id,
         kind="search",
         container_name="airuntime-77777777-search",
         volume_name="airuntime-77777777-search-data",
@@ -275,13 +292,16 @@ def test_ensure_service_containers_supports_arbitrary_image():
 
     run_call = client_fake.containers.run_calls[0]
     assert run_call["image"] == "elasticsearch:8.15.0"
-    assert run_call["volumes"] == {row.volume_name: {"bind": row.data_path, "mode": "rw"}}
+    assert run_call["volumes"] == {
+        host_volume_path(project_id, "search"): {"bind": row.data_path, "mode": "rw"}
+    }
 
 
 def test_ensure_service_containers_is_idempotent():
     client_fake = _FakeDockerClient()
     project_id = "55555555-5555-4555-8555-555555555555"
     row = _fake_row(
+        project_id=project_id,
         kind="redis",
         container_name="airuntime-55555555-redis",
         volume_name="airuntime-55555555-redis-data",
@@ -296,10 +316,12 @@ def test_ensure_service_containers_is_idempotent():
     assert len(client_fake.containers.run_calls) == 1
 
 
-def test_teardown_service_containers_removes_volumes_only_when_asked():
+def test_teardown_service_containers_removes_volumes_only_when_asked(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "deployment_volumes_dir", str(tmp_path))
     client_fake = _FakeDockerClient()
     project_id = "66666666-6666-4666-8666-666666666666"
     row = _fake_row(
+        project_id=project_id,
         kind="postgres",
         container_name="airuntime-66666666-postgres",
         volume_name="airuntime-66666666-postgres-data",
@@ -308,11 +330,13 @@ def test_teardown_service_containers_removes_volumes_only_when_asked():
         credentials={"user": "app", "password": "secret", "database": "app"},
     )
     ensure_service_containers(client_fake, project_id, [row])
+    host_dir = host_volume_path(project_id, "postgres")
+    assert Path(host_dir).is_dir()
+    (Path(host_dir) / "marker").write_text("keep", encoding="utf-8")
 
     teardown_service_containers(client_fake, project_id, remove_volumes=False)
     assert client_fake.containers.list()[0].removed is True
-    assert len(client_fake.volumes.list()) == 1
-    assert client_fake.volumes.get(row.volume_name).removed is False
+    assert Path(host_dir).joinpath("marker").exists()
 
     teardown_service_containers(client_fake, project_id, remove_volumes=True)
-    assert client_fake.volumes.get(row.volume_name).removed is True
+    assert not Path(project_volumes_root(project_id)).exists()

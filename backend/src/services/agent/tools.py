@@ -210,9 +210,10 @@ TOOL_DEFS: list[dict[str, Any]] = [
                     "type": "string",
                     "description": (
                         "Absolute path inside the service's container where it stores data, "
-                        "e.g. '/var/lib/rabbitmq' - the platform mounts a persistent volume "
-                        "there so data survives restarts. Omit for services that don't need "
-                        "persistence, or for a preset kind (already knows its own path)."
+                        "e.g. '/var/lib/rabbitmq' - the platform bind-mounts a persistent host "
+                        "directory under AIRUNTIME_VOLUMES_DIR so data survives rebuilds. "
+                        "Omit for services that don't need persistence, or for a preset kind "
+                        "(already knows its own path)."
                     ),
                 },
             },

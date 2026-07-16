@@ -17,6 +17,10 @@ class DeployRequest:
     service_network: str | None = None
 
 
+def app_container_name(project_id: str) -> str:
+    return f"airuntime-{project_id[:8]}"
+
+
 class DockerDeploymentAdapter:
     """Deploy per-project containers via the Docker Engine API."""
 
@@ -72,9 +76,25 @@ class DockerDeploymentAdapter:
         second network requires this explicit post-creation connect call."""
         self._client.networks.get(network_name).connect(container_id)
 
+    def _iter_app_containers(self, project_id: str):
+        """Yield only the project app container.
+
+        Docker's `name=` filter is a substring match, so `airuntime-{id8}` also matches
+        sidecars like `airuntime-{id8}-postgres`. Exact name (+ role label) keeps stop/redeploy
+        from deleting Postgres/Redis right after they were started.
+        """
+        exact = app_container_name(project_id)
+        for existing in self._client.containers.list(all=True, filters={"name": exact}):
+            name = (existing.name or "").lstrip("/")
+            if name != exact:
+                continue
+            labels = getattr(existing, "labels", None) or {}
+            if labels.get("airuntime.role") == "service":
+                continue
+            yield existing
+
     def stop_project(self, project_id: str) -> None:
-        container_name = f"airuntime-{project_id[:8]}"
-        for existing in self._client.containers.list(all=True, filters={"name": container_name}):
+        for existing in self._iter_app_containers(project_id):
             try:
                 if existing.status == "running":
                     existing.stop(timeout=10)
@@ -86,13 +106,23 @@ class DockerDeploymentAdapter:
                 pass
 
     def deploy(self, request: DeployRequest) -> dict:
-        container_name = f"airuntime-{request.project_id[:8]}"
+        container_name = app_container_name(request.project_id)
         host_port = self._allocate_port(request.project_id)
         deploy_url = settings.build_project_url(request.subdomain)
         service_name = re.sub(r"[^a-z0-9-]", "-", container_name.lower()).strip("-")
+        public_network = (
+            settings.deployment_public_network
+            if request.expose_http and settings.deployment_public_network
+            else None
+        )
 
-        for existing in self._client.containers.list(all=True, filters={"name": container_name}):
+        for existing in self._iter_app_containers(request.project_id):
             existing.remove(force=True)
+
+        # Prefer the private service network as the primary network when sidecars exist, so
+        # DATABASE_URL hostnames resolve immediately at process start. Traefik/public is
+        # attached second for HTTP sites (dual-homed).
+        primary_network = request.service_network or public_network
 
         try:
             ports = (
@@ -104,12 +134,12 @@ class DockerDeploymentAdapter:
                 "airuntime.project_id": request.project_id,
                 "airuntime.managed": "true",
             }
-            if request.expose_http and settings.deployment_public_network:
+            if public_network:
                 host = f"{request.subdomain}.{settings.resolved_app_domain}"
                 labels.update(
                     {
                         "traefik.enable": "true",
-                        "traefik.docker.network": settings.deployment_public_network,
+                        "traefik.docker.network": public_network,
                         f"traefik.http.routers.{service_name}.rule": f"Host(`{host}`)",
                         f"traefik.http.routers.{service_name}.entrypoints": "websecure",
                         f"traefik.http.routers.{service_name}.tls.certresolver": "letsencrypt",
@@ -126,16 +156,15 @@ class DockerDeploymentAdapter:
                 environment=request.environment or None,
                 mem_limit=settings.deployment_memory_limit,
                 nano_cpus=int(float(settings.deployment_cpu_limit) * 1_000_000_000),
-                network=settings.deployment_public_network
-                if request.expose_http and settings.deployment_public_network
-                else None,
+                network=primary_network,
             )
         except DockerException as exc:
             raise RuntimeError(str(exc)) from exc
 
-        if request.service_network:
+        # Dual-home HTTP apps: already on private (DNS to Postgres); attach Traefik/public second.
+        if request.service_network and public_network and request.service_network != public_network:
             try:
-                self.attach_to_network(container.id, request.service_network)
+                self.attach_to_network(container.id, public_network)
             except DockerException as exc:
                 container.reload()
                 if container.status != "running":

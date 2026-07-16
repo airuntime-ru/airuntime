@@ -44,6 +44,26 @@ _TELEGRAM_RULES = (
     "модули не попадут в образ."
 )
 
+# Scope lines describe the classified project kind. They must not ban capabilities: if the
+# user later asks for a site in a bot project (or a bot in a site project), the agent may add
+# it. Wrong types are fixed upstream in project_intent classification.
+_TELEGRAM_SCOPE = (
+    "Этот проект сейчас классифицирован как Telegram-бот. Реализуй то, что просит "
+    "пользователь. Упоминания «сайт»/URL часто значат внешний ресурс для парсинга или API, "
+    "а не отдельный hosted landing - но если пользователь явно просит сайт/лендинг в этом "
+    "же проекте, сделай и его."
+)
+
+_MIXED_SCOPE = (
+    "Этот проект — сайт и Telegram-бота в одном проекте. Если просят и сайт, и бота - "
+    "делай оба здесь. Отдельный проект предлагай только если пользователь сам хочет разделить."
+)
+
+_WEBSITE_SCOPE = (
+    "Этот проект — сайт. Если позже попросят и бота в том же проекте - делай оба здесь. "
+    "Отдельный проект предлагай только если пользователь сам хочет разделить."
+)
+
 _DEPENDENCY_RULES = (
     "Зависимости (requirements.txt / package.json и т.п.): по умолчанию указывай ТОЛЬКО имя "
     "пакета БЕЗ ==версии (например `psycopg2-binary`, `aiogram`, `apscheduler`) - pip сам "
@@ -80,6 +100,7 @@ _QUALITY_RULES = (
 def build_system_prompt(project: Project) -> str:
     if project.type == "mixed":
         kind = "сайт и Telegram-бота в одном проекте"
+        scope = _MIXED_SCOPE
         rules = (
             f"{_WEBSITE_RULES}\n- {_TELEGRAM_RULES}\n- Проект деплоится как один контейнер: "
             "сайт в public/, бот стартует из app.py, Dockerfile запускает оба процесса "
@@ -88,9 +109,11 @@ def build_system_prompt(project: Project) -> str:
         )
     elif project.type == "telegram_bot":
         kind = "Telegram-бота"
+        scope = _TELEGRAM_SCOPE
         rules = _TELEGRAM_RULES
     else:
         kind = "сайт"
+        scope = _WEBSITE_SCOPE
         rules = _WEBSITE_RULES
 
     return (
@@ -131,8 +154,7 @@ def build_system_prompt(project: Project) -> str:
         "деплой-контракт, а НЕ «положи всё в app.py» и не повод урезать стек/scope. "
         "Перед финальным резюме для нетривиального бота убедись, что логика разнесена по "
         "модулям, а app.py только стартует приложение.\n"
-        f"- Этот проект — {kind}. Если просят и сайт, и бота - делай оба здесь. "
-        "Отдельный проект предлагай только если пользователь сам хочет разделить.\n"
+        f"- {scope}\n"
         f"- {rules}\n"
         f"- {_DEPENDENCY_RULES}\n"
         f"- {_QUALITY_RULES}\n"

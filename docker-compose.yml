@@ -106,10 +106,12 @@ services:
       S3_ACCESS_KEY: airuntime
       S3_SECRET_KEY: airuntime-secret
       S3_BUCKET: airuntime-files
+      DEPLOYMENT_VOLUMES_DIR: ${DEPLOYMENT_VOLUMES_DIR:-/var/lib/airuntime/volumes}
     command: ["sh", "/app/entrypoint.sh", "worker"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - airruntime_projects_data:/data/airruntime-projects
+      - ${DEPLOYMENT_VOLUMES_DIR:-/var/lib/airuntime/volumes}:${DEPLOYMENT_VOLUMES_DIR:-/var/lib/airuntime/volumes}
     depends_on:
       postgres:
         condition: service_healthy

@@ -655,6 +655,12 @@ async def _stream_events(
                 raise _StopDeployment
             yield _sse_status("verify", "Проверяю готовые файлы проекта")
             try:
+                # Demote false mixed/website → telegram_bot before requiring website files,
+                # so a bot-only workspace is not forced to invent public/index.html.
+                if reconcile_type_with_workspace(project, artifact_path):
+                    db.add(project)
+                    db.commit()
+                    db.refresh(project)
                 ensure_required_files(project, artifact_path)
             except ArtifactError as verify_exc:
                 if workspace_has_agent_code(artifact_path, project):

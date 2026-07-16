@@ -27,6 +27,39 @@ def test_infer_project_type_webhook_is_bot_not_mixed():
     assert infer_project_type("Сделай telegram bot на webhook") == "telegram_bot"
 
 
+def test_infer_bot_parsing_competitor_site_is_not_mixed():
+    assert (
+        infer_project_type("Сделай бота который парсит сайт конкурента") == "telegram_bot"
+    )
+
+
+def test_infer_bot_menu_pages_is_not_mixed():
+    assert (
+        infer_project_type("Telegram бот с несколькими страницами меню") == "telegram_bot"
+    )
+
+
+def test_infer_bot_booking_page_is_not_mixed():
+    assert infer_project_type("бот для записи на страницу услуг") == "telegram_bot"
+
+
+def test_infer_bot_with_explicit_no_site():
+    assert (
+        infer_project_type("Сделай бота для заявок. Не нужен сайт.") == "telegram_bot"
+    )
+
+
+def test_infer_bot_site_parsing_phrase():
+    assert infer_project_type("парсинг сайта в телеграм боте") == "telegram_bot"
+
+
+def test_infer_bot_with_dashboard_word_is_not_mixed():
+    assert (
+        infer_project_type("Сделай телеграм бота с дашбордом статистики внутри")
+        == "telegram_bot"
+    )
+
+
 def test_update_project_type_ignores_prompt_without_signals():
     project = SimpleNamespace(type="telegram_bot", deploy_subdomain="keep-me")
     assert update_project_type_from_prompt(project, "Ок, продолжай") is False

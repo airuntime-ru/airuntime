@@ -8,21 +8,36 @@ from src.services.deployment.docker_adapter import DeployRequest, DockerDeployme
 class _FakeContainer:
     id = "container-123"
     status = "running"
+    name = "airuntime-11111111"
+    labels: dict[str, str] = {}
+
+    def __init__(self, name: str = "airuntime-11111111", labels: dict[str, str] | None = None):
+        self.name = name
+        self.labels = labels or {}
+        self.removed = False
 
     def reload(self) -> None:
         pass
+
+    def remove(self, force: bool = False) -> None:
+        self.removed = True
+
+    def stop(self, timeout: int = 10) -> None:
+        self.status = "exited"
 
 
 class _FakeContainers:
     def __init__(self) -> None:
         self.run_kwargs = None
+        self._listed: list[_FakeContainer] = []
 
     def list(self, all: bool, filters: dict[str, str]) -> list:
-        return []
+        needle = (filters or {}).get("name", "")
+        return [c for c in self._listed if needle in (c.name or "")]
 
     def run(self, *args, **kwargs) -> _FakeContainer:
         self.run_kwargs = kwargs
-        return _FakeContainer()
+        return _FakeContainer(name=kwargs.get("name", "airuntime-11111111"))
 
 
 class _FakeNetwork:
@@ -103,13 +118,15 @@ def test_deploy_maps_host_port_without_public_network(monkeypatch):
     assert "traefik.enable" not in client.containers.run_kwargs["labels"]
 
 
-def test_deploy_attaches_second_network_when_service_network_given(monkeypatch):
+def test_deploy_attaches_public_network_when_service_network_given(monkeypatch):
+    """App starts on the private service network, then attaches Traefik/public second."""
     client = _FakeDockerClient()
     monkeypatch.setattr(docker_adapter.docker, "from_env", lambda: client)
     monkeypatch.setattr(settings, "deployment_public_network", "airuntime_public")
     monkeypatch.setattr(settings, "deployment_expose_host_ports", False)
 
     adapter = DockerDeploymentAdapter()
+    client.networks.create("airuntime_public")
     network_name = adapter.ensure_private_network("33333333-3333-4333-8333-333333333333")
 
     adapter.deploy(
@@ -121,4 +138,33 @@ def test_deploy_attaches_second_network_when_service_network_given(monkeypatch):
         )
     )
 
-    assert client.networks.get(network_name).connected_containers == ["container-123"]
+    assert client.containers.run_kwargs["network"] == network_name
+    assert client.networks.get("airuntime_public").connected_containers == ["container-123"]
+
+
+def test_deploy_cleanup_does_not_remove_postgres_sidecar(monkeypatch):
+    client = _FakeDockerClient()
+    monkeypatch.setattr(docker_adapter.docker, "from_env", lambda: client)
+    monkeypatch.setattr(settings, "deployment_public_network", "airuntime_public")
+    monkeypatch.setattr(settings, "deployment_expose_host_ports", False)
+
+    project_id = "44444444-4444-4444-8444-444444444444"
+    app = _FakeContainer(name="airuntime-44444444")
+    postgres = _FakeContainer(
+        name="airuntime-44444444-postgres",
+        labels={"airuntime.role": "service", "airuntime.project_id": project_id},
+    )
+    client.containers._listed = [app, postgres]
+
+    DockerDeploymentAdapter().deploy(
+        DeployRequest(
+            project_id=project_id,
+            image_ref="airuntime-generated-bot:latest",
+            subdomain="demo-44444444",
+            expose_http=False,
+            service_network="airuntime-svc-44444444",
+        )
+    )
+
+    assert app.removed is True
+    assert postgres.removed is False
