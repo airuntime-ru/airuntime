@@ -197,6 +197,9 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
       PROVIDER_NAME: ${PROVIDER_NAME:-openai}
+      # Worker now resolves the OpenAI key itself (it's the one that execs into the codex
+      # container - see codex_worker.py) instead of only the backend process needing it.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       S3_ENDPOINT_URL: http://minio:9000
       S3_PUBLIC_ENDPOINT_URL: https://s3.${APP_DOMAIN}
       S3_ACCESS_KEY: ${S3_ACCESS_KEY}
