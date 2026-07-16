@@ -125,6 +125,27 @@ async function parseErrorMessage(response: Response): Promise<string> {
   try {
     const payload = JSON.parse(text) as { detail?: unknown };
     if (typeof payload.detail === "string") return payload.detail;
+    // FastAPI / Pydantic validation errors: detail is an array of {loc, msg, type}.
+    if (Array.isArray(payload.detail)) {
+      const parts = payload.detail.map((item) => {
+        if (item && typeof item === "object" && "msg" in item) {
+          const row = item as { loc?: unknown[]; msg?: string; type?: string };
+          const field = Array.isArray(row.loc)
+            ? row.loc.filter((part) => part !== "body").join(".")
+            : "";
+          const msg = row.msg || "Ошибка валидации";
+          if (row.type === "string_too_long" || /at most \d+ characters/i.test(msg)) {
+            return (
+              "Сообщение слишком длинное. Вставьте более короткий фрагмент лога " +
+              "или нажмите «Проверить и исправить» на странице логов."
+            );
+          }
+          return field ? `${field}: ${msg}` : msg;
+        }
+        return String(item);
+      });
+      return parts.filter(Boolean).join("; ") || `Request failed: ${response.status}`;
+    }
   } catch {
     // Response body is not JSON.
   }
@@ -411,11 +432,13 @@ export async function checkDeployment(projectId: string): Promise<DeploymentChec
 export function streamRepairDeployment(
   projectId: string,
   chatId: string,
-  options: { signal?: AbortSignal } = {}
+  options: { signal?: AbortSignal; errorLog?: string | null } = {}
 ): Promise<Response> {
   return rawRequest(`/projects/${projectId}/chats/${chatId}/repair-stream`, {
     method: "POST",
-    body: JSON.stringify({}),
+    body: JSON.stringify({
+      error_log: options.errorLog?.trim() ? options.errorLog : undefined,
+    }),
     signal: options.signal,
   });
 }

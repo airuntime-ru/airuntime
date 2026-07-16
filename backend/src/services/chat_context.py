@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from src.db.models.message import Message
 from src.services.agent.events import TextDelta, TurnFinished
 from src.services.agent.providers import get_agent_provider
+from src.services.prompt_guard import clip_history_message
 
 VERBATIM_TURNS = 30
 SUMMARY_TTL_SECONDS = 6 * 60 * 60
@@ -57,7 +58,7 @@ def load_plain_history(db: Session, chat_id) -> list[dict[str, str]]:
     return [
         {
             "role": "assistant" if row.role == "assistant" else "user",
-            "content": row.content_markdown,
+            "content": clip_history_message(row.content_markdown),
         }
         for row in rows
         if row.content_markdown and row.content_markdown.strip()

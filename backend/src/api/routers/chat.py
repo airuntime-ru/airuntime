@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -17,6 +17,7 @@ from src.api.dto.chat import (
     MessageResponse,
     StreamRequest,
 )
+from src.api.dto.files import RepairStreamRequest
 from src.api.mappers.chat_files import chat_file_to_response
 from src.core.config import settings
 from src.db.models.chat import Chat
@@ -69,7 +70,7 @@ from src.services.project_subdomain import (
     assert_subdomain_available,
     normalize_deploy_subdomain,
 )
-from src.services.prompt_guard import sanitize_user_message
+from src.services.prompt_guard import prepare_agent_user_message, sanitize_user_message
 from src.services.provider.factory import resolve_provider_and_model
 from src.services.secrets import capture_telegram_tokens_from_text, ensure_secret_placeholder
 from src.services.system_settings import resolve_api_key_for_provider
@@ -586,10 +587,9 @@ async def _stream_events(
     user_agent_message = _compose_user_message(
         content=content, attachment_ids=attachment_ids, db=db
     )
-    try:
-        safe_message = sanitize_user_message(user_agent_message)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    # Content already passed sanitize_user_message (injection + hard size). For the agent,
+    # keep the useful tail of oversized log pastes instead of 400/422 rejecting the turn.
+    safe_message = prepare_agent_user_message(user_agent_message)
     image_attachments = extract_image_attachments(db, attachment_ids)
 
     provider_name, model = resolve_provider_and_model(
@@ -1087,6 +1087,7 @@ async def stream_reply_post(
 async def stream_repair_post(
     project_id: UUID,
     chat_id: UUID,
+    payload: RepairStreamRequest = Body(default_factory=RepairStreamRequest),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
@@ -1098,9 +1099,10 @@ async def stream_repair_post(
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="Insufficient credits"
         )
+    force_error = (payload.error_log or "").strip() or None
 
     async def event_source():
-        async for frame in iter_repair_sse(db, project, chat):
+        async for frame in iter_repair_sse(db, project, chat, force_error=force_error):
             yield frame
 
     return StreamingResponse(event_source(), media_type="text/event-stream")

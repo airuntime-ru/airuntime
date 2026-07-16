@@ -42,25 +42,22 @@ import {
   type MessageType,
   type ProvidersType,
 } from "@/lib/api";
+import {
+  abortChatStream,
+  clearChatStreamSession,
+  getChatStreamSnapshot,
+  peekPendingRepair,
+  setChatStreamAgentStatus,
+  setChatStreamMessages,
+  startChatTurn,
+  startRepairTurn,
+  subscribeChatStream,
+  takePendingRepair,
+  type AgentStatus,
+  type ChatMessage,
+  type ToolActivityItem,
+} from "@/lib/chat-stream-runtime";
 import { cn } from "@/lib/cn";
-
-type ChatMessage = {
-  role: "user" | "assistant";
-  content: string;
-  attachments?: ChatFileType[];
-};
-
-type AgentStatus = {
-  phase: string;
-  label: string;
-  state: "running" | "done" | "error" | "waiting";
-};
-
-type ToolActivityItem = {
-  id: number;
-  label: string;
-  state: "running" | "done" | "error";
-};
 
 type QueuedMessage = {
   id: string;
@@ -77,10 +74,6 @@ const PROVIDER_LABELS: Record<string, string> = {
   gemini: "Gemini",
   openrouter: "OpenRouter",
 };
-
-function agentStatusStorageKey(projectId: string, chatId: string) {
-  return `airuntime_agent_status_${projectId}_${chatId}`;
-}
 
 function readPinned(): string[] {
   if (typeof window === "undefined") return [];
@@ -104,29 +97,6 @@ function writeSelectedProvider(value: string) {
   if (typeof window === "undefined") return;
   if (value) localStorage.setItem(PROVIDER_KEY, value);
   else localStorage.removeItem(PROVIDER_KEY);
-}
-
-function readPersistedAgentStatus(projectId: string, chatId: string): AgentStatus | null {
-  if (typeof window === "undefined" || !projectId || !chatId) return null;
-  try {
-    const raw = sessionStorage.getItem(agentStatusStorageKey(projectId, chatId));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as AgentStatus;
-    if (!parsed?.phase || !parsed?.label || !parsed?.state) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function writePersistedAgentStatus(projectId: string, chatId: string, status: AgentStatus | null) {
-  if (typeof window === "undefined" || !projectId || !chatId) return;
-  const key = agentStatusStorageKey(projectId, chatId);
-  if (!status) {
-    sessionStorage.removeItem(key);
-    return;
-  }
-  sessionStorage.setItem(key, JSON.stringify(status));
 }
 
 function toolIcon(label: string) {
@@ -343,28 +313,42 @@ export default function ProjectChatPage() {
   const [providerMenuOpen, setProviderMenuOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const agentStatusRef = useRef<AgentStatus | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const toolActivityIdRef = useRef(0);
   const providerMenuRef = useRef<HTMLDivElement>(null);
   const repairStartedRef = useRef(false);
+  const messagesRef = useRef<ChatMessage[]>([]);
+
+  const syncFromRuntime = useCallback(() => {
+    if (!projectId || !chatId) return;
+    const snap = getChatStreamSnapshot(projectId, chatId);
+    setLoading(snap.loading);
+    setAgentStatus(snap.agentStatus);
+    setToolActivity(snap.toolActivity);
+    setChatError(snap.chatError);
+    if (snap.messages) {
+      messagesRef.current = snap.messages;
+      setMessages(snap.messages);
+    }
+  }, [projectId, chatId]);
 
   const updateAgentStatus = useCallback(
     (status: AgentStatus | null) => {
-      agentStatusRef.current = status;
-      setAgentStatus(status);
       if (projectId && chatId) {
-        // Keep sticky statuses (token needed / waiting / done) across leaving the chat page.
-        // Clear ephemeral "running" snapshots so a remount doesn't show a stale spinner.
-        if (!status || status.state === "running") {
-          writePersistedAgentStatus(projectId, chatId, null);
-        } else {
-          writePersistedAgentStatus(projectId, chatId, status);
-        }
+        setChatStreamAgentStatus(projectId, chatId, status);
       }
+      setAgentStatus(status);
     },
     [projectId, chatId]
   );
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    if (!projectId || !chatId) return;
+    syncFromRuntime();
+    return subscribeChatStream(projectId, chatId, syncFromRuntime);
+  }, [projectId, chatId, syncFromRuntime]);
 
   useEffect(() => {
     getProviders()
@@ -409,22 +393,33 @@ export default function ProjectChatPage() {
   useEffect(() => {
     const loadMessages = async () => {
       if (!projectId || !chatId) return;
+      const snap = getChatStreamSnapshot(projectId, chatId);
+      // Keep live stream messages when returning from another project tab.
+      if (snap.loading && snap.messages) {
+        messagesRef.current = snap.messages;
+        setMessages(snap.messages);
+        setAgentStatus(snap.agentStatus);
+        setToolActivity(snap.toolActivity);
+        setLoading(true);
+        return;
+      }
       const rows = await listMessages(projectId, chatId);
-      // Don't clobber an in-flight repair/chat stream with a stale fetch.
-      if (abortControllerRef.current) return;
-      setMessages(
-        rows.map((row: MessageType) => ({
-          role: row.role === "assistant" ? "assistant" : "user",
-          content: row.content_markdown,
-          attachments: row.attachments,
-        }))
-      );
+      if (getChatStreamSnapshot(projectId, chatId).loading) return;
+      const mapped = rows.map((row: MessageType) => ({
+        role: (row.role === "assistant" ? "assistant" : "user") as "user" | "assistant",
+        content: row.content_markdown,
+        attachments: row.attachments,
+      }));
+      messagesRef.current = mapped;
+      setMessages(mapped);
       setPendingFiles([]);
-      const restored = readPersistedAgentStatus(projectId, chatId);
-      updateAgentStatus(restored);
+      setChatStreamMessages(projectId, chatId, mapped);
+      if (!snap.loading) {
+        setAgentStatus(snap.agentStatus);
+      }
     };
     void loadMessages();
-  }, [projectId, chatId, updateAgentStatus]);
+  }, [projectId, chatId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: loading ? "smooth" : "auto" });
@@ -444,11 +439,12 @@ export default function ProjectChatPage() {
 
   const onNewChat = async () => {
     if (!projectId) return;
-    if (chatId) writePersistedAgentStatus(projectId, chatId, null);
+    if (chatId) clearChatStreamSession(projectId, chatId);
     const chat = await createChat(projectId);
     setChats((prev) => [chat, ...prev]);
     setChatId(chat.id);
     setMessages([]);
+    messagesRef.current = [];
     setPendingFiles([]);
     updateAgentStatus(null);
     setMobilePanel("chat");
@@ -492,258 +488,67 @@ export default function ProjectChatPage() {
   };
 
   const onStop = () => {
-    abortControllerRef.current?.abort();
+    if (projectId && chatId) abortChatStream(projectId, chatId);
   };
 
   const runTurn = async (userMessage: string, attachments: ChatFileType[]) => {
     if ((!userMessage.trim() && attachments.length === 0) || !projectId || !chatId) return;
-    const attachmentIds = attachments.map((file) => file.id);
-    setLoading(true);
-    setChatError("");
-    setToolActivity([]);
-    updateAgentStatus({ phase: "thinking", label: "AIRuntime анализирует задачу", state: "running" });
-    setMessages((prev) => [
-      ...prev,
-      {
-        role: "user",
-        content: (userMessage || "Прикреплены файлы").replace(
-          /\b\d{6,}:[A-Za-z0-9_-]{20,}\b/g,
-          "[TELEGRAM_BOT_TOKEN]"
+    const displayUserContent = (userMessage || "Прикреплены файлы").replace(
+      /\b\d{6,}:[A-Za-z0-9_-]{20,}\b/g,
+      "[TELEGRAM_BOT_TOKEN]"
+    );
+    const seed = messagesRef.current;
+    await startChatTurn({
+      projectId,
+      chatId,
+      userMessage,
+      attachments,
+      displayUserContent,
+      seedMessages: seed,
+      createMessage: () => createMessage(projectId, chatId, userMessage, attachments.map((f) => f.id)),
+      streamRequest: (signal) =>
+        streamChat(
+          projectId,
+          chatId,
+          userMessage,
+          attachments.map((f) => f.id),
+          { provider: selectedProvider || undefined, signal }
         ),
-        attachments,
-      },
-      { role: "assistant", content: "" },
-    ]);
-
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-
-    try {
-      await createMessage(projectId, chatId, userMessage, attachmentIds);
-      const response = await streamChat(projectId, chatId, userMessage, attachmentIds, {
-        provider: selectedProvider || undefined,
-        signal: controller.signal,
-      });
-      if (!response.ok) {
-        const raw = await response.text();
-        let detail = raw;
-        try {
-          const parsed = JSON.parse(raw) as { detail?: string };
-          if (parsed.detail) detail = parsed.detail;
-        } catch {
-          // raw wasn't JSON - use it as-is
-        }
-        throw new Error(detail || `Не удалось получить ответ (код ${response.status})`);
-      }
-      if (!response.body) {
-        throw new Error("Пустой ответ сервера");
-      }
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let partial = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        partial += decoder.decode(value, { stream: true });
-        const lines = partial.split("\n\n");
-        partial = lines.pop() ?? "";
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const payload = line.replace("data: ", "");
-          if (payload === "[DONE]") {
-            const latestStatus = agentStatusRef.current;
-            // Keep terminal statuses from the server (live / failed / waiting for input).
-            if (latestStatus && latestStatus.state !== "running") {
-              continue;
-            }
-            // Deploy still in progress at stream end - do not claim success.
-            if (latestStatus?.phase === "deploy") {
-              continue;
-            }
-            updateAgentStatus({
-              phase: "done",
-              label: "Изменения сохранены",
-              state: "done",
-            });
-            continue;
-          }
-          const parsed = JSON.parse(payload) as { chunk?: string; status?: AgentStatus };
-          if (parsed.status) {
-            updateAgentStatus(parsed.status);
-            if (parsed.status.phase === "tool") {
-              toolActivityIdRef.current += 1;
-              const item: ToolActivityItem = {
-                id: toolActivityIdRef.current,
-                label: parsed.status.label,
-                state: parsed.status.state === "error" ? "error" : parsed.status.state === "done" ? "done" : "running",
-              };
-              setToolActivity((prev) => [...prev.slice(-49), item]);
-            }
-          }
-          if (parsed.chunk) {
-            setMessages((prev) => {
-              const lastIndex = prev.length - 1;
-              const last = prev[lastIndex];
-              if (last?.role !== "assistant") return prev;
-              const copy = [...prev];
-              copy[lastIndex] = { ...last, content: last.content + parsed.chunk };
-              return copy;
-            });
-          }
-        }
-      }
-    } catch (err) {
-      const aborted = err instanceof DOMException && err.name === "AbortError";
-      if (aborted) {
-        updateAgentStatus({ phase: "done", label: "Остановлено пользователем", state: "done" });
-        setMessages((prev) => {
-          const lastIndex = prev.length - 1;
-          const last = prev[lastIndex];
-          if (last?.role !== "assistant" || last.content) return prev;
-          return prev.slice(0, lastIndex);
-        });
-      } else {
-        const message = err instanceof Error ? err.message : "Не удалось получить ответ агента";
-        setChatError(message);
-        updateAgentStatus({ phase: "error", label: "Не удалось получить ответ агента", state: "error" });
-        setMessages((prev) => {
-          const lastIndex = prev.length - 1;
-          const last = prev[lastIndex];
-          if (last?.role !== "assistant") return prev;
-          const copy = [...prev];
-          copy[lastIndex] = { ...last, content: message };
-          return copy;
-        });
-      }
-    } finally {
-      abortControllerRef.current = null;
-      setLoading(false);
-    }
+    });
   };
 
-  const runRepairTurn = async () => {
+  const runRepairTurn = async (errorLog?: string | null) => {
     if (!projectId || !chatId || loading) return;
-    setLoading(true);
-    setChatError("");
-    setToolActivity([]);
     setMobilePanel("chat");
-    updateAgentStatus({
-      phase: "thinking",
-      label: "Проверяю последний деплой",
-      state: "running",
+    const seed = messagesRef.current;
+    const note = errorLog?.trim()
+      ? "Проверить и исправить по логам с страницы логов"
+      : "Проверить и исправить последний деплой";
+    await startRepairTurn({
+      projectId,
+      chatId,
+      userNote: note,
+      seedMessages: seed,
+      streamRequest: (signal) =>
+        streamRepairDeployment(projectId, chatId, {
+          signal,
+          errorLog: errorLog?.trim() || null,
+        }),
     });
-    setMessages((prev) => [
-      ...prev,
-      { role: "user", content: "Проверить и исправить последний деплой" },
-      { role: "assistant", content: "" },
-    ]);
-
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-
-    try {
-      const response = await streamRepairDeployment(projectId, chatId, {
-        signal: controller.signal,
-      });
-      if (!response.ok) {
-        const raw = await response.text();
-        let detail = raw;
-        try {
-          const parsed = JSON.parse(raw) as { detail?: string };
-          if (parsed.detail) detail = parsed.detail;
-        } catch {
-          // keep raw
-        }
-        throw new Error(detail || `Не удалось запустить проверку (код ${response.status})`);
-      }
-      if (!response.body) throw new Error("Пустой ответ сервера");
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let partial = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        partial += decoder.decode(value, { stream: true });
-        const lines = partial.split("\n\n");
-        partial = lines.pop() ?? "";
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const payload = line.replace("data: ", "");
-          if (payload === "[DONE]") {
-            const latestStatus = agentStatusRef.current;
-            if (latestStatus && latestStatus.state !== "running") continue;
-            if (latestStatus?.phase === "deploy") continue;
-            updateAgentStatus({
-              phase: "done",
-              label: "Проверка завершена",
-              state: "done",
-            });
-            continue;
-          }
-          const parsed = JSON.parse(payload) as { chunk?: string; status?: AgentStatus };
-          if (parsed.status) {
-            updateAgentStatus(parsed.status);
-            if (parsed.status.phase === "tool") {
-              toolActivityIdRef.current += 1;
-              setToolActivity((prev) => [
-                ...prev.slice(-49),
-                {
-                  id: toolActivityIdRef.current,
-                  label: parsed.status!.label,
-                  state:
-                    parsed.status!.state === "error"
-                      ? "error"
-                      : parsed.status!.state === "done"
-                        ? "done"
-                        : "running",
-                },
-              ]);
-            }
-          }
-          if (parsed.chunk) {
-            setMessages((prev) => {
-              const lastIndex = prev.length - 1;
-              const last = prev[lastIndex];
-              if (last?.role !== "assistant") return prev;
-              const copy = [...prev];
-              copy[lastIndex] = { ...last, content: last.content + parsed.chunk };
-              return copy;
-            });
-          }
-        }
-      }
-    } catch (err) {
-      const aborted = err instanceof DOMException && err.name === "AbortError";
-      if (aborted) {
-        updateAgentStatus({ phase: "done", label: "Остановлено пользователем", state: "done" });
-      } else {
-        const message = err instanceof Error ? err.message : "Не удалось проверить деплой";
-        setChatError(message);
-        updateAgentStatus({ phase: "error", label: "Проверка не удалась", state: "error" });
-        setMessages((prev) => {
-          const lastIndex = prev.length - 1;
-          const last = prev[lastIndex];
-          if (last?.role !== "assistant") return prev;
-          const copy = [...prev];
-          copy[lastIndex] = { ...last, content: message };
-          return copy;
-        });
-      }
-    } finally {
-      abortControllerRef.current = null;
-      setLoading(false);
-    }
   };
 
   useEffect(() => {
     if (bootstrapping || loading || !chatId || !projectId) return;
-    if (searchParams.get("repair") !== "1") return;
+    const fromUrl = searchParams.get("repair") === "1";
+    const pending = peekPendingRepair(projectId);
+    if (!fromUrl && !pending) return;
     if (repairStartedRef.current) return;
     repairStartedRef.current = true;
-    router.replace(`/app/projects/${projectId}/chat`, { scroll: false });
-    void runRepairTurn();
+    const errorLog = takePendingRepair(projectId);
+    if (fromUrl) {
+      router.replace(`/app/projects/${projectId}/chat`, { scroll: false });
+    }
+    void runRepairTurn(errorLog);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bootstrapping, chatId, loading, projectId, searchParams]);
 

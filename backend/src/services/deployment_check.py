@@ -146,10 +146,17 @@ def _collect_error_excerpt(
         if text and not text.startswith("docker://"):
             return text[-_ERROR_BUDGET:], _looks_like_build_failure(text)
 
+    # Live build log may still contain the pip/docker failure tail.
+    if deployment.status == "failed" and deployment.log_text:
+        text = deployment.log_text.strip()
+        if text:
+            return text[-_ERROR_BUDGET:], _looks_like_build_failure(text)
+
     if deployment.container_id:
         result = submit_control_job(
             action="logs",
             project_id=str(deployment.project_id),
+            timeout_seconds=45,
             extra={"container_id": deployment.container_id, "tail": 400},
         )
         if result and result.get("ok"):
@@ -388,9 +395,20 @@ def check_and_repair_deployment(
     return {"checked": True, "found_errors": True, "fixed": True, "summary": clean_summary}
 
 
-async def iter_repair_sse(db: Session, project: Project, chat: Chat) -> AsyncIterator[str]:
+async def iter_repair_sse(
+    db: Session,
+    project: Project,
+    chat: Chat,
+    *,
+    force_error: str | None = None,
+) -> AsyncIterator[str]:
     """Yield SSE frames while repairing; persists user+assistant messages to chat."""
-    user_note = "Проверить и исправить последний деплой"
+    excerpt_from_ui = bool(force_error and force_error.strip())
+    user_note = (
+        "Проверить и исправить по логам с страницы логов"
+        if excerpt_from_ui
+        else "Проверить и исправить последний деплой"
+    )
     _append_chat_message(db, chat, role="user", content=user_note)
     db.commit()
 
@@ -401,7 +419,9 @@ async def iter_repair_sse(db: Session, project: Project, chat: Chat) -> AsyncIte
         return f"data: {json.dumps({'status': {'phase': phase, 'label': label, 'state': state}})}\n\n"
 
     deployment = _latest_checkable_deployment(db, project)
-    error_excerpt, build_failure = _collect_error_excerpt(deployment)
+    error_excerpt, build_failure = _collect_error_excerpt(
+        deployment, force_error=force_error
+    )
 
     if not error_excerpt:
         if deployment and deployment.status == "failed":
@@ -417,6 +437,18 @@ async def iter_repair_sse(db: Session, project: Project, chat: Chat) -> AsyncIte
             return
         summary = "Ошибок в логах не найдено — деплой выглядит исправным."
         yield _sse_status("done", "Ошибок не найдено", "done")
+        yield _sse_chunk(summary)
+        _append_chat_message(db, chat, role="assistant", content=summary)
+        db.commit()
+        yield "data: [DONE]\n\n"
+        return
+
+    if not is_repairable_app_error(error_excerpt):
+        summary = (
+            "В переданных логах видна инфраструктурная ошибка платформы — "
+            "правка кода здесь не поможет. Попробуйте «Собрать и запустить» позже."
+        )
+        yield _sse_status("error", "Инфраструктурная ошибка", "error")
         yield _sse_chunk(summary)
         _append_chat_message(db, chat, role="assistant", content=summary)
         db.commit()
@@ -480,7 +512,7 @@ async def iter_repair_sse(db: Session, project: Project, chat: Chat) -> AsyncIte
         assistant_full = "Исправил ошибку деплоя."
     assistant_full = assistant_full.rstrip() + footer
     yield _sse_chunk(footer)
-    yield _sse_status("deploy", "Повторный запуск поставлен в очередь", "running")
+    yield _sse_status("done", "Повторный запуск поставлен в очередь", "done")
     _append_chat_message(db, chat, role="assistant", content=assistant_full)
     db.commit()
     yield "data: [DONE]\n\n"

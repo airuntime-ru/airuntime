@@ -26,6 +26,7 @@ import {
   isProjectRunning,
   projectStatusLabel,
 } from "@/lib/project-status";
+import { stashPendingRepair } from "@/lib/chat-stream-runtime";
 import { cn } from "@/lib/cn";
 
 function statusTone(status: string) {
@@ -188,6 +189,9 @@ export default function ProjectDeploymentsPage() {
 
   const onCheckDeployment = () => {
     if (!projectId) return;
+    const failed = deployments.find((item) => item.status === "failed");
+    const excerpt = failed ? deployLogBody(failed) : "";
+    stashPendingRepair(projectId, excerpt.slice(-100_000));
     router.push(`/app/projects/${projectId}/chat?repair=1`);
   };
 

@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
-import { BookOpen, KeyRound, MessageSquare, Settings } from "lucide-react";
+import { useParams, usePathname, useRouter } from "next/navigation";
+import { BookOpen, KeyRound, Loader2, MessageSquare, Settings } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { Modal } from "@/components/ui/modal";
 import { Tabs } from "@/components/ui/tabs";
 import { PageLoader } from "@/components/ui/loader";
 import { getProject, type ProjectType } from "@/lib/api";
+import { getActiveProjectChatStream, type ChatStreamSnapshot } from "@/lib/chat-stream-runtime";
 import { cn } from "@/lib/cn";
 import { projectStatusLabel } from "@/lib/project-status";
 
@@ -45,9 +46,11 @@ const STATUS_GUIDANCE: Record<
 export default function ProjectLayout({ children }: { children: React.ReactNode }) {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const pathname = usePathname();
   const projectId = params.id;
   const [project, setProject] = useState<ProjectType | null>(null);
   const [statusModalOpen, setStatusModalOpen] = useState(false);
+  const [chatStream, setChatStream] = useState<ChatStreamSnapshot | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -77,11 +80,21 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
     return () => window.clearInterval(timer);
   }, [projectId, project?.status]);
 
+  // Surface in-flight chat work while user is on other project tabs (stream survives unmount).
+  useEffect(() => {
+    if (!projectId) return undefined;
+    const refresh = () => setChatStream(getActiveProjectChatStream(projectId));
+    refresh();
+    const timer = window.setInterval(refresh, 800);
+    return () => window.clearInterval(timer);
+  }, [projectId, pathname]);
+
   if (!project) {
     return <PageLoader />;
   }
 
   const base = `/app/projects/${projectId}`;
+  const onChatTab = pathname?.includes("/chat") ?? false;
   const tabs = [
     { href: base, label: "Обзор" },
     { href: `${base}/chat`, label: "Чат" },
@@ -92,6 +105,7 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
   ];
 
   const guidance = STATUS_GUIDANCE[project.status]?.(project);
+  const showStreamBanner = Boolean(chatStream?.loading && chatStream.agentStatus && !onChatTab);
 
   return (
     <div className="space-y-5">
@@ -132,6 +146,24 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
         </div>
       </header>
       <Tabs items={tabs} />
+      {showStreamBanner && chatStream?.agentStatus ? (
+        <button
+          type="button"
+          onClick={() => router.push(`${base}/chat`)}
+          className="flex w-full items-center gap-3 rounded-xl border border-sky-100 bg-sky-50/80 px-4 py-3 text-left transition hover:bg-sky-50"
+        >
+          <Loader2 size={16} className="shrink-0 animate-spin text-[var(--ar-sky)]" />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium text-[var(--ar-black)]">
+              {chatStream.agentStatus.label}
+            </span>
+            <span className="block text-xs text-[var(--ar-stone)]">
+              Агент продолжает работу — вернитесь в чат, чтобы смотреть ответ
+            </span>
+          </span>
+          <MessageSquare size={16} className="shrink-0 text-[var(--ar-sky)]" />
+        </button>
+      ) : null}
       {children}
 
       {guidance ? (

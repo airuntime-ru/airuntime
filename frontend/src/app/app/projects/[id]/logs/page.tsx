@@ -9,8 +9,27 @@ import { Card } from "@/components/ui/card";
 import { EmptyState, PageLoader } from "@/components/ui/loader";
 import { Modal } from "@/components/ui/modal";
 import { getProjectLogs, type ProjectLogsType } from "@/lib/api";
+import { stashPendingRepair } from "@/lib/chat-stream-runtime";
 import { cn } from "@/lib/cn";
 import { deploymentStatusLabel } from "@/lib/project-status";
+
+const REPAIR_LOG_BUDGET = 100_000;
+
+function buildRepairLogExcerpt(logs: ProjectLogsType): string {
+  const parts: string[] = [];
+  if (logs.runtime_error?.trim()) {
+    parts.push(logs.runtime_error.trim());
+  }
+  if (logs.deployment_logs.trim()) {
+    parts.push(`--- Деплой / сборка ---\n${logs.deployment_logs.trim()}`);
+  }
+  if (logs.runtime_logs.trim()) {
+    parts.push(`--- Runtime ---\n${logs.runtime_logs.trim()}`);
+  }
+  const joined = parts.join("\n\n").trim();
+  if (!joined) return "";
+  return joined.length > REPAIR_LOG_BUDGET ? joined.slice(-REPAIR_LOG_BUDGET) : joined;
+}
 
 function LogBlock({
   title,
@@ -99,8 +118,21 @@ export default function ProjectLogsPage() {
     );
   }, [logs]);
 
+  const canAnalyze = useMemo(() => {
+    if (!logs) return false;
+    return Boolean(
+      logs.deployment_status === "failed" ||
+        logs.runtime_error ||
+        logs.runtime_logs.trim() ||
+        (logs.deployment_logs.trim() && logs.deployment_status === "failed") ||
+        logs.container_id
+    );
+  }, [logs]);
+
   const onAnalyzeRuntimeLogs = () => {
-    if (!params.id) return;
+    if (!params.id || !logs) return;
+    const excerpt = buildRepairLogExcerpt(logs);
+    stashPendingRepair(params.id, excerpt);
     router.push(`/app/projects/${params.id}/chat?repair=1`);
   };
 
@@ -159,10 +191,11 @@ export default function ProjectLogsPage() {
         </div>
       ) : null}
 
-      {logs?.container_id || logs?.deployment_status === "failed" ? (
+      {canAnalyze ? (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-black/10 bg-white/70 px-4 py-3">
           <p className="text-sm text-[var(--ar-mist)]">
-            ИИ прочитает ошибку деплоя / runtime-логи, исправит код в чате и пересоберёт проект.
+            ИИ получит тот же фрагмент логов, что вы видите здесь, исправит код в чате и пересоберёт
+            проект.
           </p>
           <Button
             variant="outline"
