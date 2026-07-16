@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   Activity,
   ArrowLeft,
@@ -35,6 +35,7 @@ import {
   listChats,
   listMessages,
   streamChat,
+  streamRepairDeployment,
   uploadChatFile,
   type ChatFileType,
   type ChatType,
@@ -184,7 +185,10 @@ function AgentStatusPanel({
 }) {
   const waiting = status.state === "waiting" || status.phase === "questions";
   const done = status.state === "done" && !waiting;
-  const error = status.state === "error";
+  const error =
+    status.state === "error" ||
+    status.phase === "error" ||
+    /не удался|ошибка|failed/i.test(status.label);
   const steps = ["thinking", "context", "tool", "verify", "module", "version", "deploy", "done"];
   const currentIndex = Math.max(0, steps.indexOf(status.phase));
   const needsSecret = status.phase === "needs_configuration";
@@ -222,18 +226,28 @@ function AgentStatusPanel({
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold text-[var(--ar-black)]">{status.label}</p>
             <p className="text-xs text-[var(--ar-stone)]">
-              {needsToken
-                ? "Добавьте токен в секреты проекта — после этого запуск продолжится"
-                : waiting
-                  ? "Ответьте в чат, и агент продолжит сборку"
-                  : done
-                    ? "Статус подтверждён по деплою"
-                    : "Статус сборки обновляется в реальном времени"}
+              {error
+                ? "Запрос не выполнен — исправьте причину и отправьте сообщение снова"
+                : needsToken
+                  ? "Добавьте токен в секреты проекта — после этого запуск продолжится"
+                  : waiting
+                    ? "Ответьте в чат, и агент продолжит сборку"
+                    : done
+                      ? "Статус подтверждён по деплою"
+                      : "Статус сборки обновляется в реальном времени"}
             </p>
           </div>
         </div>
         <span className="hidden rounded-full border border-white/70 bg-white/70 px-2.5 py-1 text-xs font-medium text-[var(--ar-mist)] sm:inline-flex">
-          {needsToken ? "нужен токен" : waiting ? "ожидание" : done ? "готово" : "агент работает"}
+          {error
+            ? "ошибка"
+            : needsToken
+              ? "нужен токен"
+              : waiting
+                ? "ожидание"
+                : done
+                  ? "готово"
+                  : "агент работает"}
         </span>
       </div>
 
@@ -305,6 +319,8 @@ function MessageBody({
 
 export default function ProjectChatPage() {
   const params = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
+  const router = useRouter();
   const projectId = params.id;
   const [chats, setChats] = useState<ChatType[]>([]);
   const [chatId, setChatId] = useState("");
@@ -331,6 +347,7 @@ export default function ProjectChatPage() {
   const abortControllerRef = useRef<AbortController | null>(null);
   const toolActivityIdRef = useRef(0);
   const providerMenuRef = useRef<HTMLDivElement>(null);
+  const repairStartedRef = useRef(false);
 
   const updateAgentStatus = useCallback(
     (status: AgentStatus | null) => {
@@ -393,6 +410,8 @@ export default function ProjectChatPage() {
     const loadMessages = async () => {
       if (!projectId || !chatId) return;
       const rows = await listMessages(projectId, chatId);
+      // Don't clobber an in-flight repair/chat stream with a stale fetch.
+      if (abortControllerRef.current) return;
       setMessages(
         rows.map((row: MessageType) => ({
           role: row.role === "assistant" ? "assistant" : "user",
@@ -485,7 +504,14 @@ export default function ProjectChatPage() {
     updateAgentStatus({ phase: "thinking", label: "AIRuntime анализирует задачу", state: "running" });
     setMessages((prev) => [
       ...prev,
-      { role: "user", content: userMessage || "Прикреплены файлы", attachments },
+      {
+        role: "user",
+        content: (userMessage || "Прикреплены файлы").replace(
+          /\b\d{6,}:[A-Za-z0-9_-]{20,}\b/g,
+          "[TELEGRAM_BOT_TOKEN]"
+        ),
+        attachments,
+      },
       { role: "assistant", content: "" },
     ]);
 
@@ -595,6 +621,131 @@ export default function ProjectChatPage() {
       setLoading(false);
     }
   };
+
+  const runRepairTurn = async () => {
+    if (!projectId || !chatId || loading) return;
+    setLoading(true);
+    setChatError("");
+    setToolActivity([]);
+    setMobilePanel("chat");
+    updateAgentStatus({
+      phase: "thinking",
+      label: "Проверяю последний деплой",
+      state: "running",
+    });
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", content: "Проверить и исправить последний деплой" },
+      { role: "assistant", content: "" },
+    ]);
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    try {
+      const response = await streamRepairDeployment(projectId, chatId, {
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        const raw = await response.text();
+        let detail = raw;
+        try {
+          const parsed = JSON.parse(raw) as { detail?: string };
+          if (parsed.detail) detail = parsed.detail;
+        } catch {
+          // keep raw
+        }
+        throw new Error(detail || `Не удалось запустить проверку (код ${response.status})`);
+      }
+      if (!response.body) throw new Error("Пустой ответ сервера");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let partial = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        partial += decoder.decode(value, { stream: true });
+        const lines = partial.split("\n\n");
+        partial = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const payload = line.replace("data: ", "");
+          if (payload === "[DONE]") {
+            const latestStatus = agentStatusRef.current;
+            if (latestStatus && latestStatus.state !== "running") continue;
+            if (latestStatus?.phase === "deploy") continue;
+            updateAgentStatus({
+              phase: "done",
+              label: "Проверка завершена",
+              state: "done",
+            });
+            continue;
+          }
+          const parsed = JSON.parse(payload) as { chunk?: string; status?: AgentStatus };
+          if (parsed.status) {
+            updateAgentStatus(parsed.status);
+            if (parsed.status.phase === "tool") {
+              toolActivityIdRef.current += 1;
+              setToolActivity((prev) => [
+                ...prev.slice(-49),
+                {
+                  id: toolActivityIdRef.current,
+                  label: parsed.status!.label,
+                  state:
+                    parsed.status!.state === "error"
+                      ? "error"
+                      : parsed.status!.state === "done"
+                        ? "done"
+                        : "running",
+                },
+              ]);
+            }
+          }
+          if (parsed.chunk) {
+            setMessages((prev) => {
+              const lastIndex = prev.length - 1;
+              const last = prev[lastIndex];
+              if (last?.role !== "assistant") return prev;
+              const copy = [...prev];
+              copy[lastIndex] = { ...last, content: last.content + parsed.chunk };
+              return copy;
+            });
+          }
+        }
+      }
+    } catch (err) {
+      const aborted = err instanceof DOMException && err.name === "AbortError";
+      if (aborted) {
+        updateAgentStatus({ phase: "done", label: "Остановлено пользователем", state: "done" });
+      } else {
+        const message = err instanceof Error ? err.message : "Не удалось проверить деплой";
+        setChatError(message);
+        updateAgentStatus({ phase: "error", label: "Проверка не удалась", state: "error" });
+        setMessages((prev) => {
+          const lastIndex = prev.length - 1;
+          const last = prev[lastIndex];
+          if (last?.role !== "assistant") return prev;
+          const copy = [...prev];
+          copy[lastIndex] = { ...last, content: message };
+          return copy;
+        });
+      }
+    } finally {
+      abortControllerRef.current = null;
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (bootstrapping || loading || !chatId || !projectId) return;
+    if (searchParams.get("repair") !== "1") return;
+    if (repairStartedRef.current) return;
+    repairStartedRef.current = true;
+    router.replace(`/app/projects/${projectId}/chat`, { scroll: false });
+    void runRepairTurn();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bootstrapping, chatId, loading, projectId, searchParams]);
 
   useEffect(() => {
     if (loading || queue.length === 0) return;

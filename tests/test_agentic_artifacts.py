@@ -3,14 +3,17 @@ import uuid
 
 import pytest
 
-from src.core.config import settings
 from src.db.models.project import Project
 from src.services.agent.events import TextDelta, ToolCallRequested, ToolCallResult, TurnFinished
 from src.services.agent.loop import CodingAgentSession
 from src.services.agent.tools import WorkspaceTools
-from src.services.agentic_artifacts import ensure_required_files, generate_fallback_artifact
+from src.services.agentic_artifacts import (
+    ensure_required_files,
+    normalize_psycopg2_requirements,
+    unpin_missing_pip_versions,
+)
 from src.services.artifacts import ArtifactError
-from src.services.workspace import WorkspaceError, project_dir
+from src.services.workspace import WorkspaceError
 
 
 def _project(project_type: str = "website") -> Project:
@@ -21,11 +24,6 @@ def _project(project_type: str = "website") -> Project:
         name="Demo Project",
         description="A bright product launch",
     )
-
-
-class DummyDb:
-    def add(self, item) -> None:
-        self.item = item
 
 
 def test_workspace_tools_write_then_read_roundtrip(tmp_path):
@@ -201,14 +199,6 @@ def test_ensure_required_files_requires_requirements_txt(tmp_path):
         ensure_required_files(project, tmp_path)
 
 
-def test_generate_fallback_artifact_produces_required_files(tmp_path, monkeypatch):
-    monkeypatch.setattr(settings, "generated_projects_dir", str(tmp_path))
-    project = _project("website")
-    path = generate_fallback_artifact(DummyDb(), project, "Build a site")
-    assert (path / "public" / "index.html").exists()
-    assert path == project_dir(project.id)
-
-
 def test_ensure_required_files_mixed_requires_both_entry_files(tmp_path):
     project = _project("mixed")
     (tmp_path / "public").mkdir()
@@ -225,18 +215,42 @@ def test_ensure_required_files_mixed_requires_both_entry_files(tmp_path):
     assert "app.py" in dockerfile
 
 
-def test_generate_fallback_artifact_mixed_produces_both_without_wiping_either(
-    tmp_path, monkeypatch
-):
-    monkeypatch.setattr(settings, "generated_projects_dir", str(tmp_path))
-    project = _project("mixed")
-    path = generate_fallback_artifact(DummyDb(), project, "Сайт и бот для студии")
-    assert (path / "public" / "index.html").exists()
-    assert (path / "app.py").exists()
-    assert (path / "requirements.txt").exists()
-    dockerfile = (path / "Dockerfile").read_text(encoding="utf-8")
-    assert "nginx" in dockerfile
-    assert "app.py" in dockerfile
+def test_normalize_psycopg2_rewrites_bare_and_collapses_binary_binary(tmp_path):
+    req = tmp_path / "requirements.txt"
+    req.write_text(
+        "aiogram\n"
+        "psycopg2==2.9.3\n"
+        "psycopg2-binary-binary==2.19.3\n"
+        "psycopg2-binary\n"
+        "psycopg2cffi>=2.9\n"
+        "Psycopg2-Binary-Binary\n",
+        encoding="utf-8",
+    )
+
+    notes = normalize_psycopg2_requirements(tmp_path)
+    assert notes
+    text = req.read_text(encoding="utf-8")
+    assert "psycopg2==" not in text
+    assert "psycopg2-binary-binary" not in text.lower()
+    assert "psycopg2-binary\n" in text or text.strip().endswith("psycopg2-binary")
+    assert "psycopg2cffi>=2.9" in text
+    # Already-correct line untouched; bare + broken rewritten to unpinned binary.
+    assert text.count("psycopg2-binary") >= 3
+
+    # Idempotent: second pass changes nothing.
+    assert normalize_psycopg2_requirements(tmp_path) == []
+
+
+def test_unpin_missing_pip_versions_drops_rejected_pin(tmp_path):
+    req = tmp_path / "requirements.txt"
+    req.write_text("psycopg2-binary==2.19.3\naiogram==3.29.1\n", encoding="utf-8")
+    error = (
+        "ERROR: Could not find a version that satisfies the requirement "
+        "psycopg2-binary==2.19.3 (from versions: 2.9.9, 2.9.10)"
+    )
+    changed = unpin_missing_pip_versions(tmp_path, error)
+    assert changed == ["psycopg2-binary"]
+    assert req.read_text(encoding="utf-8") == "psycopg2-binary\naiogram==3.29.1\n"
 
 
 class FakeProvider:

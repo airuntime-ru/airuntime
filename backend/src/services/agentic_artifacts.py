@@ -7,6 +7,8 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from src.core.config import settings
+from src.db.models.chat import Chat
+from src.db.models.message import Message
 from src.db.models.project import Project
 from src.services.agent.async_utils import run_async
 from src.services.agent.loop import CodingAgentSession
@@ -15,10 +17,8 @@ from src.services.agent.tools import WorkspaceTools
 from src.services.artifacts import (
     MIXED_DOCKERFILE,
     ArtifactError,
-    generate_mixed_artifact,
-    generate_telegram_bot_artifact,
-    generate_website_artifact,
 )
+from src.services.project_git import commit_snapshot
 from src.services.provider.factory import resolve_model
 from src.services.system_settings import resolve_api_key_for_provider
 from src.services.workspace import project_dir as _project_dir
@@ -30,6 +30,9 @@ TELEGRAM_REQUIRED = "app.py"
 
 # How many times to hand a build failure back to the AI before giving up.
 REPAIR_ATTEMPTS = 5
+
+# How much of the Docker build log to include in each repair turn.
+_REPAIR_ERROR_CHARS = 12_000
 
 _DEFAULT_WEBSITE_DOCKERFILE = "FROM nginx:1.27-alpine\nCOPY public/ /usr/share/nginx/html/\n"
 _DEFAULT_TELEGRAM_DOCKERFILE = "\n".join(
@@ -54,6 +57,125 @@ _STUB_MARKERS = (
 _TOKEN_ENV_RE = re.compile(
     r"TELEGRAM_BOT_TOKEN|getenv\(\s*[\"']TELEGRAM_BOT_TOKEN|environ(?:\.get)?\(\s*[\"']TELEGRAM_BOT_TOKEN"
 )
+
+# pip: "No matching distribution found for psycopg2-binary==2.19.3"
+_PIP_MISSING_PIN_RE = re.compile(
+    r"(?:No matching distribution found for|Could not find a version that satisfies the requirement)\s+"
+    r"([A-Za-z0-9_.\-]+)(?:\[[^\]]*\])?==([^\s\\]+)",
+    re.IGNORECASE,
+)
+
+# Capture package name as a whole token (not a substring of e.g. psycopg2cffi).
+_REQ_LINE_RE = re.compile(
+    r"^(\s*)([A-Za-z0-9][A-Za-z0-9._-]*)((?:\[[^\]]*\])?)(.*)$",
+)
+_PSYCOPG2_CANONICAL = "psycopg2-binary"
+_PSYCOPG2_NAME_RE = re.compile(r"^psycopg2(?:-binary)+$", re.IGNORECASE)
+
+
+def _normalize_psycopg2_requirement_line(line: str) -> str | None:
+    """Return a fixed requirements line, or None if this line needs no change.
+
+    Idempotent: already-correct `psycopg2-binary` is left alone. Never produces
+    `psycopg2-binary-binary`. Collapses repeated `-binary` suffixes and rewrites bare
+    `psycopg2` (needs pg_config on slim images) to unpinned `psycopg2-binary`.
+    """
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return None
+    if stripped.startswith(("-e ", "-r ", "--", "http://", "https://", "git+")):
+        return None
+
+    match = _REQ_LINE_RE.match(line)
+    if not match:
+        return None
+
+    prefix, name, extras, rest = match.groups()
+    name_lower = name.lower()
+    if name_lower == _PSYCOPG2_CANONICAL:
+        return None
+    if name_lower != "psycopg2" and not _PSYCOPG2_NAME_RE.fullmatch(name_lower):
+        return None
+
+    # Bare psycopg2, or psycopg2-binary-binary(+): canonicalize and drop ==pins
+    # (agents often invent nonexistent versions when rewriting).
+    comment = ""
+    body = rest
+    if "#" in body:
+        body, after = body.split("#", 1)
+        comment = f"#{after}"
+    body = body.rstrip()
+    if body.lstrip().startswith("=="):
+        body = ""
+    fixed = f"{prefix}{_PSYCOPG2_CANONICAL}{extras}{body}"
+    if comment:
+        fixed = f"{fixed.rstrip()}  {comment}"
+    return fixed
+
+
+def normalize_psycopg2_requirements(root: Path) -> list[str]:
+    """Package-name-aware fix for psycopg2 / psycopg2-binary-binary in requirements.txt.
+
+    Returns human-readable change notes (empty if nothing changed).
+    """
+    req_path = root / "requirements.txt"
+    if not req_path.exists():
+        return []
+    original = req_path.read_text(encoding="utf-8")
+    lines = original.splitlines()
+    notes: list[str] = []
+    new_lines: list[str] = []
+    for line in lines:
+        fixed = _normalize_psycopg2_requirement_line(line)
+        if fixed is None:
+            new_lines.append(line)
+            continue
+        new_lines.append(fixed)
+        notes.append(f"{line.strip()} -> {fixed.strip()}")
+    if not notes:
+        return []
+    req_path.write_text("\n".join(new_lines) + ("\n" if original.endswith("\n") else ""), encoding="utf-8")
+    return notes
+
+
+def unpin_missing_pip_versions(root: Path, build_error: str) -> list[str]:
+    """Drop hallucinated ==pins that pip rejected so the next build can take the latest stable.
+
+    Returns the package names that were unpinned (empty if nothing changed).
+    """
+    packages = {match.group(1) for match in _PIP_MISSING_PIN_RE.finditer(build_error or "")}
+    if not packages:
+        return []
+    req_path = root / "requirements.txt"
+    if not req_path.exists():
+        return []
+    original = req_path.read_text(encoding="utf-8")
+    lines = original.splitlines()
+    changed: list[str] = []
+    new_lines: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("#") or not stripped:
+            new_lines.append(line)
+            continue
+        updated = line
+        for package in packages:
+            # Match "pkg==1.2.3" or "pkg[extra]==1.2.3" (optional whitespace around ==).
+            pattern = re.compile(
+                rf"^(\s*{re.escape(package)}(?:\[[^\]]*\])?)\s*==\s*[^\s#]+(.*)$",
+                re.IGNORECASE,
+            )
+            match = pattern.match(line)
+            if match:
+                updated = f"{match.group(1)}{match.group(2)}"
+                if package not in changed:
+                    changed.append(package)
+                break
+        new_lines.append(updated)
+    if not changed:
+        return []
+    req_path.write_text("\n".join(new_lines) + ("\n" if original.endswith("\n") else ""), encoding="utf-8")
+    return changed
 
 
 def _resolve_provider_and_key(provider_name: str | None = None) -> tuple[str, str, str]:
@@ -172,35 +294,7 @@ def ensure_required_files(project: Project, root: Path) -> None:
     ensure_dockerfile(project, root)
 
 
-def generate_fallback_artifact(db: Session, project: Project, prompt: str = "") -> Path:
-    """Deterministic, non-AI template. Last-resort only when the workspace has no agent code."""
-
-    if project.type == "website":
-        path = generate_website_artifact(project, prompt)
-    elif project.type == "telegram_bot":
-        path = generate_telegram_bot_artifact(project, prompt)
-    elif project.type == "mixed":
-        path = generate_mixed_artifact(project, prompt)
-    else:
-        raise ArtifactError(f"Unsupported project type: {project.type}")
-
-    _write_manifest(project, path, source="fallback-template")
-    return path
-
-
-def repair_artifact_with_fallback(db: Session, project: Project, reason: str) -> Path:
-    prompt = ""
-    last_prompt = _project_dir(project.id) / ".airuntime" / "last_prompt.txt"
-    if last_prompt.exists():
-        prompt = last_prompt.read_text(encoding="utf-8")
-    path = generate_fallback_artifact(db, project, prompt)
-    note = f"Artifact repaired with fallback template after build failure: {reason[:800]}"
-    project.logs = f"{project.logs}\n{note}".strip() if project.logs else note
-    db.add(project)
-    return path
-
-
-async def _run_agent_repair(project: Project, root: Path, build_error: str) -> str:
+async def _run_agent_repair(project: Project, root: Path, build_error: str, *, attempt: int) -> str:
     provider_name, model, api_key = _resolve_provider_and_key()
     if not api_key:
         raise ArtifactError("No AI provider key configured for automatic repair")
@@ -213,10 +307,12 @@ async def _run_agent_repair(project: Project, root: Path, build_error: str) -> s
         workspace=workspace,
         system_prompt=build_repair_prompt(project),
     )
+    error_body = (build_error or "")[-_REPAIR_ERROR_CHARS:]
     user_message = (
-        "Сборка Docker-образа этого проекта упала с ошибкой:\n\n"
-        f"{build_error[:4000]}\n\n"
-        "Найди причину, прочитай нужные файлы и исправь их так, чтобы сборка прошла. "
+        f"Сборка Docker-образа этого проекта упала с ошибкой (попытка исправления {attempt}):\n\n"
+        f"{error_body}\n\n"
+        "Это актуальный лог ПОСЛЕДНЕЙ неудачной сборки. Прочитай requirements.txt и файлы "
+        "из трассировки заново, внеси правки на диске и вызови build_project. "
         "Не заменяй проект шаблоном и не удаляй реализованную логику пользователя."
     )
     final_text = ""
@@ -230,15 +326,40 @@ async def _run_agent_repair(project: Project, root: Path, build_error: str) -> s
     return final_text
 
 
-def repair_artifact_with_agent(db: Session, project: Project, build_error: str) -> Path:
+def _append_chat_note(db: Session, project: Project, text: str) -> None:
+    """Surface repair progress in chat (not project.logs)."""
+    if not text.strip():
+        return
+    chat = (
+        db.query(Chat)
+        .filter(Chat.project_id == project.id)
+        .order_by(Chat.created_at.desc())
+        .first()
+    )
+    if not chat:
+        return
+    db.add(Message(chat_id=chat.id, role="assistant", content_markdown=text.strip()))
+
+
+def repair_artifact_with_agent(
+    db: Session, project: Project, build_error: str, *, attempt: int = 1
+) -> Path:
     """Feed the real Docker build error back to the coding agent and let it patch the
     specific files that are broken, instead of throwing the whole project away."""
 
     root = _project_dir(project.id)
-    summary = run_async(_run_agent_repair(project, root, build_error))
+    summary = run_async(_run_agent_repair(project, root, build_error, attempt=attempt))
     ensure_required_files(project, root)
     _write_manifest(project, root, source="ai-repair")
-    note = f"AI repair: {summary.strip()}" if summary.strip() else "AI repair applied"
-    project.logs = f"{project.logs}\n{note}".strip() if project.logs else note
+    try:
+        commit_snapshot(root, message=f"AI repair attempt {attempt}: {project.name}")
+    except Exception:  # noqa: BLE001 - git snapshotting is best-effort
+        pass
+    note = (
+        f"Исправил ошибку сборки (попытка {attempt}): {summary.strip()}"
+        if summary.strip()
+        else f"Внёс правки после ошибки сборки (попытка {attempt})."
+    )
+    _append_chat_note(db, project, note)
     db.add(project)
     return root

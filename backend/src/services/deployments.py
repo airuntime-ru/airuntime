@@ -7,8 +7,10 @@ from src.db.models.project import Project
 from src.services.deployment_queue import enqueue_deployment
 from src.services.project_runtime import assert_can_start_project, cancel_active_deployments
 
-# Must fit Deployment.logs_ref String(512).
+# Must fit Deployment.logs_ref String(512). Full errors live on Deployment.error_text.
 _LOGS_REF_MAX = 500
+_ERROR_TEXT_MAX = 50_000
+_LOG_TEXT_MAX = 200_000
 
 
 def create_deployment_for_project(
@@ -31,6 +33,8 @@ def create_deployment_for_project(
         image_ref=None,
         container_id=None,
         logs_ref=None,
+        error_text=None,
+        log_text="В очереди на запуск…\n",
         # Used as queue timestamp so the worker can reap stuck queued jobs.
         started_at=now,
     )
@@ -64,3 +68,28 @@ def truncate_logs_ref(text: str) -> str:
     if len(cleaned) <= _LOGS_REF_MAX:
         return cleaned
     return cleaned[: _LOGS_REF_MAX - 3] + "..."
+
+
+def store_deployment_error(deployment: Deployment, text: str) -> None:
+    """Persist the full failure for repair/UI; keep a short hint on logs_ref for older clients."""
+    cleaned = (text or "").strip()
+    if len(cleaned) > _ERROR_TEXT_MAX:
+        cleaned = cleaned[-_ERROR_TEXT_MAX:]
+    deployment.error_text = cleaned or None
+    # Keep the failure in the expandable live log too.
+    if cleaned:
+        append_deployment_log(deployment, f"\n--- Ошибка ---\n{cleaned}\n", commit=False)
+    # Do not overwrite a live docker:// pointer with truncated prose.
+    if not (deployment.logs_ref or "").startswith("docker://"):
+        deployment.logs_ref = truncate_logs_ref(cleaned) if cleaned else None
+
+
+def append_deployment_log(deployment: Deployment, chunk: str, *, commit: bool = False) -> None:
+    """Append to the live build/deploy log shown in the expandable deployments UI."""
+    if not chunk:
+        return
+    existing = deployment.log_text or ""
+    combined = existing + chunk
+    if len(combined) > _LOG_TEXT_MAX:
+        combined = combined[-_LOG_TEXT_MAX:]
+    deployment.log_text = combined

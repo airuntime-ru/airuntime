@@ -109,6 +109,15 @@ def block_project(db: Session, project: Project, *, reason: str) -> Project:
     return project
 
 
+def unblock_project(db: Session, project: Project) -> Project:
+    project.status = "ready"
+    project.blocked_reason = None
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+    return project
+
+
 def start_project_runtime(db: Session, project: Project) -> Project:
     if project.status in RUNNING_STATUSES:
         raise ValueError("Проект уже запущен или запускается")

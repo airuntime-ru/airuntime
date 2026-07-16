@@ -35,27 +35,29 @@ from src.services.agent.tools import WorkspaceTools
 from src.services.agentic_artifacts import (
     ensure_dockerfile,
     ensure_required_files,
-    generate_fallback_artifact,
     workspace_has_agent_code,
 )
 from src.services.artifacts import ArtifactError, _telegram_token
 from src.services.billing import record_usage
 from src.services.chat_context import build_llm_context
-from src.services.deployments import create_deployment_for_project, truncate_logs_ref
+from src.services.deployments import create_deployment_for_project, store_deployment_error
 from src.services.file_context import (
     attach_files_to_message,
     build_attachment_context,
     extract_image_attachments,
     serialize_message_metadata,
 )
-from src.services.moderation import check_project_safety
+from src.services.moderation import (
+    check_project_safety,
+    is_token_related_block_reason,
+)
 from src.services.project_git import ProjectGitError, commit_snapshot
 from src.services.project_intent import (
     can_update_project_type,
     reconcile_type_with_workspace,
     update_project_type_from_prompt,
 )
-from src.services.project_runtime import RunningProjectLimitError, block_project
+from src.services.project_runtime import RunningProjectLimitError, block_project, unblock_project
 from src.services.project_services import (
     ProjectServiceError,
     ensure_service_request,
@@ -67,7 +69,7 @@ from src.services.project_subdomain import (
 )
 from src.services.prompt_guard import sanitize_user_message
 from src.services.provider.factory import resolve_model
-from src.services.secrets import ensure_secret_placeholder
+from src.services.secrets import capture_telegram_tokens_from_text, ensure_secret_placeholder
 from src.services.system_settings import resolve_api_key_for_provider
 from src.services.workspace import project_dir
 
@@ -275,7 +277,9 @@ def _launch_success_message(project: Project, *, has_website: bool, has_bot: boo
 
 def _launch_failure_message(deployment: Deployment | None, project: Project) -> str:
     detail = ""
-    if deployment and deployment.logs_ref:
+    if deployment and deployment.error_text:
+        detail = deployment.error_text.strip()[-4000:]
+    elif deployment and deployment.logs_ref and not deployment.logs_ref.startswith("docker://"):
         detail = deployment.logs_ref.strip()
     elif project.logs:
         # Prefer the last deployment-related note from project logs.
@@ -388,6 +392,8 @@ def create_message(
             content = sanitize_user_message(content)
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        # Persist BotFather tokens into secrets and keep the raw value out of chat history.
+        content = capture_telegram_tokens_from_text(db, project, content)
     display_content = content or "Shared attachments"
     message = Message(
         chat_id=chat_id,
@@ -427,11 +433,28 @@ async def _stream_events(
             + (f": {current_user.banned_reason}" if current_user.banned_reason else "."),
         )
     if project.status == "blocked":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Проект заблокирован модерацией"
-            + (f": {project.blocked_reason}" if project.blocked_reason else "."),
-        )
+        # Pasting a BotFather token used to be auto-flagged as scam - heal those blocks in place
+        # so the user does not need an admin to continue.
+        if is_token_related_block_reason(project.blocked_reason):
+            unblock_project(db, project)
+            db.add(
+                ModerationEvent(
+                    project_id=project.id,
+                    project_name=project.name,
+                    user_id=current_user.id,
+                    action="unblocked",
+                    category="",
+                    reason="Авто: ложное срабатывание на токен Telegram-бота",
+                )
+            )
+            db.commit()
+            db.refresh(project)
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Проект заблокирован модерацией"
+                + (f": {project.blocked_reason}" if project.blocked_reason else "."),
+            )
 
     content = user_message.strip()
     if content:
@@ -439,6 +462,7 @@ async def _stream_events(
             content = sanitize_user_message(content)
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        content = capture_telegram_tokens_from_text(db, project, content)
 
     # Only allowed to move away from the initial guess while nothing has been generated yet -
     # once a project has real files/a deploy, a later message mentioning an unrelated word
@@ -528,9 +552,10 @@ async def _stream_events(
 
         if not api_key:
             yield append_visible(
-                "AI-провайдер не настроен (нет API ключа). Но AIRuntime всё равно соберёт "
-                "проект по шаблону и отправит на деплой."
+                "AI-провайдер не настроен (нет API ключа). Без агента проект не соберётся — "
+                "шаблоны отключены. Настройте ключ провайдера и повторите запрос."
             )
+            yield _sse_status("error", "Нет API-ключа провайдера", "error")
         else:
             history, summary = await build_llm_context(
                 db, chat_id, provider_name=provider_name, model=model, api_key=api_key
@@ -618,29 +643,34 @@ async def _stream_events(
                 lowered = (agent_error or "").lower()
                 if "api key" in lowered or "not configured" in lowered:
                     yield append_visible(
-                        "\n\nAI-провайдер вернул ошибку авторизации. Но AIRuntime всё равно "
-                        "соберёт проект по шаблону и отправит на деплой."
+                        "\n\nAI-провайдер вернул ошибку авторизации. Без ключа проект не "
+                        "соберётся — шаблоны отключены. Настройте провайдера и повторите запрос."
                     )
                 else:
                     yield append_visible(f"\n\nАгент столкнулся с ошибкой: {agent_error}")
 
         try:
+            if not api_key:
+                raise _StopDeployment
             yield _sse_status("verify", "Проверяю готовые файлы проекта")
             try:
                 ensure_required_files(project, artifact_path)
             except ArtifactError as verify_exc:
                 if workspace_has_agent_code(artifact_path, project):
-                    # Keep the agent's implementation. Never wipe real code with the stub bot.
+                    # Keep the agent's implementation. Never wipe real code with a stub.
                     ensure_dockerfile(project, artifact_path)
                     yield append_visible(
-                        f"\n\nПроверка entrypoint неполная ({verify_exc}), но код агента сохранён "
-                        "без замены на шаблон. Если бот ведёт себя не так - напишите в чат, что поправить."
+                        f"\n\nПроверка entrypoint неполная ({verify_exc}), но код агента сохранён. "
+                        "Если бот ведёт себя не так - напишите в чат, что поправить."
                     )
                 else:
-                    yield _sse_status(
-                        "verify", "Не хватает обязательных файлов - собираю по шаблону"
+                    yield _sse_status("verify", "Не хватает файлов проекта", "error")
+                    yield append_visible(
+                        f"\n\nАгент не создал обязательные файлы ({verify_exc}). "
+                        "Шаблон не подставляется — опишите задачу ещё раз или уточните, что "
+                        "нужно дописать, и агент соберёт код с нуля."
                     )
-                    artifact_path = generate_fallback_artifact(db, project, safe_message)
+                    raise _StopDeployment
             for rel_path in _generated_files(artifact_path):
                 yield _sse_status("module", f"Файл готов: {rel_path}")
             git_commit_hash: str | None = None
@@ -827,8 +857,9 @@ async def _stream_events(
                     # Still queued/running past the wait window - fail the row so UI can't stick.
                     if deployment is not None and deployment.status not in _DEPLOYMENT_TERMINAL:
                         deployment.status = "failed"
-                        deployment.logs_ref = truncate_logs_ref(
-                            f"Timed out waiting for deployment after {_DEPLOY_WAIT_SECONDS}s"
+                        store_deployment_error(
+                            deployment,
+                            f"Timed out waiting for deployment after {_DEPLOY_WAIT_SECONDS}s",
                         )
                         deployment.finished_at = datetime.now(UTC)
                         db.add(deployment)
@@ -907,6 +938,29 @@ async def stream_reply_post(
         provider_override=payload.provider,
         model_override=payload.model,
     )
+
+
+@router.post("/{chat_id}/repair-stream")
+async def stream_repair_post(
+    project_id: UUID,
+    chat_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    """Run check-and-repair with the same live SSE status/chunks as a normal chat turn."""
+    from src.services.deployment_check import iter_repair_sse
+
+    project, chat = _authorize_chat(db, project_id, chat_id, current_user)
+    if current_user.credits_balance <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="Insufficient credits"
+        )
+
+    async def event_source():
+        async for frame in iter_repair_sse(db, project, chat):
+            yield frame
+
+    return StreamingResponse(event_source(), media_type="text/event-stream")
 
 
 @router.get("/{chat_id}/stream")

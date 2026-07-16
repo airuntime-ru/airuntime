@@ -135,6 +135,31 @@ class DockerDeploymentAdapter:
             "logs_ref": logs_ref,
         }
 
+    def container_status(self, container_id: str) -> str:
+        try:
+            container = self._client.containers.get(container_id)
+            container.reload()
+        except NotFound as exc:
+            raise RuntimeError(f"Container {container_id} was not found.") from exc
+        return container.status
+
+    def verify_still_running(self, container_id: str, *, settle_seconds: float = 5.0) -> str:
+        """Wait briefly after start, then require the container to still be running.
+
+        Returns the latest container log tail for startup-error scanning.
+        """
+        import time
+
+        if settle_seconds > 0:
+            time.sleep(settle_seconds)
+        status = self.container_status(container_id)
+        logs = self.fetch_container_logs(container_id, tail=400)
+        if status != "running":
+            raise RuntimeError(
+                f"Container exited shortly after start (status: {status}).\n{logs[-8000:]}"
+            )
+        return logs
+
     def _allocate_port(self, project_id: str) -> int:
         base = settings.deployment_port_base
         offset = int(project_id.replace("-", "")[:6], 16) % 5000

@@ -2,7 +2,7 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Download, FileText, Folder, RotateCcw } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, FileText, Folder, RotateCcw } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,8 @@ import {
   type ProjectVersionTreeEntryType,
   type ProjectVersionType,
 } from "@/lib/api";
+
+const COMMITS_PAGE_SIZE = 5;
 
 function formatDateTime(value: string) {
   const date = new Date(value);
@@ -38,6 +40,7 @@ export default function ProjectVersionsPage() {
   const [versions, setVersions] = useState<ProjectVersionType[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [commitsPage, setCommitsPage] = useState(0);
 
   const [downloading, setDownloading] = useState<string | null>(null);
   const [rollingBack, setRollingBack] = useState<string | null>(null);
@@ -63,10 +66,17 @@ export default function ProjectVersionsPage() {
     try {
       const rows = await listProjectVersions(projectId);
       setVersions(rows);
+      setCommitsPage(0);
+      setActiveCommitHash((prev) => {
+        if (!rows.length) return null;
+        if (prev && rows.some((row) => row.commit_hash === prev)) return prev;
+        return rows[0].commit_hash;
+      });
       setError("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Не удалось загрузить версии");
       setVersions([]);
+      setActiveCommitHash(null);
     } finally {
       if (!silent) setLoading(false);
     }
@@ -80,6 +90,11 @@ export default function ProjectVersionsPage() {
   }, [loadVersions]);
 
   const hasVersions = useMemo(() => versions.length > 0, [versions]);
+  const commitsPageCount = Math.max(1, Math.ceil(versions.length / COMMITS_PAGE_SIZE));
+  const pagedVersions = useMemo(() => {
+    const start = commitsPage * COMMITS_PAGE_SIZE;
+    return versions.slice(start, start + COMMITS_PAGE_SIZE);
+  }, [versions, commitsPage]);
 
   const onDownload = async (commitHash: string) => {
     if (!projectId) return;
@@ -199,56 +214,8 @@ export default function ProjectVersionsPage() {
         />
       ) : null}
 
-      {versions.map((v) => (
-        <Card key={v.commit_hash} className="space-y-3 p-4" hover={false}>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge className="border-black/10 bg-black/5 text-[var(--ar-stone)]">commit {shortHash(v.commit_hash)}</Badge>
-                <span className="text-xs text-[var(--ar-stone)]">{formatDateTime(v.created_at)}</span>
-              </div>
-              <p className="mt-2 text-sm font-medium text-[var(--ar-black)] break-words">{v.message || "—"}</p>
-            </div>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void onDownload(v.commit_hash)}
-                disabled={downloading === v.commit_hash}
-              >
-                <Download size={15} />
-                {downloading === v.commit_hash ? "..." : "ZIP"}
-              </Button>
-              <Button
-                variant="accent"
-                size="sm"
-                onClick={() => setConfirmRollback(v)}
-                disabled={rollingBack === v.commit_hash}
-              >
-                <RotateCcw size={15} />
-                {rollingBack === v.commit_hash ? "..." : "Откатиться"}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setActiveCommitHash(v.commit_hash);
-                  setTreePath("");
-                  setFilePath(null);
-                  setFileData(null);
-                  setError("");
-                }}
-              >
-                <FileText size={15} />
-                Открыть файлы версии
-              </Button>
-            </div>
-          </div>
-        </Card>
-      ))}
-
       {activeCommitHash ? (
-        <div className="mt-4 grid gap-4 lg:grid-cols-[360px_1fr]">
+        <div className="grid gap-4 lg:grid-cols-[360px_1fr]">
           <Card hover={false} className="p-4">
             <div className="flex flex-col gap-2">
               <div className="flex items-start justify-between gap-3">
@@ -365,6 +332,88 @@ export default function ProjectVersionsPage() {
               </div>
             )}
           </Card>
+        </div>
+      ) : null}
+
+      {hasVersions ? (
+        <div className="space-y-3">
+          <p className="text-sm font-semibold text-[var(--ar-black)]">История коммитов</p>
+          {pagedVersions.map((v) => (
+            <Card key={v.commit_hash} className="space-y-3 p-4" hover={false}>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge className="border-black/10 bg-black/5 text-[var(--ar-stone)]">commit {shortHash(v.commit_hash)}</Badge>
+                    {v.commit_hash === activeCommitHash ? (
+                      <Badge className="border-emerald-200 bg-emerald-50 text-emerald-700">открыт</Badge>
+                    ) : null}
+                    <span className="text-xs text-[var(--ar-stone)]">{formatDateTime(v.created_at)}</span>
+                  </div>
+                  <p className="mt-2 text-sm font-medium text-[var(--ar-black)] break-words">{v.message || "—"}</p>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void onDownload(v.commit_hash)}
+                    disabled={downloading === v.commit_hash}
+                  >
+                    <Download size={15} />
+                    {downloading === v.commit_hash ? "..." : "ZIP"}
+                  </Button>
+                  <Button
+                    variant="accent"
+                    size="sm"
+                    onClick={() => setConfirmRollback(v)}
+                    disabled={rollingBack === v.commit_hash}
+                  >
+                    <RotateCcw size={15} />
+                    {rollingBack === v.commit_hash ? "..." : "Откатиться"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setActiveCommitHash(v.commit_hash);
+                      setTreePath("");
+                      setFilePath(null);
+                      setFileData(null);
+                      setError("");
+                    }}
+                  >
+                    <FileText size={15} />
+                    Открыть файлы версии
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          ))}
+
+          {versions.length > COMMITS_PAGE_SIZE ? (
+            <div className="flex items-center justify-center gap-3 pt-1">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={commitsPage <= 0}
+                onClick={() => setCommitsPage((page) => Math.max(0, page - 1))}
+              >
+                <ChevronLeft size={15} />
+                Назад
+              </Button>
+              <span className="text-xs tabular-nums text-[var(--ar-stone)]">
+                {commitsPage + 1} / {commitsPageCount}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={commitsPage >= commitsPageCount - 1}
+                onClick={() => setCommitsPage((page) => Math.min(commitsPageCount - 1, page + 1))}
+              >
+                Вперёд
+                <ChevronRight size={15} />
+              </Button>
+            </div>
+          ) : null}
         </div>
       ) : null}
 

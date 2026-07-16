@@ -11,6 +11,8 @@ class DeploymentResponse(BaseModel):
     image_ref: str | None
     container_id: str | None
     logs_ref: str | None
+    error_text: str | None = None
+    log_text: str | None = None
     started_at: datetime | None
     finished_at: datetime | None
 

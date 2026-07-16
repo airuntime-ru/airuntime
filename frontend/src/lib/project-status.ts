@@ -43,10 +43,23 @@ export function canStartProject(status: string): boolean {
   );
 }
 
-export function canCheckDeployment(
-  projectStatus: string,
-  deployments: { status: string }[]
-): boolean {
-  if (isProjectRunning(projectStatus)) return true;
-  return deployments.some((item) => item.status === "failed" || item.status === "completed");
+/** Primary deploy CTA: restart when already live/deploying, otherwise build & start. */
+export function deployActionLabel(projectStatus: string, *, loading = false): string {
+  if (loading) {
+    return isProjectRunning(projectStatus) ? "Перезапускаем…" : "Запускаем…";
+  }
+  return projectStatus === "live" || projectStatus === "deploying"
+    ? "Перезапустить"
+    : "Собрать и запустить";
+}
+
+/**
+ * "Проверить и исправить" only when the latest finished deployment failed.
+ * Live/healthy projects should not show a repair CTA.
+ */
+export function canCheckDeployment(deployments: { status: string }[]): boolean {
+  const latestFinished = deployments.find(
+    (item) => item.status === "failed" || item.status === "completed" || item.status === "cancelled"
+  );
+  return latestFinished?.status === "failed";
 }

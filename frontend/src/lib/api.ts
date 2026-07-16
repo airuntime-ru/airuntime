@@ -28,6 +28,8 @@ export type DeploymentType = {
   image_ref: string | null;
   container_id: string | null;
   logs_ref: string | null;
+  error_text?: string | null;
+  log_text?: string | null;
   started_at: string | null;
   finished_at: string | null;
 };
@@ -399,6 +401,18 @@ export type DeploymentCheckResultType = {
 export async function checkDeployment(projectId: string): Promise<DeploymentCheckResultType> {
   return requestJson<DeploymentCheckResultType>(`/projects/${projectId}/check-deployment`, {
     method: "POST",
+  });
+}
+
+export function streamRepairDeployment(
+  projectId: string,
+  chatId: string,
+  options: { signal?: AbortSignal } = {}
+): Promise<Response> {
+  return rawRequest(`/projects/${projectId}/chats/${chatId}/repair-stream`, {
+    method: "POST",
+    body: JSON.stringify({}),
+    signal: options.signal,
   });
 }
 

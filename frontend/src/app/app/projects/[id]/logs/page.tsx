@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Activity, AlertCircle, CheckCircle2, Maximize2, RefreshCw, ShieldCheck, Terminal } from "lucide-react";
 
@@ -8,25 +8,30 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState, PageLoader } from "@/components/ui/loader";
 import { Modal } from "@/components/ui/modal";
-import { checkDeployment, getProjectLogs, type ProjectLogsType } from "@/lib/api";
+import { getProjectLogs, type ProjectLogsType } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { deploymentStatusLabel } from "@/lib/project-status";
 
 function LogBlock({
   title,
+  hint,
   value,
   onExpand,
 }: {
   title: string;
+  hint?: string;
   value: string;
   onExpand: () => void;
 }) {
   return (
     <section className="overflow-hidden rounded-xl border border-black/10 bg-white/70">
       <div className="flex items-center justify-between gap-2 border-b border-black/8 px-4 py-3">
-        <div className="flex items-center gap-2">
-          <Terminal size={15} className="text-[var(--ar-sky)]" />
-          <h2 className="text-sm font-semibold text-[var(--ar-black)]">{title}</h2>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <Terminal size={15} className="shrink-0 text-[var(--ar-sky)]" />
+            <h2 className="text-sm font-semibold text-[var(--ar-black)]">{title}</h2>
+          </div>
+          {hint ? <p className="mt-1 pl-6 text-xs text-[var(--ar-stone)]">{hint}</p> : null}
         </div>
         <button
           type="button"
@@ -46,13 +51,11 @@ function LogBlock({
 
 export default function ProjectLogsPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const [logs, setLogs] = useState<ProjectLogsType | null>(null);
   const [error, setError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [expanded, setExpanded] = useState<{ title: string; value: string } | null>(null);
-  const [analyzeLoading, setAnalyzeLoading] = useState(false);
-  const [analyzeResult, setAnalyzeResult] = useState("");
-  const [analyzeError, setAnalyzeError] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -96,19 +99,9 @@ export default function ProjectLogsPage() {
     );
   }, [logs]);
 
-  const onAnalyzeRuntimeLogs = async () => {
+  const onAnalyzeRuntimeLogs = () => {
     if (!params.id) return;
-    setAnalyzeLoading(true);
-    setAnalyzeResult("");
-    setAnalyzeError("");
-    try {
-      const result = await checkDeployment(params.id);
-      setAnalyzeResult(result.summary);
-    } catch (err) {
-      setAnalyzeError(err instanceof Error ? err.message : "Не удалось проанализировать логи");
-    } finally {
-      setAnalyzeLoading(false);
-    }
+    router.push(`/app/projects/${params.id}/chat?repair=1`);
   };
 
   if (logs === null && !error) return <PageLoader />;
@@ -134,10 +127,14 @@ export default function ProjectLogsPage() {
             </span>
             <div>
               <p className="text-sm font-semibold text-[var(--ar-black)]">
-                {logs?.deployment_status ? `Деплой: ${deploymentStatusLabel(logs.deployment_status)}` : "Логи проекта"}
+                {logs?.deployment_status
+                  ? `Деплой: ${deploymentStatusLabel(logs.deployment_status)}`
+                  : "Логи проекта"}
               </p>
               <p className="text-xs text-[var(--ar-stone)]">
-                {logs?.container_id ? `Контейнер ${logs.container_id.slice(0, 12)}` : "Обновляется автоматически"}
+                {logs?.container_id
+                  ? `Контейнер ${logs.container_id.slice(0, 12)}`
+                  : "Обновляется автоматически"}
               </p>
             </div>
           </div>
@@ -162,55 +159,51 @@ export default function ProjectLogsPage() {
         </div>
       ) : null}
 
-      {logs?.container_id ? (
+      {logs?.container_id || logs?.deployment_status === "failed" ? (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-black/10 bg-white/70 px-4 py-3">
           <p className="text-sm text-[var(--ar-mist)]">
-            ИИ прочитает runtime-логи, найдёт причину ошибки и, если дело в коде, сразу же
-            исправит и пересоберёт проект.
+            ИИ прочитает ошибку деплоя / runtime-логи, исправит код в чате и пересоберёт проект.
           </p>
           <Button
             variant="outline"
             size="sm"
             className="w-full sm:w-auto"
-            disabled={analyzeLoading}
-            onClick={() => void onAnalyzeRuntimeLogs()}
+            onClick={onAnalyzeRuntimeLogs}
           >
             <ShieldCheck size={15} />
-            {analyzeLoading ? "Анализируем…" : "Анализ логов с помощью ИИ"}
+            Проверить и исправить в чате
           </Button>
         </div>
-      ) : null}
-      {analyzeError ? <p className="text-sm text-rose-600">{analyzeError}</p> : null}
-      {analyzeResult ? (
-        <Card hover={false} className="border-[var(--ar-sky)]/20 bg-[var(--ar-sky)]/5">
-          <p className="flex items-start gap-2 text-sm text-[var(--ar-black)]">
-            <ShieldCheck size={16} className="mt-0.5 shrink-0 text-[var(--ar-sky)]" />
-            {analyzeResult}
-          </p>
-        </Card>
       ) : null}
 
       {hasLogs && logs ? (
         <div className="grid gap-4">
           {logs.project_logs.trim() ? (
             <LogBlock
-              title="Проект"
+              title="События платформы"
+              hint="DNS, остановки, служебные заметки — не вывод контейнера"
               value={logs.project_logs}
-              onExpand={() => setExpanded({ title: "Проект", value: logs.project_logs })}
+              onExpand={() =>
+                setExpanded({ title: "События платформы", value: logs.project_logs })
+              }
             />
           ) : null}
           {logs.deployment_logs.trim() ? (
             <LogBlock
-              title="Деплой"
+              title="Деплой / сборка"
+              hint="Статус последнего деплоя и полный текст ошибки сборки, если есть"
               value={logs.deployment_logs}
-              onExpand={() => setExpanded({ title: "Деплой", value: logs.deployment_logs })}
+              onExpand={() => setExpanded({ title: "Деплой / сборка", value: logs.deployment_logs })}
             />
           ) : null}
           {logs.runtime_logs.trim() ? (
             <LogBlock
-              title="Runtime"
+              title="Контейнер (runtime)"
+              hint="Живой stdout/stderr работающего контейнера"
               value={logs.runtime_logs}
-              onExpand={() => setExpanded({ title: "Runtime", value: logs.runtime_logs })}
+              onExpand={() =>
+                setExpanded({ title: "Контейнер (runtime)", value: logs.runtime_logs })
+              }
             />
           ) : null}
         </div>
@@ -218,7 +211,7 @@ export default function ProjectLogsPage() {
         <Card hover={false}>
           <EmptyState
             title="Логов пока нет"
-            description="Они появятся здесь во время сборки, запуска и работы проекта."
+            description="Лог сборки смотрите во вкладке «Деплои» (разверните строку). Здесь — события платформы и runtime контейнера."
           />
         </Card>
       )}

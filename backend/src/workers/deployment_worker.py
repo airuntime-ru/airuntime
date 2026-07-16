@@ -4,9 +4,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy.orm import Session
 
 from src.core.config import settings
-from src.db.models.chat import Chat
 from src.db.models.deployment import Deployment
-from src.db.models.message import Message
 from src.db.models.project import Project
 from src.db.models.project_service import ProjectService
 from src.db.session import SessionLocal
@@ -14,9 +12,9 @@ from src.services.artifacts import build_project_image, try_build_project_image
 from src.services.billing import run_billing_maintenance
 from src.services.cloudflare_dns import CloudflareDnsError, sync_dns_for_website_deploy
 from src.services.deployment.docker_adapter import DeployRequest, DockerDeploymentAdapter
-from src.services.deployment_check import check_and_repair_deployment
+from src.services.deployment_check import check_and_repair_deployment, detect_runtime_errors
 from src.services.deployment_queue import pop_deployment_job
-from src.services.deployments import truncate_logs_ref
+from src.services.deployments import append_deployment_log, store_deployment_error, truncate_logs_ref
 from src.services.docker_control_queue import pop_control_job, push_control_result
 from src.services.project_services import (
     build_connection_env,
@@ -28,28 +26,6 @@ from src.services.telegram_profile import TelegramProfileError, fetch_bot_profil
 
 BILLING_SWEEP_INTERVAL_SECONDS = 300
 STALE_SWEEP_INTERVAL_SECONDS = 60
-
-
-def _notify_fallback_used(db: Session, project: Project) -> None:
-    """Docker build kept failing even after AI repair, so the deterministic placeholder
-    template was deployed instead of the agent's real code - tell the user plainly in chat,
-    since otherwise the only trace is a log line they're unlikely to go looking for."""
-    chat = (
-        db.query(Chat)
-        .filter(Chat.project_id == project.id)
-        .order_by(Chat.created_at.desc())
-        .first()
-    )
-    if not chat:
-        return
-    note = (
-        "⚠️ Не удалось собрать код, который я писал для этой задачи - сборка падала даже "
-        "после нескольких попыток автоматически исправить ошибку. Чтобы проект не остался "
-        "полностью сломан, я запустил временную заглушку без вашей бизнес-логики (простой "
-        "ответ на сообщения) - её нужно заменить. Опишите в чате, что не так или просто "
-        "повторите исходный запрос, и я попробую собрать реальную версию заново."
-    )
-    db.add(Message(chat_id=chat.id, role="assistant", content_markdown=note))
 
 
 def process_billing_sweep() -> None:
@@ -127,11 +103,23 @@ def process_job(job: dict) -> None:
 
         deployment.status = "running"
         deployment.started_at = datetime.now(UTC)
+        append_deployment_log(deployment, "Запуск сборки…\n")
+        db.add(deployment)
         db.commit()
 
-        image_ref, environment, used_fallback = build_project_image(db, project)
-        if used_fallback:
-            _notify_fallback_used(db, project)
+        def _on_build_log(chunk: str) -> None:
+            # Flush live build output so the deployments page can poll log_text.
+            append_deployment_log(deployment, chunk)
+            db.add(deployment)
+            try:
+                db.commit()
+            except Exception:  # noqa: BLE001 - never fail the build because of log flush
+                db.rollback()
+
+        image_ref, environment = build_project_image(db, project, on_log=_on_build_log)
+        append_deployment_log(deployment, "\nОбраз собран. Запускаю контейнер…\n")
+        db.add(deployment)
+        db.commit()
         subdomain = resolve_deploy_subdomain(project)
         has_website = project.type in ("website", "mixed")
         has_bot = project.type in ("telegram_bot", "mixed")
@@ -165,9 +153,29 @@ def process_job(job: dict) -> None:
             )
         )
 
+        # Confirm the process stays up after start - "docker run succeeded" is not enough
+        # (bots/sites often crash on first import or missing env within a few seconds).
+        append_deployment_log(deployment, "Контейнер создан. Проверяю, что процесс не падает…\n")
+        db.add(deployment)
+        db.commit()
+        startup_logs = adapter.verify_still_running(result["container_id"], settle_seconds=5.0)
+        startup_error = detect_runtime_errors(startup_logs)
+        if startup_error:
+            append_deployment_log(deployment, f"\n{startup_error[-8000:]}\n")
+            try:
+                adapter.stop_project(str(project.id))
+            except Exception:  # noqa: BLE001
+                pass
+            raise RuntimeError(
+                "Контейнер запустился, но сразу выдал ошибку в runtime-логах:\n"
+                f"{startup_error[-8000:]}"
+            )
+
+        append_deployment_log(deployment, "Контейнер стабилен после старта.\n")
         deployment.status = "completed"
         deployment.container_id = result["container_id"]
         deployment.logs_ref = result["logs_ref"]
+        deployment.error_text = None
         deployment.image_ref = result["image_ref"]
         deployment.finished_at = datetime.now(UTC)
         db.refresh(project)
@@ -197,12 +205,8 @@ def process_job(job: dict) -> None:
         db.commit()
 
         if not job.get("skip_auto_check"):
-            # Give the container a moment to finish starting up and emit its first log lines
-            # before checking - catches immediate startup crashes (bad imports, syntax errors
-            # that survived to runtime, wrong paths). Bugs that only surface once a real user
-            # interacts with the bot/site won't show here yet - that's what the manual
-            # "check deployment" action is for, run any time after real usage.
-            time.sleep(3)
+            # Extra pass after we already verified the container stayed up: catches errors that
+            # only appear slightly later. Manual "Проверить и исправить" covers user-triggered bugs.
             try:
                 check_and_repair_deployment(db, project)
             except Exception:  # noqa: BLE001 - a broken self-check must never fail the deploy
@@ -218,15 +222,16 @@ def _mark_deployment_failed(db: Session, job: dict, exc: BaseException) -> None:
     deployment = db.get(Deployment, job.get("deployment_id"))
     if not deployment:
         return
+    full_error = str(exc)
     try:
         deployment.status = "failed"
-        deployment.logs_ref = truncate_logs_ref(str(exc))
+        store_deployment_error(deployment, full_error)
         deployment.finished_at = datetime.now(UTC)
         project = db.get(Project, job.get("project_id"))
         if project and project.status in {"deploying", "live"}:
             # Generic deploy failure is not "needs secrets" - leave that for missing tokens.
             project.status = "ready"
-            note = f"Deployment failed: {exc}"
+            note = f"Deployment failed: {truncate_logs_ref(full_error)}"
             project.logs = f"{project.logs}\n{note}".strip() if project.logs else note
             db.add(project)
         db.add(deployment)
@@ -238,6 +243,7 @@ def _mark_deployment_failed(db: Session, job: dict, exc: BaseException) -> None:
             return
         deployment.status = "failed"
         deployment.logs_ref = "Deployment failed (see worker logs)"
+        deployment.error_text = full_error[:50_000] if full_error else "Deployment failed"
         deployment.finished_at = datetime.now(UTC)
         project = db.get(Project, job.get("project_id"))
         if project and project.status in {"deploying", "live"}:
@@ -250,7 +256,8 @@ def _mark_deployment_failed(db: Session, job: dict, exc: BaseException) -> None:
     project = db.get(Project, job.get("project_id"))
     if project and not job.get("skip_auto_check"):
         try:
-            check_and_repair_deployment(db, project, force_error=str(exc))
+            # Pass the FULL error so repair is not limited to the 500-char logs_ref hint.
+            check_and_repair_deployment(db, project, force_error=full_error)
         except Exception:  # noqa: BLE001 - never crash the worker on repair failure
             pass
 
@@ -273,8 +280,9 @@ def reap_stale_deployments() -> int:
                 continue
             prior_status = deployment.status
             deployment.status = "failed"
-            deployment.logs_ref = truncate_logs_ref(
-                f"Deployment timed out after {timeout}s (stuck in {prior_status})"
+            store_deployment_error(
+                deployment,
+                f"Deployment timed out after {timeout}s (stuck in {prior_status})",
             )
             deployment.finished_at = datetime.now(UTC)
             project = db.get(Project, deployment.project_id)

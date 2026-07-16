@@ -1,15 +1,14 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { Pause, Rocket, ShieldCheck } from "lucide-react";
+import { ChevronDown, ChevronRight, Pause, Rocket, RotateCcw, ShieldCheck } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState, PageLoader } from "@/components/ui/loader";
 import {
-  checkDeployment,
   createDeployment,
   getProject,
   getProjectRuntimeLimits,
@@ -22,10 +21,12 @@ import {
 import {
   canCheckDeployment,
   canStopProject,
+  deployActionLabel,
   deploymentStatusLabel,
   isProjectRunning,
   projectStatusLabel,
 } from "@/lib/project-status";
+import { cn } from "@/lib/cn";
 
 function statusTone(status: string) {
   if (status === "completed") return "text-emerald-700";
@@ -47,10 +48,48 @@ function formatDateTime(value: string | null) {
   });
 }
 
+function deployLogBody(item: DeploymentType): string {
+  const parts: string[] = [];
+  if (item.log_text?.trim()) parts.push(item.log_text.trim());
+  if (item.error_text?.trim()) {
+    const err = item.error_text.trim();
+    if (!item.log_text?.includes(err)) {
+      parts.push(`--- Ошибка ---\n${err}`);
+    }
+  }
+  return parts.join("\n\n");
+}
+
+function DeployLogPanel({ item, live }: { item: DeploymentType; live: boolean }) {
+  const body = deployLogBody(item);
+  if (!body) {
+    return (
+      <p className="text-xs text-[var(--ar-stone)]">
+        {item.status === "queued" || item.status === "running"
+          ? "Логи появятся, как только сборка начнётся…"
+          : "Логов для этого деплоя нет."}
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-2">
+      {live ? (
+        <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--ar-sky)]">
+          Обновляется в реальном времени
+        </p>
+      ) : null}
+      <pre className="max-h-[min(50vh,28rem)] overflow-auto whitespace-pre-wrap rounded-lg border border-black/8 bg-[#fbfdff] p-3 font-mono text-[11px] leading-relaxed text-[var(--ar-graphite)]">
+        {body}
+      </pre>
+    </div>
+  );
+}
+
 const PAGE_SIZE = 20;
 
 export default function ProjectDeploymentsPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const projectId = params.id;
   const [project, setProject] = useState<ProjectType | null>(null);
   const [limits, setLimits] = useState<ProjectRuntimeLimitsType | null>(null);
@@ -61,8 +100,7 @@ export default function ProjectDeploymentsPage() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
-  const [checkLoading, setCheckLoading] = useState(false);
-  const [checkResult, setCheckResult] = useState("");
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
 
   const loadPage = useCallback(async (options?: { silent?: boolean; limit?: number }) => {
     if (!projectId) return;
@@ -79,6 +117,18 @@ export default function ProjectDeploymentsPage() {
       setDeploymentsTotal(deploymentResult.total);
       setLimits(runtimeLimits);
       setError("");
+      // Auto-expand the newest active deploy so live logs are visible without an extra click.
+      const active = deploymentResult.items.find(
+        (item) => item.status === "running" || item.status === "queued",
+      );
+      if (active) {
+        setExpandedIds((prev) => {
+          if (prev.has(active.id)) return prev;
+          const next = new Set(prev);
+          next.add(active.id);
+          return next;
+        });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось загрузить деплои");
     } finally {
@@ -107,14 +157,20 @@ export default function ProjectDeploymentsPage() {
   const hasActiveDeployments = deployments.some(
     (item) => item.status === "running" || item.status === "queued",
   );
+  const hasExpandedActive = deployments.some(
+    (item) =>
+      expandedIds.has(item.id) && (item.status === "running" || item.status === "queued"),
+  );
 
   useEffect(() => {
-    if (!hasActiveDeployments) return;
+    // Poll faster when an expanded row is actively building so logs feel live.
+    if (!hasActiveDeployments && !hasExpandedActive) return;
+    const intervalMs = hasExpandedActive ? 2000 : 5000;
     const timer = window.setInterval(() => {
       void loadPage({ silent: true });
-    }, 5000);
+    }, intervalMs);
     return () => window.clearInterval(timer);
-  }, [hasActiveDeployments, loadPage]);
+  }, [hasActiveDeployments, hasExpandedActive, loadPage]);
 
   const onDeploy = async () => {
     if (!projectId) return;
@@ -130,20 +186,9 @@ export default function ProjectDeploymentsPage() {
     }
   };
 
-  const onCheckDeployment = async () => {
+  const onCheckDeployment = () => {
     if (!projectId) return;
-    setCheckLoading(true);
-    setCheckResult("");
-    setError("");
-    try {
-      const result = await checkDeployment(projectId);
-      setCheckResult(result.summary);
-      await loadPage({ silent: true });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось проверить деплой");
-    } finally {
-      setCheckLoading(false);
-    }
+    router.push(`/app/projects/${projectId}/chat?repair=1`);
   };
 
   const onStop = async () => {
@@ -161,6 +206,15 @@ export default function ProjectDeploymentsPage() {
     }
   };
 
+  const toggleExpanded = (id: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   if (loading) return <PageLoader />;
 
   const atLimit = limits ? limits.running >= limits.max_running : false;
@@ -170,6 +224,11 @@ export default function ProjectDeploymentsPage() {
     actionLoading ||
     !project ||
     (atLimit && !isProjectRunning(project.status));
+  const isLive = project?.status === "live";
+  const showCheck = canCheckDeployment(deployments);
+  const primaryLabel = project
+    ? deployActionLabel(project.status, { loading: actionLoading })
+    : "Собрать и запустить";
 
   return (
     <div className="space-y-4">
@@ -190,79 +249,97 @@ export default function ProjectDeploymentsPage() {
         </Card>
       ) : null}
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="flex flex-col gap-3">
         <p className="text-sm leading-7 text-[var(--ar-mist)]">
           Каждый запуск заново собирает Docker-образ из текущего кода, затем поднимает контейнер.
+          Разверните деплой, чтобы смотреть лог сборки в реальном времени.
         </p>
-        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-          {project && canStopProject(project.status) ? (
-            <Button variant="outline" size="sm" className="w-full sm:w-auto" disabled={actionLoading} onClick={onStop}>
-              <Pause size={15} />
-              Остановить
-            </Button>
-          ) : null}
-          {project && canCheckDeployment(project.status, deployments) ? (
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full sm:w-auto"
-              disabled={checkLoading}
-              onClick={() => void onCheckDeployment()}
-            >
-              <ShieldCheck size={15} />
-              {checkLoading ? "Проверяем…" : "Проверить и исправить"}
-            </Button>
-          ) : null}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {project && canStopProject(project.status) ? (
+              <Button variant="outline" size="sm" disabled={actionLoading} onClick={onStop}>
+                <Pause size={15} />
+                Остановить
+              </Button>
+            ) : null}
+            {showCheck ? (
+              <Button variant="outline" size="sm" onClick={onCheckDeployment}>
+                <ShieldCheck size={15} />
+                Проверить и исправить
+              </Button>
+            ) : null}
+          </div>
           <Button
             variant="accent"
             size="sm"
-            className="w-full sm:w-auto"
             disabled={deployDisabled}
             onClick={() => void onDeploy()}
           >
-            <Rocket size={15} />
-            {actionLoading ? "Запускаем…" : "Собрать и запустить"}
+            {isLive ? <RotateCcw size={15} /> : <Rocket size={15} />}
+            {primaryLabel}
           </Button>
         </div>
       </div>
       {error ? <p className="text-sm text-rose-600">{error}</p> : null}
-      {checkResult ? (
-        <Card hover={false} className="border-[var(--ar-sky)]/20 bg-[var(--ar-sky)]/5">
-          <p className="flex items-start gap-2 text-sm text-[var(--ar-black)]">
-            <ShieldCheck size={16} className="mt-0.5 shrink-0 text-[var(--ar-sky)]" />
-            {checkResult}
-          </p>
-        </Card>
-      ) : null}
-      {deployments.map((item) => (
-        <Card key={item.id} className="space-y-3" hover={false}>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="break-all font-semibold text-[var(--ar-black)]">{item.image_ref ?? "Образ приложения"}</p>
-              <p className="mt-1 text-xs text-[var(--ar-stone)]">ID: {item.id}</p>
+      {deployments.map((item) => {
+        const expanded = expandedIds.has(item.id);
+        const live = item.status === "running" || item.status === "queued";
+        const hasLog = Boolean(deployLogBody(item) || live || item.status === "failed");
+        return (
+          <Card key={item.id} className="space-y-3" hover={false}>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <p className="break-all font-semibold text-[var(--ar-black)]">
+                  {item.image_ref ?? "Образ приложения"}
+                </p>
+                <p className="mt-1 text-xs text-[var(--ar-stone)]">ID: {item.id}</p>
+              </div>
+              <Badge className={statusTone(item.status)}>{deploymentStatusLabel(item.status)}</Badge>
             </div>
-            <Badge className={statusTone(item.status)}>{deploymentStatusLabel(item.status)}</Badge>
-          </div>
-          <div className="h-2 overflow-hidden rounded-full bg-white/70">
-            <div
-              className={`h-full rounded-full transition-all ${
-                item.status === "completed"
-                  ? "w-full bg-emerald-400"
-                  : item.status === "running"
-                    ? "w-2/3 bg-[var(--ar-sky)]"
-                    : item.status === "failed" || item.status === "cancelled"
-                      ? "w-full bg-rose-400"
-                      : "w-1/3 bg-[var(--ar-stone)]"
-              }`}
-            />
-          </div>
-          <div className="grid gap-1 text-xs text-[var(--ar-stone)] sm:grid-cols-2">
-            <p>Старт: {formatDateTime(item.started_at)}</p>
-            <p>Финиш: {formatDateTime(item.finished_at)}</p>
-          </div>
-          <p className="text-xs text-[var(--ar-stone)]">{item.logs_ref ?? "Логи появятся после запуска"}</p>
-        </Card>
-      ))}
+            <div className="h-2 overflow-hidden rounded-full bg-white/70">
+              <div
+                className={`h-full rounded-full transition-all ${
+                  item.status === "completed"
+                    ? "w-full bg-emerald-400"
+                    : item.status === "running"
+                      ? "w-2/3 bg-[var(--ar-sky)]"
+                      : item.status === "failed" || item.status === "cancelled"
+                        ? "w-full bg-rose-400"
+                        : "w-1/3 bg-[var(--ar-stone)]"
+                }`}
+              />
+            </div>
+            <div className="grid gap-1 text-xs text-[var(--ar-stone)] sm:grid-cols-2">
+              <p>Старт: {formatDateTime(item.started_at)}</p>
+              <p>Финиш: {formatDateTime(item.finished_at)}</p>
+            </div>
+            {hasLog ? (
+              <div className="border-t border-black/5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => toggleExpanded(item.id)}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-lg px-1 py-1.5 text-left text-sm font-medium text-[var(--ar-black)]",
+                    "hover:bg-black/[0.03]",
+                  )}
+                >
+                  {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                  {expanded ? "Свернуть лог" : "Развернуть лог"}
+                  {item.status === "failed" && !expanded ? (
+                    <span className="text-xs font-normal text-rose-600">— есть ошибка</span>
+                  ) : null}
+                  {live && !expanded ? (
+                    <span className="text-xs font-normal text-[var(--ar-sky)]">— идёт сборка</span>
+                  ) : null}
+                </button>
+                {expanded ? <DeployLogPanel item={item} live={live} /> : null}
+              </div>
+            ) : (
+              <p className="text-xs text-[var(--ar-stone)]">Логи появятся после запуска</p>
+            )}
+          </Card>
+        );
+      })}
       {deployments.length === 0 ? (
         <EmptyState
           title="Деплоев пока нет"

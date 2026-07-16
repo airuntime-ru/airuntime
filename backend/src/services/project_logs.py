@@ -20,7 +20,8 @@ def _read_runtime_logs(project_id: UUID, logs_ref: str | None) -> tuple[str, str
     if not logs_ref:
         return "", None
     if not logs_ref.startswith("docker://"):
-        return "", f"Unsupported logs source: {logs_ref}"
+        # Legacy rows stored truncated failure text here - surface it as deploy error, not runtime.
+        return "", None
 
     container_id = logs_ref.removeprefix("docker://")
     result = submit_control_job(
@@ -52,18 +53,27 @@ def read_project_logs(db: Session, project: Project) -> ProjectLogsResponse:
     deployment_logs = ""
 
     if deployment:
-        deployment_logs = "\n".join(
-            line
-            for line in [
-                f"Deployment: {deployment.id}",
-                f"Status: {deployment.status}",
-                f"Image: {deployment.image_ref or '-'}",
-                f"Container: {deployment.container_id or '-'}",
-                f"Started: {deployment.started_at or '-'}",
-                f"Finished: {deployment.finished_at or '-'}",
-            ]
-            if line
-        )
+        lines = [
+            f"Deployment: {deployment.id}",
+            f"Status: {deployment.status}",
+            f"Image: {deployment.image_ref or '-'}",
+            f"Container: {deployment.container_id or '-'}",
+            f"Started: {deployment.started_at or '-'}",
+            f"Finished: {deployment.finished_at or '-'}",
+        ]
+        if deployment.log_text:
+            lines.append("")
+            lines.append("--- Лог сборки / деплоя ---")
+            lines.append(deployment.log_text)
+        if deployment.error_text:
+            lines.append("")
+            lines.append("--- Ошибка деплоя / сборки ---")
+            lines.append(deployment.error_text)
+        elif not deployment.log_text and deployment.logs_ref and not deployment.logs_ref.startswith("docker://"):
+            lines.append("")
+            lines.append("--- Ошибка деплоя ---")
+            lines.append(deployment.logs_ref)
+        deployment_logs = "\n".join(lines)
         runtime_logs, runtime_error = _read_runtime_logs(project.id, deployment.logs_ref)
 
     return ProjectLogsResponse(

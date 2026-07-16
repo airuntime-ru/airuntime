@@ -156,6 +156,8 @@ class Deployment(models.Model):
     image_ref = models.CharField(max_length=512, null=True, blank=True)
     container_id = models.CharField(max_length=255, null=True, blank=True)
     logs_ref = models.CharField(max_length=512, null=True, blank=True)
+    error_text = models.TextField(null=True, blank=True)
+    log_text = models.TextField(null=True, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
 

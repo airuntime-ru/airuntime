@@ -71,6 +71,58 @@ def looks_like_telegram_token(value: str) -> bool:
     return bool(re.fullmatch(r"\d{6,}:[A-Za-z0-9_-]{20,}", value.strip()))
 
 
+_TELEGRAM_TOKEN_IN_TEXT = re.compile(r"\b(\d{6,}:[A-Za-z0-9_-]{20,})\b")
+
+
+def extract_telegram_bot_tokens(text: str) -> list[str]:
+    return list(dict.fromkeys(_TELEGRAM_TOKEN_IN_TEXT.findall(text or "")))
+
+
+def redact_telegram_bot_tokens(text: str) -> str:
+    return _TELEGRAM_TOKEN_IN_TEXT.sub("[TELEGRAM_BOT_TOKEN]", text or "")
+
+
+def store_telegram_bot_token(
+    db: Session,
+    project: Project,
+    token: str,
+    *,
+    reason: str = "Токен из чата для запуска Telegram-бота",
+) -> Secret | None:
+    """Persist a BotFather token pasted into chat. Returns None if the value is not a token."""
+    cleaned = (token or "").strip()
+    if not looks_like_telegram_token(cleaned):
+        return None
+    secret, _created = ensure_secret_placeholder(db, project, TELEGRAM_BOT_TOKEN_KEY, reason)
+    secret.encrypted_value = encrypt_secret(cleaned)
+    if not secret.reason:
+        secret.reason = reason
+    db.add(secret)
+    # Best-effort: refresh public bot URL when Telegram accepts the token.
+    try:
+        from src.services.telegram_profile import fetch_bot_profile
+
+        profile = fetch_bot_profile(cleaned)
+        if project.type in ("telegram_bot", "mixed"):
+            project.deployment_url = profile.public_url
+            db.add(project)
+    except Exception:
+        pass
+    db.commit()
+    db.refresh(secret)
+    return secret
+
+
+def capture_telegram_tokens_from_text(db: Session, project: Project, text: str) -> str:
+    """Save any BotFather tokens found in text and return the same text with tokens redacted."""
+    tokens = extract_telegram_bot_tokens(text)
+    if not tokens:
+        return text
+    for token in tokens:
+        store_telegram_bot_token(db, project, token)
+    return redact_telegram_bot_tokens(text)
+
+
 def all_secrets_filled(db: Session, project: Project) -> bool:
     missing = (
         db.query(Secret)
