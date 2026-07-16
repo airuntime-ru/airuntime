@@ -155,8 +155,22 @@ async def _stream_events(run_id: str, *, timeout_seconds: int) -> AsyncIterator[
             continue
 
 
+def _relativize(path_str: str, root: Path | None) -> str:
+    """Show paths relative to the project root in the UI - the raw item.path is an absolute
+    in-container path (/data/airruntime-projects/<project_id>/...), which leaks server layout
+    for no benefit to the user."""
+    if not root or not path_str:
+        return path_str
+    try:
+        return str(Path(path_str).relative_to(root))
+    except ValueError:
+        return path_str
+
+
 def _map_event(
     payload: dict[str, Any],
+    *,
+    workspace_root: Path | None = None,
 ) -> list[TextDelta | ToolCallRequested | ToolCallResult]:
     """Translation from Codex CLI's `--json` event stream into our internal event types.
 
@@ -197,24 +211,33 @@ def _map_event(
             ]
         exit_code = item.get("exit_code")
         output = str(item.get("aggregated_output") or "")[-4000:]
+        ok = exit_code == 0
+        summary = f"exit {exit_code}"
+        if not ok:
+            # The exit code alone doesn't say why - the last non-empty output line usually is
+            # the actual error (e.g. "bash: eslint: command not found"), so surface it inline
+            # instead of making the user open a separate log to find out.
+            last_line = next((ln for ln in reversed(output.strip().splitlines()) if ln.strip()), "")
+            if last_line:
+                summary = f"{summary}: {last_line.strip()[:200]}"
         return [
             ToolCallResult(
                 call_id=call_id,
                 name="command_execution",
-                ok=exit_code == 0,
-                summary=f"exit {exit_code}",
+                ok=ok,
+                summary=summary,
                 content=output,
             )
         ]
 
     if item_type == "file_change":
         changes = item.get("changes")
-        paths = (
+        raw_paths = (
             [c.get("path", "") for c in changes if isinstance(c, dict)]
             if isinstance(changes, list)
             else []
         )
-        names = ", ".join(p for p in paths if p)
+        names = ", ".join(_relativize(p, workspace_root) for p in raw_paths if p)
         if kind == "item.started":
             return [
                 ToolCallRequested(call_id=call_id, name="file_change", arguments={"files": names})
@@ -383,7 +406,9 @@ class CodexAgentSession:
             if terminal is not None:
                 yield terminal
                 return
-            for event in _map_event(payload):
+            for event in _map_event(
+                payload, workspace_root=self.workspace.root if self.workspace else None
+            ):
                 yield event
 
         if self.workspace:
@@ -414,7 +439,9 @@ class CodexAgentSession:
             if terminal is not None:
                 yield terminal
                 return
-            for event in _map_event(payload):
+            for event in _map_event(
+                payload, workspace_root=self.workspace.root if self.workspace else None
+            ):
                 yield event
 
         if self.workspace:

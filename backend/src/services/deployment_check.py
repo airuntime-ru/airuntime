@@ -197,6 +197,14 @@ def _tool_status_label(name: str, arguments: dict[str, Any] | None = None) -> st
         return "Проверяю сборку Docker-образа"
     if name == "list_files":
         return "Смотрю файлы проекта"
+    if name == "command_execution":
+        command = " ".join(str(args.get("command", "")).split())
+        if len(command) > 100:
+            command = command[:100] + "…"
+        return f"Выполняю: {command}" if command else "Выполняю команду"
+    if name == "file_change":
+        files = args.get("files", "")
+        return f"Правлю: {files}" if files else "Правлю файлы"
     return f"Инструмент: {name}"
 
 

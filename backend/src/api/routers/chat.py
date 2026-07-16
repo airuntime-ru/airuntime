@@ -164,6 +164,15 @@ def _tool_status_label(name: str, arguments: dict) -> str:
     if name == "request_service":
         kind = arguments.get("kind", "") if isinstance(arguments, dict) else ""
         return f"Запрашиваю сервис {kind}" if kind else "Запрашиваю сервис"
+    if name == "command_execution":
+        command = arguments.get("command", "") if isinstance(arguments, dict) else ""
+        command = " ".join(command.split())  # collapse newlines/indentation for a one-line label
+        if len(command) > 100:
+            command = command[:100] + "…"
+        return f"Выполняю: {command}" if command else "Выполняю команду"
+    if name == "file_change":
+        files = arguments.get("files", "") if isinstance(arguments, dict) else ""
+        return f"Правлю: {files}" if files else "Правлю файлы"
     return f"Инструмент: {name}"
 
 
