@@ -44,7 +44,10 @@ export function canStartProject(status: string): boolean {
 }
 
 /** Primary deploy CTA: restart when already live/deploying, otherwise build & start. */
-export function deployActionLabel(projectStatus: string, *, loading = false): string {
+export function deployActionLabel(
+  projectStatus: string,
+  { loading = false }: { loading?: boolean } = {}
+): string {
   if (loading) {
     return isProjectRunning(projectStatus) ? "Перезапускаем…" : "Запускаем…";
   }
