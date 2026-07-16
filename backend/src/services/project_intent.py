@@ -22,7 +22,6 @@ _SITE_TERMS = (
     "landing",
     "website",
     "страниц",
-    "интерфейс",
     "дашборд",
     "личный кабинет",
     "лк",
@@ -31,6 +30,7 @@ _SITE_TERMS = (
 _SITE_WHOLE_WORDS = (
     "web",
     "веб",
+    # "интерфейс" is too ambiguous (Telegram button UIs, bot menus) to count as a site signal.
 )
 
 
@@ -66,6 +66,28 @@ def infer_project_type(text: str) -> ProjectType:
     return ProjectType.website
 
 
+def _workspace_has_site(root: Path) -> bool:
+    return (root / "public" / "index.html").exists()
+
+
+def _workspace_has_bot(root: Path) -> bool:
+    return (root / "app.py").exists() or (root / "bot.py").exists()
+
+
+def workspace_root_for(project: Project) -> Path:
+    from src.services.workspace import project_dir
+
+    return project_dir(project.id)
+
+
+def can_update_project_type(project: Project) -> bool:
+    """Allow reclassification until real bot/site files exist."""
+    if project.status == "created":
+        return True
+    root = workspace_root_for(project)
+    return not _workspace_has_site(root) and not _workspace_has_bot(root)
+
+
 def update_project_type_from_prompt(project: Project, prompt: str) -> bool:
     bot_score, site_score = detect_project_type_signals(prompt)
     if bot_score == 0 and site_score == 0:
@@ -81,21 +103,46 @@ def update_project_type_from_prompt(project: Project, prompt: str) -> bool:
     return True
 
 
-def reconcile_mixed_type_without_website(project: Project, workspace: Path | None = None) -> bool:
-    """Downgrade mixed → telegram_bot when the workspace has no site entrypoint."""
-    if project.type != ProjectType.mixed:
-        return False
-    root = workspace
-    if root is None:
-        from src.services.workspace import project_dir
+def reconcile_type_with_workspace(
+    project: Project,
+    workspace: Path | None = None,
+    *,
+    has_bot_secret: bool = False,
+) -> bool:
+    """Fix type when workspace/secrets clearly indicate bot-only (no site).
 
-        root = project_dir(project.id)
-    if (root / "public" / "index.html").exists():
+    Covers false `mixed`/`website` classifications that still show the subdomain card
+    for projects that never generated a website.
+    """
+    if project.type == ProjectType.telegram_bot:
         return False
-    # Only reconcile when the workspace already has bot files; otherwise the project may
-    # still be empty / not generated yet and mixed remains a valid intent.
-    if not (root / "app.py").exists() and not (root / "bot.py").exists():
+
+    root = workspace if workspace is not None else workspace_root_for(project)
+    has_site = _workspace_has_site(root)
+    has_bot_files = _workspace_has_bot(root)
+
+    if has_site:
+        if not has_bot_files and project.type == ProjectType.mixed:
+            project.type = ProjectType.website
+            return True
         return False
-    project.type = ProjectType.telegram_bot
-    project.deploy_subdomain = None
-    return True
+
+    # No site entrypoint on disk.
+    if has_bot_files and project.type in (ProjectType.mixed, ProjectType.website):
+        project.type = ProjectType.telegram_bot
+        project.deploy_subdomain = None
+        return True
+
+    # website + TELEGRAM_BOT_TOKEN and no site files is inconsistent (token is only
+    # requested for bot/mixed). Do not auto-demote intentional mixed before generation.
+    if has_bot_secret and project.type == ProjectType.website:
+        project.type = ProjectType.telegram_bot
+        project.deploy_subdomain = None
+        return True
+
+    return False
+
+
+# Backwards-compatible alias used by older call sites / tests.
+def reconcile_mixed_type_without_website(project: Project, workspace: Path | None = None) -> bool:
+    return reconcile_type_with_workspace(project, workspace)

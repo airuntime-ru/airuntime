@@ -274,9 +274,16 @@ export default function ProjectSettingsPage() {
 
   if (!project || !params.id) return <PageLoader />;
 
+  const hasTelegramTokenSlot =
+    secrets?.some((secret) => secret.key === "TELEGRAM_BOT_TOKEN") ?? false;
+  // Subdomain is for websites. Hide for bots; also hide a misclassified "website"
+  // that already has a Telegram token slot (backend will reconcile type on get).
+  const showSubdomainCard =
+    project.type === "mixed" || (project.type === "website" && !hasTelegramTokenSlot);
+
   return (
     <div className="grid gap-4 md:grid-cols-2">
-      {project.type === "website" || project.type === "mixed" ? (
+      {showSubdomainCard ? (
         <Card hover={false} className="md:col-span-2">
           <div className="flex items-start gap-3">
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--ar-radius-sm)] bg-white/80 text-emerald-600 shadow-sm shadow-sky-950/5">

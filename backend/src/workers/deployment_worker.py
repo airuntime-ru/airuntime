@@ -3,7 +3,9 @@ from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
+from src.db.models.chat import Chat
 from src.db.models.deployment import Deployment
+from src.db.models.message import Message
 from src.db.models.project import Project
 from src.db.models.project_service import ProjectService
 from src.db.session import SessionLocal
@@ -23,6 +25,28 @@ from src.services.project_subdomain import resolve_deploy_subdomain
 from src.services.telegram_profile import TelegramProfileError, fetch_bot_profile
 
 BILLING_SWEEP_INTERVAL_SECONDS = 300
+
+
+def _notify_fallback_used(db: Session, project: Project) -> None:
+    """Docker build kept failing even after AI repair, so the deterministic placeholder
+    template was deployed instead of the agent's real code - tell the user plainly in chat,
+    since otherwise the only trace is a log line they're unlikely to go looking for."""
+    chat = (
+        db.query(Chat)
+        .filter(Chat.project_id == project.id)
+        .order_by(Chat.created_at.desc())
+        .first()
+    )
+    if not chat:
+        return
+    note = (
+        "⚠️ Не удалось собрать код, который я писал для этой задачи - сборка падала даже "
+        "после нескольких попыток автоматически исправить ошибку. Чтобы проект не остался "
+        "полностью сломан, я запустил временную заглушку без вашей бизнес-логики (простой "
+        "ответ на сообщения) - её нужно заменить. Опишите в чате, что не так или просто "
+        "повторите исходный запрос, и я попробую собрать реальную версию заново."
+    )
+    db.add(Message(chat_id=chat.id, role="assistant", content_markdown=note))
 
 
 def process_billing_sweep() -> None:
@@ -107,7 +131,9 @@ def process_job(job: dict) -> None:
         deployment.started_at = datetime.now(UTC)
         db.commit()
 
-        image_ref, environment = build_project_image(db, project)
+        image_ref, environment, used_fallback = build_project_image(db, project)
+        if used_fallback:
+            _notify_fallback_used(db, project)
         subdomain = resolve_deploy_subdomain(project)
         has_website = project.type in ("website", "mixed")
         has_bot = project.type in ("telegram_bot", "mixed")

@@ -42,7 +42,8 @@ from src.services.file_context import (
 from src.services.moderation import check_project_safety
 from src.services.project_git import ProjectGitError, commit_snapshot
 from src.services.project_intent import (
-    reconcile_mixed_type_without_website,
+    can_update_project_type,
+    reconcile_type_with_workspace,
     update_project_type_from_prompt,
 )
 from src.services.project_runtime import RunningProjectLimitError, block_project
@@ -151,107 +152,6 @@ def _tool_status_label(name: str, arguments: dict) -> str:
         kind = arguments.get("kind", "") if isinstance(arguments, dict) else ""
         return f"Запрашиваю сервис {kind}" if kind else "Запрашиваю сервис"
     return f"Инструмент: {name}"
-
-
-# Phrases that explicitly hand the decision to the agent - once a user says this, asking more
-# clarifying questions contradicts what they just said, no matter how short the message is.
-_FREEFORM_MARKERS = (
-    "на свой вкус",
-    "на твой вкус",
-    "на ваш вкус",
-    "как хочешь",
-    "как хотите",
-    "как считаешь нужным",
-    "как думаешь лучше",
-    "сам реши",
-    "сам решай",
-    "сама реши",
-    "на твое усмотрение",
-    "на ваше усмотрение",
-    "делай как лучше",
-    "что посчитаешь нужным",
-    "удиви меня",
-    "surprise me",
-    "your choice",
-    "up to you",
-    "your call",
-)
-
-
-def _needs_clarification(project: Project, content: str, attachment_ids: list[UUID]) -> bool:
-    if attachment_ids:
-        return False
-    text = content.strip().lower()
-    if not text:
-        return True
-    if any(marker in text for marker in _FREEFORM_MARKERS):
-        return False
-    vague_phrases = (
-        "сделай сайт",
-        "сделай лендинг",
-        "самый крутой",
-        "крутой лендинг",
-        "напиши бота",
-        "сделай бота",
-    )
-    has_context = (
-        any(
-            marker in text
-            for marker in (
-                "для ",
-                "чтобы ",
-                "котор",
-                "клиент",
-                "продаж",
-                "заяв",
-                "бренд",
-                "стиль",
-                "целевая",
-            )
-        )
-        or _extract_deploy_subdomain(text) is not None
-    )
-    if len(text) < 26:
-        return True
-    return (
-        any(phrase in text for phrase in vague_phrases)
-        and not has_context
-        and not project.description
-    )
-
-
-def _clarifying_questions(project: Project, content: str) -> str:
-    token_help_url = (
-        f"{settings.resolved_frontend_url}/help/telegram-token?projectId={project.id}"
-    )
-    bot_questions = (
-        "1. Где бот должен брать данные и что отвечать по умолчанию?\n"
-        "2. Нужны ли команды вроде /start, /help, заявка, меню или сценарии?\n"
-        "3. Добавьте секрет TELEGRAM_BOT_TOKEN в настройках проекта, чтобы я смог запустить бота.\n\n"
-        "Как получить токен: откройте @BotFather в Telegram, выполните /newbot и скопируйте выданный token. "
-        f"[Подробная инструкция]({token_help_url})\n"
-    )
-    site_questions = (
-        "1. Для кого этот продукт и какое действие пользователь должен совершить?\n"
-        "2. Какие 3-5 блоков или функций точно нужны?\n"
-        "3. Какой стиль ближе: минимальный, премиальный, playful, SaaS, editorial?\n"
-        "4. Нужен ли конкретный поддомен или можно подобрать автоматически?\n"
-    )
-    if project.type == "mixed":
-        return (
-            "Перед разработкой сайта и бота в одном проекте нужно уточнить пару вещей:\n\n"
-            f"По сайту:\n{site_questions}\nПо боту:\n{bot_questions}\n"
-            "Ответьте одним сообщением, и я соберу оба сразу."
-        )
-    if project.type == "telegram_bot":
-        return (
-            f"Перед разработкой бота нужно уточнить пару вещей:\n\n{bot_questions}\n"
-            "После этого я соберу файлы, проверю Docker-сборку и запущу polling."
-        )
-    return (
-        f"Перед разработкой стоит уточнить основу проекта:\n\n{site_questions}\n"
-        "Ответьте одним сообщением, и я соберу проект уже по нормальному плану."
-    )
 
 
 def _generated_files(path: Path, limit: int = 12) -> list[str]:
@@ -481,7 +381,7 @@ async def _stream_events(
     # (e.g. any form of "работать") must not silently flip it to a different project type.
     if (
         content
-        and project.status == "created"
+        and can_update_project_type(project)
         and update_project_type_from_prompt(project, content)
     ):
         db.add(project)
@@ -550,24 +450,6 @@ async def _stream_events(
             nonlocal assistant_full
             assistant_full += text
             return _sse_chunk(text)
-
-        if _needs_clarification(project, content, attachment_ids):
-            if project.type in ("telegram_bot", "mixed"):
-                ensure_secret_placeholder(
-                    db, project, "TELEGRAM_BOT_TOKEN", "Нужен для запуска Telegram-бота"
-                )
-            questions = _clarifying_questions(project, content)
-            yield _sse_status("questions", "Жду ответы на уточняющие вопросы", "waiting")
-            yield append_visible(questions)
-            assistant_message = Message(
-                chat_id=chat_id, role="assistant", content_markdown=assistant_full
-            )
-            db.add(assistant_message)
-            usage_cost = max(100, len(safe_message) + len(assistant_full))
-            record_usage(db, current_user, project_id=project.id, amount=usage_cost)
-            db.commit()
-            yield "data: [DONE]\n\n"
-            return
 
         yield _sse_status("thinking", "AIRuntime осмысляет задачу")
         if attachment_ids:
@@ -706,8 +588,9 @@ async def _stream_events(
             db.add(project)
             has_website = project.type in ("website", "mixed")
             has_bot = project.type in ("telegram_bot", "mixed")
-            if has_website and has_bot and reconcile_mixed_type_without_website(project, artifact_path):
-                has_website = False
+            if reconcile_type_with_workspace(project, artifact_path):
+                has_website = project.type in ("website", "mixed")
+                has_bot = project.type in ("telegram_bot", "mixed")
                 db.add(project)
             if has_bot and not _telegram_token(db, project):
                 ensure_secret_placeholder(

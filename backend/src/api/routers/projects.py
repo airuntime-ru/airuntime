@@ -15,11 +15,12 @@ from src.api.dto.project_logs import ProjectLogsResponse
 from src.api.dto.project_runtime import ProjectRuntimeLimitsResponse
 from src.db.models.chat import Chat
 from src.db.models.project import Project
+from src.db.models.secret import Secret
 from src.db.models.user import User
 from src.db.session import get_db
 from src.services.deployment_check import check_and_repair_deployment
 from src.services.docker_control_queue import submit_control_job
-from src.services.project_intent import infer_project_type, reconcile_mixed_type_without_website
+from src.services.project_intent import infer_project_type, reconcile_type_with_workspace
 from src.services.project_logs import read_project_logs
 from src.services.project_runtime import (
     RunningProjectLimitError,
@@ -29,6 +30,7 @@ from src.services.project_runtime import (
     stop_project_runtime,
 )
 from src.services.project_subdomain import assert_subdomain_available, normalize_deploy_subdomain
+from src.services.secrets import TELEGRAM_BOT_TOKEN_KEY
 from src.services.system_settings import get_system_setting_number
 from src.services.workspace import project_dir
 
@@ -241,7 +243,13 @@ def get_project(
     )
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    if reconcile_mixed_type_without_website(project):
+    has_bot_secret = (
+        db.query(Secret.id)
+        .filter(Secret.project_id == project.id, Secret.key == TELEGRAM_BOT_TOKEN_KEY)
+        .first()
+        is not None
+    )
+    if reconcile_type_with_workspace(project, has_bot_secret=has_bot_secret):
         db.add(project)
         db.commit()
         db.refresh(project)

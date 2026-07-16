@@ -34,11 +34,38 @@ def test_update_project_type_ignores_prompt_without_signals():
     assert project.deploy_subdomain == "keep-me"
 
 
+def test_reconcile_website_typed_bot_without_site(tmp_path):
+    from src.services.project_intent import reconcile_type_with_workspace
+
+    (tmp_path / "app.py").write_text("print('bot')", encoding="utf-8")
+    project = SimpleNamespace(type="website", deploy_subdomain="bot-site")
+    assert reconcile_type_with_workspace(project, tmp_path) is True
+    assert project.type == "telegram_bot"
+    assert project.deploy_subdomain is None
+
+
+def test_reconcile_website_with_bot_secret_without_site(tmp_path):
+    from src.services.project_intent import reconcile_type_with_workspace
+
+    project = SimpleNamespace(type="website", deploy_subdomain="bot-site")
+    assert reconcile_type_with_workspace(project, tmp_path, has_bot_secret=True) is True
+    assert project.type == "telegram_bot"
+    assert project.deploy_subdomain is None
+
+
+def test_reconcile_keeps_mixed_with_only_bot_secret_before_files(tmp_path):
+    from src.services.project_intent import reconcile_type_with_workspace
+
+    project = SimpleNamespace(type="mixed", deploy_subdomain="studio")
+    assert reconcile_type_with_workspace(project, tmp_path, has_bot_secret=True) is False
+    assert project.type == "mixed"
+
+
 def test_reconcile_mixed_without_website(tmp_path):
-    from src.services.project_intent import reconcile_mixed_type_without_website
+    from src.services.project_intent import reconcile_type_with_workspace
 
     (tmp_path / "app.py").write_text("print('bot')", encoding="utf-8")
     project = SimpleNamespace(type="mixed", deploy_subdomain="bot-site")
-    assert reconcile_mixed_type_without_website(project, tmp_path) is True
+    assert reconcile_type_with_workspace(project, tmp_path) is True
     assert project.type == "telegram_bot"
     assert project.deploy_subdomain is None

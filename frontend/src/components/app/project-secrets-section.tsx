@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { BookOpen, CheckCircle2, KeyRound, ShieldCheck } from "lucide-react";
+import { BookOpen, CheckCircle2, KeyRound, Pencil, ShieldCheck, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -27,7 +27,9 @@ function SecretRow({
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [editing, setEditing] = useState(false);
   const helpUrl = SECRET_HELP_LINKS[secret.key];
+  const showEditor = !secret.has_value || editing;
 
   const onSave = async () => {
     if (!value.trim()) return;
@@ -36,12 +38,19 @@ function SecretRow({
     try {
       const updated = await setSecretValue(projectId, secret.id, value);
       setValue("");
+      setEditing(false);
       onSaved(updated);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось сохранить значение");
     } finally {
       setSaving(false);
     }
+  };
+
+  const onCancelEdit = () => {
+    setEditing(false);
+    setValue("");
+    setError("");
   };
 
   return (
@@ -62,18 +71,24 @@ function SecretRow({
               </Button>
             </a>
           ) : null}
-          {secret.has_value ? (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-              <CheckCircle2 size={14} />
-              Настроено
-            </span>
+          {secret.has_value && !editing ? (
+            <>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                <CheckCircle2 size={14} />
+                Настроено
+              </span>
+              <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+                <Pencil size={14} />
+                Изменить
+              </Button>
+            </>
           ) : null}
         </div>
       </div>
-      {!secret.has_value ? (
+      {showEditor ? (
         <div className="flex flex-col gap-2 sm:flex-row">
           <Input
-            placeholder="Вставьте значение"
+            placeholder={secret.has_value ? "Вставьте новое значение" : "Вставьте значение"}
             type="password"
             value={value}
             onChange={(event) => setValue(event.target.value)}
@@ -87,8 +102,14 @@ function SecretRow({
             disabled={saving || !value.trim()}
           >
             <KeyRound size={14} />
-            {saving ? "Проверяем..." : "Сохранить"}
+            {saving ? "Проверяем..." : secret.has_value ? "Обновить" : "Сохранить"}
           </Button>
+          {editing ? (
+            <Button variant="outline" size="sm" className="sm:w-auto" onClick={onCancelEdit} disabled={saving}>
+              <X size={14} />
+              Отмена
+            </Button>
+          ) : null}
         </div>
       ) : null}
       {error ? <p className="text-sm text-rose-600">{error}</p> : null}

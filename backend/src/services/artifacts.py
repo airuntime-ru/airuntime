@@ -547,7 +547,12 @@ def try_build_project_image(project: Project) -> dict:
 
 def build_project_image(
     db: Session, project: Project, prompt: str = ""
-) -> tuple[str, dict[str, str]]:
+) -> tuple[str, dict[str, str], bool]:
+    """Returns (image_tag, environment, used_fallback). used_fallback is True when the agent's
+    own code failed to build and even AI repair couldn't fix it in time, so the deterministic
+    placeholder template was deployed instead - callers must tell the user this happened, since
+    it silently replaces whatever real logic the agent had written with a generic stub."""
+    used_fallback = False
     # Prevent races between git checkout/commit and docker builds.
     with with_project_git_lock(project.id):
         path = ensure_project_artifact(db, project, prompt)
@@ -579,6 +584,7 @@ def build_project_image(
                     break
 
             if not fixed:
+                used_fallback = True
                 try:
                     repaired_path = repair_artifact_with_fallback(db, project, last_error)
                     db.commit()
@@ -599,4 +605,4 @@ def build_project_image(
         if not token:
             raise ArtifactError("Telegram bot token is missing")
         environment["TELEGRAM_BOT_TOKEN"] = token
-    return tag, environment
+    return tag, environment, used_fallback
