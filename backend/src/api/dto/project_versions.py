@@ -28,4 +28,3 @@ class ProjectVersionFileResponse(BaseModel):
     is_binary: bool
     truncated: bool
     size_bytes: int
-

@@ -76,9 +76,13 @@ def stop_project_runtime(db: Session, project: Project) -> Project:
 
     result = submit_control_job(action="stop", project_id=str(project.id))
     if result is None:
-        raise ValueError("Не удалось остановить проект: сервис деплоя не отвечает, попробуйте ещё раз")
+        raise ValueError(
+            "Не удалось остановить проект: сервис деплоя не отвечает, попробуйте ещё раз"
+        )
     if not result.get("ok"):
-        raise ValueError(f"Не удалось остановить проект: {result.get('error', 'неизвестная ошибка')}")
+        raise ValueError(
+            f"Не удалось остановить проект: {result.get('error', 'неизвестная ошибка')}"
+        )
     _cancel_active_deployments(db, project.id)
     project.status = "stopped"
     note = "Проект остановлен пользователем."

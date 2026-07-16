@@ -8,7 +8,6 @@ from sqlalchemy import select
 from src.db.models.system_setting import SystemSetting
 from src.db.session import SessionLocal
 
-
 _TTL_SECONDS = 60
 _cache: dict[str, tuple[Any, float]] = {}
 
@@ -85,4 +84,3 @@ def resolve_api_key_for_provider(provider_name: str) -> str | None:
         if value:
             return value
     return None
-

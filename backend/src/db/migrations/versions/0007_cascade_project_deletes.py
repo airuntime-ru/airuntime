@@ -29,9 +29,7 @@ _FOREIGN_KEYS = [
 def upgrade() -> None:
     for name, source, column, target, target_column in _FOREIGN_KEYS:
         op.drop_constraint(name, source, type_="foreignkey")
-        op.create_foreign_key(
-            name, source, target, [column], [target_column], ondelete="CASCADE"
-        )
+        op.create_foreign_key(name, source, target, [column], [target_column], ondelete="CASCADE")
 
 
 def downgrade() -> None:

@@ -147,7 +147,7 @@ def delete_secret(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    project = _get_owned_project(project_id, current_user, db)
+    _get_owned_project(project_id, current_user, db)
     secret = db.get(Secret, secret_id)
     if not secret or str(secret.project_id) != project_id:
         raise HTTPException(status_code=404, detail="Secret not found")

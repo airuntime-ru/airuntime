@@ -143,7 +143,9 @@ def credits_topup_paid_email(*, credits: int, amount_rub: int) -> EmailContent:
         f"<p style='margin:0 0 8px;text-align:center;'>Платёж на <strong style='color:{_COLORS['ink']};'>{amount_rub} ₽</strong> подтверждён.</p>"
         f"<p style='margin:0;text-align:center;'>На баланс начислено <strong style='color:{_COLORS['ink']};'>{credits_str} кредитов</strong>.</p>"
     )
-    html = _layout(title="Баланс пополнен", body_html=body, footer="Спасибо, что пользуетесь AIRuntime.")
+    html = _layout(
+        title="Баланс пополнен", body_html=body, footer="Спасибо, что пользуетесь AIRuntime."
+    )
     return EmailContent(subject=subject, plain=plain, html=html)
 
 

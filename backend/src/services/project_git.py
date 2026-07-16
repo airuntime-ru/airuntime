@@ -16,6 +16,7 @@ try:
 except Exception:  # pragma: no cover
     Redis = None  # type: ignore[assignment]
 
+
 @dataclass(frozen=True)
 class ProjectVersion:
     commit_hash: str
@@ -72,7 +73,9 @@ def _run_git(*, cwd: Path, args: list[str], check: bool = True) -> subprocess.Co
     )
 
 
-def _run_git_bytes(*, cwd: Path, args: list[str], check: bool = True) -> subprocess.CompletedProcess[bytes]:
+def _run_git_bytes(
+    *, cwd: Path, args: list[str], check: bool = True
+) -> subprocess.CompletedProcess[bytes]:
     _ = _require_git()
     return subprocess.run(
         ["git", *args],
@@ -129,7 +132,9 @@ class _NullLock:
         return None
 
 
-def with_project_git_lock(project_id: UUID | str, *, ttl_seconds: int = 180) -> AbstractContextManager[None]:
+def with_project_git_lock(
+    project_id: UUID | str, *, ttl_seconds: int = 180
+) -> AbstractContextManager[None]:
     """
     Best-effort lock to protect git checkout/commit and docker builds.
 
@@ -185,7 +190,9 @@ def commit_snapshot(project_dir: Path, *, message: str) -> str | None:
         _run_git(cwd=project_dir, args=["add", "-A"])
 
         # If index == HEAD, git commit will be a no-op (we also avoid creating noise).
-        changed = _run_git(cwd=project_dir, args=["status", "--porcelain"], check=False).stdout.strip()
+        changed = _run_git(
+            cwd=project_dir, args=["status", "--porcelain"], check=False
+        ).stdout.strip()
         if not changed:
             return None
 
@@ -241,7 +248,9 @@ def list_version_tree(
 
     proc = _run_git_bytes(cwd=project_dir, args=args, check=False)
     if proc.returncode != 0:
-        raise ProjectGitError(proc.stderr.decode("utf-8", errors="replace").strip() or "git ls-tree failed")
+        raise ProjectGitError(
+            proc.stderr.decode("utf-8", errors="replace").strip() or "git ls-tree failed"
+        )
 
     out = proc.stdout
     entries: list[ProjectVersionTreeEntry] = []
@@ -294,7 +303,9 @@ def read_version_file(
     obj = f"{commit_hash}:{normalized}"
     proc = _run_git_bytes(cwd=project_dir, args=["show", obj], check=False)
     if proc.returncode != 0:
-        raise ProjectGitError(proc.stderr.decode("utf-8", errors="replace").strip() or "git show failed")
+        raise ProjectGitError(
+            proc.stderr.decode("utf-8", errors="replace").strip() or "git show failed"
+        )
 
     data = proc.stdout
     size_bytes = len(data)

@@ -105,9 +105,17 @@ class BlockedProjectAdmin(admin.ModelAdmin):
             count += 1
         self.message_user(request, f"Разблокировано проектов: {count}", messages.SUCCESS)
 
+
 @admin.register(DomainModerationEvent)
 class DomainModerationEventAdmin(admin.ModelAdmin):
-    list_display = ("created_at", "action_badge", "project_name", "user", "category", "short_reason")
+    list_display = (
+        "created_at",
+        "action_badge",
+        "project_name",
+        "user",
+        "category",
+        "short_reason",
+    )
     list_filter = ("action", "category")
     search_fields = ("project_name", "reason", "user__email")
     readonly_fields = (

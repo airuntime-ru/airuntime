@@ -49,9 +49,9 @@ jobs:
       - name: Pytest
         run: pytest tests -q
       - name: Ruff
-        run: ruff check backend/src agents tests scripts admin
+        run: ruff check backend/src tests scripts admin
       - name: Ruff format check
-        run: ruff format --check backend/src agents tests scripts admin
+        run: ruff format --check backend/src tests scripts admin
 
   frontend:
     runs-on: ubuntu-latest

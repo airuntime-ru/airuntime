@@ -47,8 +47,7 @@ class AgentProvider(Protocol):
         images: list[ImageAttachment] = ...,
     ) -> list[dict[str, Any]]: ...
 
-    def build_tool_result_messages(self, results: list[ToolCallResult]) -> list[dict[str, Any]]:
-        ...
+    def build_tool_result_messages(self, results: list[ToolCallResult]) -> list[dict[str, Any]]: ...
 
     def stream_turn(
         self,
@@ -210,7 +209,9 @@ class OpenAICompatibleProvider:
                 args = json.loads(slot["arguments"]) if slot["arguments"] else {}
             except json.JSONDecodeError:
                 args = {}
-            tool_calls.append(ToolCallRequested(call_id=slot["id"], name=slot["name"], arguments=args))
+            tool_calls.append(
+                ToolCallRequested(call_id=slot["id"], name=slot["name"], arguments=args)
+            )
             wire_tool_calls.append(
                 {
                     "id": slot["id"],
@@ -226,7 +227,9 @@ class OpenAICompatibleProvider:
                 wire_message["tool_calls"] = wire_tool_calls
 
         stop_reason = "tool_use" if tool_calls else ("stop" if finish_reason else "stop")
-        yield TurnFinished(stop_reason=stop_reason, wire_message=wire_message, tool_calls=tool_calls)
+        yield TurnFinished(
+            stop_reason=stop_reason, wire_message=wire_message, tool_calls=tool_calls
+        )
 
 
 class AnthropicProvider:
@@ -244,7 +247,8 @@ class AnthropicProvider:
         images: list[ImageAttachment] = (),
     ) -> list[dict[str, Any]]:
         msgs = [
-            {"role": h["role"], "content": [{"type": "text", "text": h["content"]}]} for h in history
+            {"role": h["role"], "content": [{"type": "text", "text": h["content"]}]}
+            for h in history
         ]
         content: list[dict[str, Any]] = [{"type": "text", "text": user_message}]
         for image in images:
@@ -394,7 +398,9 @@ class AnthropicProvider:
 
         wire_message = {"role": "assistant", "content": content_list} if content_list else None
         stop_reason = "tool_use" if tool_calls else "stop"
-        yield TurnFinished(stop_reason=stop_reason, wire_message=wire_message, tool_calls=tool_calls)
+        yield TurnFinished(
+            stop_reason=stop_reason, wire_message=wire_message, tool_calls=tool_calls
+        )
 
 
 class GeminiProvider:

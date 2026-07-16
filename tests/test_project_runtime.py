@@ -1,6 +1,7 @@
 from uuid import uuid4
 
 import pytest
+from tests.conftest import auth_tokens
 
 from src.db.models.project import Project
 from src.db.models.user import User
@@ -11,7 +12,6 @@ from src.services.project_runtime import (
     start_project_runtime,
     stop_project_runtime,
 )
-from tests.conftest import auth_tokens
 
 
 def _user(db, email: str, client) -> User:

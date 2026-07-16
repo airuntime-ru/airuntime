@@ -118,7 +118,9 @@ def _renew_period_if_due(db: Session, user: User, *, now: datetime) -> None:
     db.add(user)
     record_ledger_entry(db, user, amount=plan.monthly_credits, reason="period_renewal")
     content = period_renewed_email(plan_name=plan.name, credits=plan.monthly_credits)
-    send_branded_email(to=user.email, subject=content.subject, plain=content.plain, html=content.html)
+    send_branded_email(
+        to=user.email, subject=content.subject, plain=content.plain, html=content.html
+    )
 
 
 def _notify_low_credits_if_due(db: Session, user: User, *, now: datetime) -> None:
@@ -135,7 +137,9 @@ def _notify_low_credits_if_due(db: Session, user: User, *, now: datetime) -> Non
     user.low_credits_notified_at = now
     db.add(user)
     content = low_credits_email(credits_balance=user.credits_balance)
-    send_branded_email(to=user.email, subject=content.subject, plain=content.plain, html=content.html)
+    send_branded_email(
+        to=user.email, subject=content.subject, plain=content.plain, html=content.html
+    )
 
 
 def _notify_period_ending_if_due(db: Session, user: User, *, now: datetime) -> None:
@@ -149,7 +153,9 @@ def _notify_period_ending_if_due(db: Session, user: User, *, now: datetime) -> N
     user.period_ending_notified_at = now
     db.add(user)
     content = period_ending_email(period_end=user.billing_period_end)
-    send_branded_email(to=user.email, subject=content.subject, plain=content.plain, html=content.html)
+    send_branded_email(
+        to=user.email, subject=content.subject, plain=content.plain, html=content.html
+    )
 
 
 def _credit_paid_topups(db: Session, *, now: datetime) -> None:
@@ -168,7 +174,9 @@ def _credit_paid_topups(db: Session, *, now: datetime) -> None:
         db.add(invoice)
         record_ledger_entry(db, user, amount=invoice.credits, reason="topup")
         content = credits_topup_paid_email(credits=invoice.credits, amount_rub=invoice.amount_rub)
-        send_branded_email(to=user.email, subject=content.subject, plain=content.plain, html=content.html)
+        send_branded_email(
+            to=user.email, subject=content.subject, plain=content.plain, html=content.html
+        )
 
 
 def run_billing_maintenance(db: Session) -> None:

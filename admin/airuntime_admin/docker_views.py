@@ -140,9 +140,9 @@ def _sum_block_io(stats: dict[str, Any]) -> tuple[int, int]:
 def _cpu_percent(stats: dict[str, Any]) -> float:
     cpu_stats = stats.get("cpu_stats") or {}
     precpu_stats = stats.get("precpu_stats") or {}
-    cpu_delta = (
-        (cpu_stats.get("cpu_usage") or {}).get("total_usage") or 0
-    ) - ((precpu_stats.get("cpu_usage") or {}).get("total_usage") or 0)
+    cpu_delta = ((cpu_stats.get("cpu_usage") or {}).get("total_usage") or 0) - (
+        (precpu_stats.get("cpu_usage") or {}).get("total_usage") or 0
+    )
     system_delta = (cpu_stats.get("system_cpu_usage") or 0) - (
         precpu_stats.get("system_cpu_usage") or 0
     )

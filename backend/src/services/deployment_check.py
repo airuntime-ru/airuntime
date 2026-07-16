@@ -15,7 +15,11 @@ from src.services.agent.events import AgentDone, TextDelta
 from src.services.agent.loop import CodingAgentSession
 from src.services.agent.prompt import build_runtime_repair_prompt
 from src.services.agent.tools import WorkspaceTools
-from src.services.agentic_artifacts import _resolve_provider_and_key, _write_manifest, ensure_required_files
+from src.services.agentic_artifacts import (
+    _resolve_provider_and_key,
+    _write_manifest,
+    ensure_required_files,
+)
 from src.services.artifacts import ArtifactError
 from src.services.docker_control_queue import submit_control_job
 from src.services.project_git import commit_snapshot

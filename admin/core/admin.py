@@ -27,4 +27,3 @@ class AdminUserAdmin(UserAdmin):
         ),
     )
     search_fields = ("email",)
-

@@ -44,4 +44,3 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index("ix_admin_system_settings_key", table_name="admin_system_settings")
     op.drop_table("admin_system_settings")
-

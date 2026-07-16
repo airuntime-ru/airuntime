@@ -54,11 +54,19 @@ def upgrade() -> None:
 
     op.add_column(
         "users",
-        sa.Column("plan_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("plans.id"), nullable=True),
+        sa.Column(
+            "plan_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("plans.id"), nullable=True
+        ),
     )
-    op.add_column("users", sa.Column("billing_period_start", sa.DateTime(timezone=True), nullable=True))
-    op.add_column("users", sa.Column("billing_period_end", sa.DateTime(timezone=True), nullable=True))
-    op.add_column("users", sa.Column("low_credits_notified_at", sa.DateTime(timezone=True), nullable=True))
+    op.add_column(
+        "users", sa.Column("billing_period_start", sa.DateTime(timezone=True), nullable=True)
+    )
+    op.add_column(
+        "users", sa.Column("billing_period_end", sa.DateTime(timezone=True), nullable=True)
+    )
+    op.add_column(
+        "users", sa.Column("low_credits_notified_at", sa.DateTime(timezone=True), nullable=True)
+    )
     op.add_column(
         "users", sa.Column("period_ending_notified_at", sa.DateTime(timezone=True), nullable=True)
     )

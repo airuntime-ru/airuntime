@@ -75,4 +75,3 @@ def read_project_logs(db: Session, project: Project) -> ProjectLogsResponse:
         container_id=deployment.container_id if deployment else None,
         logs_ref=deployment.logs_ref if deployment else None,
     )
-

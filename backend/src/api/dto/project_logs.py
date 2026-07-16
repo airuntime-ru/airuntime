@@ -9,4 +9,3 @@ class ProjectLogsResponse(BaseModel):
     deployment_status: str | None
     container_id: str | None
     logs_ref: str | None
-

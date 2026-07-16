@@ -231,7 +231,9 @@ def forgot_password(
             plain=content.plain,
             html=content.html,
         )
-    return AuthMessageResponse(message="Если аккаунт существует, инструкции по сбросу пароля отправлены на почту")
+    return AuthMessageResponse(
+        message="Если аккаунт существует, инструкции по сбросу пароля отправлены на почту"
+    )
 
 
 @router.post("/verify-email", response_model=AuthMessageResponse)

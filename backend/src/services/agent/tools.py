@@ -117,7 +117,16 @@ TOOL_DEFS: list[dict[str, Any]] = [
             "themselves in the project's Settings page, where the platform can validate it. "
             "Call this as soon as you know the project needs a credential you don't have, "
             "instead of asking for it as chat text and instead of inventing/hardcoding a value. "
-            "Safe to call again for the same key - it won't overwrite an existing value."
+            "Safe to call again for the same key - it won't overwrite an existing value.\n"
+            "IMPORTANT - do NOT use this for a database/cache/queue that YOU are provisioning "
+            "for this project (e.g. a key named DATABASE_URL, REDIS_URL, MONGO_URL, "
+            "RABBITMQ_URL for a service you're about to create) - call request_service for "
+            "that instead, which provisions the real container and injects the connection "
+            "string automatically. Never make a non-technical user manually type a connection "
+            "string for infrastructure the platform can just set up for them. Only use "
+            "request_secret for things you genuinely cannot provision yourself: a third-party "
+            "API key, a payment gateway secret, or a database/service the user explicitly says "
+            "they already have elsewhere and will connect to."
         ),
         "parameters": {
             "type": "object",
@@ -154,7 +163,10 @@ TOOL_DEFS: list[dict[str, Any]] = [
             "connect to; use that hostname with whatever port/credentials you configure via "
             "`env`, since there's no auto-generated connection string for a custom image. Safe "
             "to call again for the same kind - it won't create a duplicate or change an "
-            "existing service's config."
+            "existing service's config. This is the only correct way to give the project a "
+            "database/cache/queue it doesn't already have - never ask the user (via "
+            "request_secret or chat text) to supply a connection string for something you're "
+            "provisioning yourself; most users aren't technical and won't know what that means."
         ),
         "parameters": {
             "type": "object",

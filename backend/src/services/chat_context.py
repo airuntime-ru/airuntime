@@ -37,7 +37,6 @@ _SUMMARY_PROMPT = (
 def _redis_client():
     try:
         from redis import Redis
-        from redis.exceptions import RedisError
 
         from src.core.config import settings
 
@@ -56,7 +55,10 @@ def load_plain_history(db: Session, chat_id) -> list[dict[str, str]]:
         .all()
     )
     return [
-        {"role": "assistant" if row.role == "assistant" else "user", "content": row.content_markdown}
+        {
+            "role": "assistant" if row.role == "assistant" else "user",
+            "content": row.content_markdown,
+        }
         for row in rows
         if row.content_markdown and row.content_markdown.strip()
     ]
