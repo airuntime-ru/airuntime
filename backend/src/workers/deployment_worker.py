@@ -8,18 +8,22 @@ from src.db.models.deployment import Deployment
 from src.db.models.project import Project
 from src.db.models.project_service import ProjectService
 from src.db.session import SessionLocal
-from src.services.artifacts import build_project_image, try_build_project_image
+from src.services.artifacts import build_project_image
 from src.services.billing import run_billing_maintenance
 from src.services.cloudflare_dns import CloudflareDnsError, sync_dns_for_website_deploy
 from src.services.deployment.docker_adapter import DeployRequest, DockerDeploymentAdapter
-from src.services.deployment_check import check_and_repair_deployment, detect_runtime_errors
+from src.services.deployment_check import (
+    check_and_repair_deployment,
+    detect_runtime_errors,
+    is_repairable_app_error,
+)
 from src.services.deployment_queue import pop_deployment_job
 from src.services.deployments import append_deployment_log, store_deployment_error, truncate_logs_ref
-from src.services.docker_control_queue import pop_control_job, push_control_result
+from src.services.docker_control_actions import run_control_action
+from src.services.docker_control_queue import pop_control_job, push_control_result, worker_inline_docker
 from src.services.project_services import (
     build_connection_env,
     ensure_service_containers,
-    teardown_service_containers,
 )
 from src.services.project_subdomain import resolve_deploy_subdomain
 from src.services.telegram_profile import TelegramProfileError, fetch_bot_profile
@@ -40,49 +44,24 @@ def process_control_job(job: dict) -> None:
     job_id = job.get("job_id", "")
     action = job.get("action")
     project_id = job.get("project_id")
-    try:
-        if action == "stop" and project_id:
-            # App container only - sidecar services/volumes/network are left running so a
-            # later restart is fast and doesn't lose data.
-            DockerDeploymentAdapter().stop_project(str(project_id))
-            push_control_result(job_id, {"ok": True})
-        elif action == "cleanup" and project_id:
-            adapter = DockerDeploymentAdapter()
-            adapter.stop_project(str(project_id))
-            db: Session = SessionLocal()
-            try:
-                has_services = (
-                    db.query(ProjectService).filter(ProjectService.project_id == project_id).first()
-                    is not None
-                )
-            finally:
-                db.close()
-            if has_services:
-                teardown_service_containers(adapter.client, str(project_id), remove_volumes=True)
-            push_control_result(job_id, {"ok": True})
-        elif action == "logs":
-            container_id = job.get("container_id")
-            tail = job.get("tail", 400)
-            logs = DockerDeploymentAdapter().fetch_container_logs(str(container_id), tail=tail)
-            push_control_result(job_id, {"ok": True, "logs": logs})
-        elif action == "build_check" and project_id:
-            db = SessionLocal()
-            try:
-                project = db.get(Project, project_id)
-                if not project:
-                    push_control_result(job_id, {"ok": False, "log": "Project not found"})
-                else:
-                    push_control_result(job_id, try_build_project_image(project))
-            finally:
-                db.close()
-        else:
-            push_control_result(job_id, {"ok": True})
-    except Exception as exc:  # noqa: BLE001 - always report back, never crash the worker loop
-        push_control_result(job_id, {"ok": False, "error": str(exc)})
+    # Drop Redis envelope keys so run_control_action only sees action-specific extras.
+    extra = {
+        key: value
+        for key, value in job.items()
+        if key not in {"job_id", "action", "project_id"}
+    }
+    with worker_inline_docker():
+        result = run_control_action(action=action, project_id=project_id, extra=extra)
+    push_control_result(job_id, result)
 
 
 def process_job(job: dict) -> None:
     db: Session = SessionLocal()
+    with worker_inline_docker():
+        _process_job_body(db, job)
+
+
+def _process_job_body(db: Session, job: dict) -> None:
     try:
         deployment = db.get(Deployment, job["deployment_id"])
         if not deployment:
@@ -254,9 +233,14 @@ def _mark_deployment_failed(db: Session, job: dict, exc: BaseException) -> None:
         return
 
     project = db.get(Project, job.get("project_id"))
-    if project and not job.get("skip_auto_check"):
+    if (
+        project
+        and not job.get("skip_auto_check")
+        and is_repairable_app_error(full_error)
+    ):
         try:
             # Pass the FULL error so repair is not limited to the 500-char logs_ref hint.
+            # Runs under worker_inline_docker so build_project/logs do not self-deadlock.
             check_and_repair_deployment(db, project, force_error=full_error)
         except Exception:  # noqa: BLE001 - never crash the worker on repair failure
             pass

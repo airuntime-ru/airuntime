@@ -42,6 +42,7 @@ from src.services.artifacts import ArtifactError, _telegram_token
 from src.services.billing import record_usage
 from src.services.chat_context import build_llm_context
 from src.services.deployments import create_deployment_for_project, store_deployment_error
+from src.services.deployment_check import is_repairable_app_error
 from src.services.file_context import (
     attach_files_to_message,
     build_attachment_context,
@@ -229,6 +230,98 @@ _DEPLOY_POLL_SECONDS = 2.0
 # Post-deploy auto-check sleeps ~3s then may start a repair redeploy - wait past that
 # before declaring success so chat doesn't claim "live" while the follow-up fails.
 _DEPLOY_SETTLE_SECONDS = 6.0
+# After a failed deploy the worker may hand logs to the repair agent (can take minutes).
+_REPAIR_FOLLOW_SECONDS = 240.0
+
+
+async def _follow_repair_redeploy(
+    db: Session,
+    *,
+    project: Project,
+    failed_deployment: Deployment,
+    deadline: float,
+    last_label: str,
+):
+    """After a failed deploy, wait for worker auto-repair to queue a follow-up deploy.
+
+    Yields SSE status frames while waiting. Final yield is
+    ("done", deployment_to_report, last_status_label).
+    """
+    watched_failed_id = failed_deployment.id
+    failed_started = failed_deployment.started_at
+    label = last_label
+
+    yield _sse_status("deploy", "Анализирую ошибку запуска и исправляю", "running")
+    await asyncio.sleep(_DEPLOY_SETTLE_SECONDS)
+    db.expire_all()
+    db.refresh(project)
+
+    def _find_newer() -> Deployment | None:
+        candidate = (
+            db.query(Deployment)
+            .filter(
+                Deployment.project_id == project.id,
+                Deployment.id != watched_failed_id,
+            )
+            .order_by(Deployment.started_at.desc().nullslast())
+            .first()
+        )
+        if (
+            candidate is not None
+            and candidate.started_at is not None
+            and failed_started is not None
+            and candidate.started_at >= failed_started
+        ):
+            return candidate
+        return None
+
+    newer = _find_newer()
+    if newer is None:
+        repair_deadline = min(deadline, time.monotonic() + _REPAIR_FOLLOW_SECONDS)
+        while time.monotonic() < repair_deadline:
+            await asyncio.sleep(_DEPLOY_POLL_SECONDS)
+            db.expire_all()
+            newer = _find_newer()
+            if newer is not None:
+                break
+        else:
+            yield ("done", failed_deployment, label)
+            return
+
+    next_label = _deploy_status_label(newer.status)
+    if next_label != label:
+        state = (
+            "done"
+            if newer.status == "completed"
+            else "error"
+            if newer.status == "failed"
+            else "running"
+        )
+        yield _sse_status("deploy", next_label, state)
+        label = next_label
+
+    if newer.status not in _DEPLOYMENT_TERMINAL:
+        while time.monotonic() < deadline:
+            await asyncio.sleep(_DEPLOY_POLL_SECONDS)
+            db.expire_all()
+            newer = db.get(Deployment, newer.id)
+            if newer is None:
+                break
+            next_label = _deploy_status_label(newer.status)
+            if next_label != label:
+                state = (
+                    "done"
+                    if newer.status == "completed"
+                    else "error"
+                    if newer.status == "failed"
+                    else "running"
+                )
+                yield _sse_status("deploy", next_label, state)
+                label = next_label
+            if newer.status in _DEPLOYMENT_TERMINAL:
+                break
+
+    yield ("done", newer if newer is not None else failed_deployment, label)
 
 
 def _queue_deployment_or_notify_limit(
@@ -859,8 +952,47 @@ async def _stream_events(
                     )
                     yield _sse_status("done", "Проект запущен и работает", "done")
                 elif deployment is not None and deployment.status == "failed":
-                    yield append_visible(_launch_failure_message(deployment, project))
-                    yield _sse_status("error", "Запуск не удался", "error")
+                    error_blob = (
+                        (deployment.error_text or "")
+                        or (
+                            deployment.logs_ref
+                            if deployment.logs_ref
+                            and not deployment.logs_ref.startswith("docker://")
+                            else ""
+                        )
+                        or (project.logs or "")
+                    )
+                    if is_repairable_app_error(error_blob):
+                        async for frame in _follow_repair_redeploy(
+                            db,
+                            project=project,
+                            failed_deployment=deployment,
+                            deadline=deadline,
+                            last_label=last_label,
+                        ):
+                            if isinstance(frame, tuple) and frame and frame[0] == "done":
+                                _, deployment, last_label = frame
+                            else:
+                                yield frame
+                        db.expire_all()
+                        db.refresh(project)
+                        if deployment is not None:
+                            db.refresh(deployment)
+
+                    if (
+                        deployment is not None
+                        and deployment.status == "completed"
+                        and project.status == "live"
+                    ):
+                        yield append_visible(
+                            _launch_success_message(
+                                project, has_website=has_website, has_bot=has_bot
+                            )
+                        )
+                        yield _sse_status("done", "Проект запущен и работает", "done")
+                    else:
+                        yield append_visible(_launch_failure_message(deployment, project))
+                        yield _sse_status("error", "Запуск не удался", "error")
                 elif deployment is not None and deployment.status in {"cancelled", "stopped"}:
                     yield append_visible("\n\nЗапуск остановлен.")
                     yield _sse_status("error", "Запуск остановлен", "error")

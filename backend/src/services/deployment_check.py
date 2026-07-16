@@ -51,6 +51,20 @@ _BUILD_HINTS = (
     "error building",
 )
 
+# Platform/infra failures - agent cannot fix these by editing project files.
+_INFRA_PATTERNS = (
+    re.compile(r"cannot connect to (the )?docker", re.I),
+    re.compile(r"error while fetching server api version", re.I),
+    re.compile(r"docker\.sock", re.I),
+    re.compile(r"no space left on device", re.I),
+    re.compile(r"deployment timed out", re.I),
+    re.compile(r"timed out waiting for deployment", re.I),
+    re.compile(r"worker crashed during deploy", re.I),
+    re.compile(r"temporary failure in name resolution", re.I),
+    re.compile(r"connection refused.*(?:docker|2375|2376)", re.I),
+    re.compile(r"error response from daemon", re.I),
+)
+
 # Generous budget so repair sees pip/apt tails, not a 500-char logs_ref stub.
 _ERROR_BUDGET = 12_000
 
@@ -72,6 +86,29 @@ def detect_runtime_errors(logs: str) -> str | None:
 def _looks_like_build_failure(text: str) -> bool:
     lowered = text.lower()
     return any(hint in lowered for hint in _BUILD_HINTS)
+
+
+def _looks_like_infra_failure(text: str) -> bool:
+    return any(pattern.search(text) for pattern in _INFRA_PATTERNS)
+
+
+def is_repairable_app_error(text: str) -> bool:
+    """True when logs look like an app/build bug the coding agent can fix.
+
+    Clear Traceback / ImportError / RuntimeError / build failures → repair.
+    Pure infra (Docker daemon down, deploy timeout, worker crash) → skip auto-repair.
+    If both appear, prefer repair when a real app traceback is present.
+    """
+    if not (text or "").strip():
+        return False
+    app_excerpt = detect_runtime_errors(text)
+    if app_excerpt:
+        return True
+    if _looks_like_infra_failure(text):
+        return False
+    if _looks_like_build_failure(text):
+        return True
+    return bool(re.search(r"\b(Error|Exception|Traceback)\b", text))
 
 
 def _latest_checkable_deployment(db: Session, project: Project) -> Deployment | None:
@@ -267,6 +304,34 @@ def check_and_repair_deployment(
             "fixed": False,
             "summary": "Ошибок в логах не найдено - деплой выглядит исправным.",
         }
+
+    if not is_repairable_app_error(error_excerpt):
+        summary = (
+            "Деплой упал из‑за инфраструктурной ошибки платформы — "
+            "автоисправление кода здесь не поможет. Попробуйте «Собрать и запустить» позже "
+            "или напишите в поддержку, если повторяется."
+        )
+        if deployment and deployment.status == "failed":
+            _append_chat_message(db, chat, role="assistant", content=summary)
+            db.commit()
+        return {
+            "checked": True,
+            "found_errors": True,
+            "fixed": False,
+            "skipped_infra": True,
+            "summary": summary,
+        }
+
+    # Tell the user repair started (auto path used to only append after LLM finished).
+    _append_chat_message(
+        db,
+        chat,
+        role="assistant",
+        content=(
+            "Нашёл ошибку запуска в логах — передаю её агенту для анализа и исправления…"
+        ),
+    )
+    db.commit()
 
     root = _project_dir(project.id)
     try:

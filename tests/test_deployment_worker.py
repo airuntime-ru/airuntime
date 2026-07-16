@@ -1,3 +1,4 @@
+from src.services import docker_control_actions
 from src.workers import deployment_worker
 
 
@@ -51,10 +52,10 @@ def test_process_control_job_stop_leaves_services_alone(monkeypatch):
     results: list[dict] = []
 
     monkeypatch.setattr(
-        deployment_worker, "DockerDeploymentAdapter", lambda: _FakeAdapter(stop_calls)
+        docker_control_actions, "DockerDeploymentAdapter", lambda: _FakeAdapter(stop_calls)
     )
     monkeypatch.setattr(
-        deployment_worker,
+        docker_control_actions,
         "teardown_service_containers",
         lambda client, project_id, *, remove_volumes: teardown_calls.append(
             (project_id, remove_volumes)
@@ -77,11 +78,13 @@ def test_process_control_job_cleanup_tears_down_services(monkeypatch):
     results: list[dict] = []
 
     monkeypatch.setattr(
-        deployment_worker, "DockerDeploymentAdapter", lambda: _FakeAdapter(stop_calls)
+        docker_control_actions, "DockerDeploymentAdapter", lambda: _FakeAdapter(stop_calls)
     )
-    monkeypatch.setattr(deployment_worker, "SessionLocal", lambda: _FakeSession(has_services=True))
     monkeypatch.setattr(
-        deployment_worker,
+        docker_control_actions, "SessionLocal", lambda: _FakeSession(has_services=True)
+    )
+    monkeypatch.setattr(
+        docker_control_actions,
         "teardown_service_containers",
         lambda client, project_id, *, remove_volumes: teardown_calls.append(
             (project_id, remove_volumes)
@@ -104,11 +107,13 @@ def test_process_control_job_cleanup_skips_teardown_without_services(monkeypatch
     results: list[dict] = []
 
     monkeypatch.setattr(
-        deployment_worker, "DockerDeploymentAdapter", lambda: _FakeAdapter(stop_calls)
+        docker_control_actions, "DockerDeploymentAdapter", lambda: _FakeAdapter(stop_calls)
     )
-    monkeypatch.setattr(deployment_worker, "SessionLocal", lambda: _FakeSession(has_services=False))
     monkeypatch.setattr(
-        deployment_worker,
+        docker_control_actions, "SessionLocal", lambda: _FakeSession(has_services=False)
+    )
+    monkeypatch.setattr(
+        docker_control_actions,
         "teardown_service_containers",
         lambda client, project_id, *, remove_volumes: teardown_calls.append(
             (project_id, remove_volumes)
@@ -128,11 +133,11 @@ def test_process_control_job_cleanup_skips_teardown_without_services(monkeypatch
 def test_process_control_job_build_check_returns_build_result(monkeypatch):
     fake_project = object()
     monkeypatch.setattr(
-        deployment_worker, "SessionLocal", lambda: _FakeSessionWithGet(fake_project)
+        docker_control_actions, "SessionLocal", lambda: _FakeSessionWithGet(fake_project)
     )
     build_calls: list = []
     monkeypatch.setattr(
-        deployment_worker,
+        docker_control_actions,
         "try_build_project_image",
         lambda project: build_calls.append(project) or {"ok": True, "log": "Build succeeded"},
     )
@@ -150,7 +155,9 @@ def test_process_control_job_build_check_returns_build_result(monkeypatch):
 
 
 def test_process_control_job_build_check_missing_project(monkeypatch):
-    monkeypatch.setattr(deployment_worker, "SessionLocal", lambda: _FakeSessionWithGet(None))
+    monkeypatch.setattr(
+        docker_control_actions, "SessionLocal", lambda: _FakeSessionWithGet(None)
+    )
     results: list[dict] = []
     monkeypatch.setattr(
         deployment_worker, "push_control_result", lambda job_id, result: results.append(result)
