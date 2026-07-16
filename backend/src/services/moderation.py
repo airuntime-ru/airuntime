@@ -12,6 +12,7 @@ import json
 import re
 from dataclasses import dataclass
 
+from src.services.agent.codex_runtime import CODEX_ELIGIBLE_PROVIDERS, codex_simple_complete
 from src.services.agent.events import TextDelta
 from src.services.agent.providers import get_agent_provider
 from src.services.secrets import extract_telegram_bot_tokens, redact_telegram_bot_tokens
@@ -103,21 +104,26 @@ async def check_project_safety(
     had_tokens = bool(extract_telegram_bot_tokens(text)) or "[TELEGRAM_BOT_TOKEN]" in (text or "")
     moderated_text = redact_telegram_bot_tokens(text)
 
-    provider = get_agent_provider(provider_name)
-    messages = provider.build_messages([], moderated_text[:4000])
-    collected = ""
-    try:
-        async for event in provider.stream_turn(
-            system_prompt=_MODERATION_SYSTEM_PROMPT,
-            messages=messages,
-            tools=[],
-            model=model,
-            api_key=api_key,
-        ):
-            if isinstance(event, TextDelta):
-                collected += event.text
-    except Exception:  # defensive: moderation must never take the whole turn down
-        return ModerationVerdict(blocked=False)
+    if provider_name in CODEX_ELIGIBLE_PROVIDERS:
+        collected = await codex_simple_complete(
+            system_prompt=_MODERATION_SYSTEM_PROMPT, user_text=moderated_text[:4000], model=model
+        )
+    else:
+        provider = get_agent_provider(provider_name)
+        messages = provider.build_messages([], moderated_text[:4000])
+        collected = ""
+        try:
+            async for event in provider.stream_turn(
+                system_prompt=_MODERATION_SYSTEM_PROMPT,
+                messages=messages,
+                tools=[],
+                model=model,
+                api_key=api_key,
+            ):
+                if isinstance(event, TextDelta):
+                    collected += event.text
+        except Exception:  # defensive: moderation must never take the whole turn down
+            return ModerationVerdict(blocked=False)
 
     match = re.search(r"\{.*\}", collected, flags=re.DOTALL)
     if not match:

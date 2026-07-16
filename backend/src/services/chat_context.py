@@ -21,6 +21,7 @@ import json
 from sqlalchemy.orm import Session
 
 from src.db.models.message import Message
+from src.services.agent.codex_runtime import CODEX_ELIGIBLE_PROVIDERS, codex_simple_complete
 from src.services.agent.events import TextDelta, TurnFinished
 from src.services.agent.providers import get_agent_provider
 from src.services.prompt_guard import clip_history_message
@@ -71,6 +72,12 @@ async def _summarize(
     if not api_key:
         return ""
     transcript = "\n\n".join(f"{m['role']}: {m['content']}" for m in older[-80:])
+
+    if provider_name in CODEX_ELIGIBLE_PROVIDERS:
+        return await codex_simple_complete(
+            system_prompt=_SUMMARY_PROMPT, user_text=transcript, model=model
+        )
+
     provider = get_agent_provider(provider_name)
     text_parts: list[str] = []
     try:

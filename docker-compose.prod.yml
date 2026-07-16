@@ -218,6 +218,21 @@ services:
     networks:
       - internal
 
+  codex:
+    build:
+      context: .
+      dockerfile: deployment/codex/Dockerfile
+    container_name: airuntime-codex
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - airruntime_projects_data:/data/airruntime-projects
+    depends_on:
+      redis:
+        condition: service_started
+    networks:
+      - internal
+
   django-admin:
     build:
       context: .

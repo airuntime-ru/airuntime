@@ -12,6 +12,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
+from src.services.agent.codex_runtime import CODEX_ELIGIBLE_PROVIDERS, CodexAgentSession
 from src.services.agent.events import AgentDone, TextDelta, ToolCallRequested, ToolCallResult
 from src.services.agent.providers import get_agent_provider
 from src.services.agent.tools import TOOL_DEFS, WorkspaceTools
@@ -64,11 +65,17 @@ class CodingAgentSession:
         system_prompt: str,
     ) -> None:
         self.provider_name = provider_name
-        self.provider = get_agent_provider(provider_name)
         self.model = model
         self.api_key = api_key
         self.workspace = workspace
         self.system_prompt = system_prompt
+        # Codex CLI (running in its own Docker container - see codex_runtime.py) replaces the
+        # HTTP provider loop below for the providers it can drive. Anything else (an explicit
+        # anthropic/gemini/openrouter pick, or openai falling back because it's the only one
+        # configured) keeps using the old per-provider streaming adapters.
+        self.use_codex = provider_name in CODEX_ELIGIBLE_PROVIDERS
+        if not self.use_codex:
+            self.provider = get_agent_provider(provider_name)
 
     async def run(
         self,
@@ -77,6 +84,16 @@ class CodingAgentSession:
         user_message: str,
         images: list[ImageAttachment] | None = None,
     ) -> AsyncIterator[TextDelta | ToolCallRequested | ToolCallResult | AgentDone]:
+        if self.use_codex:
+            session = CodexAgentSession(
+                model=self.model, workspace=self.workspace, system_prompt=self.system_prompt
+            )
+            async for event in session.run(
+                history=_normalize_history(history), user_message=user_message, images=images
+            ):
+                yield event
+            return
+
         tools = TOOL_DEFS if self.provider.supports_tools() else []
         wire_messages = self.provider.build_messages(
             _normalize_history(history), user_message, images=images or []

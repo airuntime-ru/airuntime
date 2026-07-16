@@ -1,3 +1,4 @@
+import threading
 import time
 from datetime import UTC, datetime, timedelta
 
@@ -40,10 +41,30 @@ def process_billing_sweep() -> None:
         db.close()
 
 
+def _run_codex_job(job: dict) -> None:
+    from src.services.agent.codex_worker import execute_codex_run
+
+    try:
+        execute_codex_run(job)
+    except Exception:  # noqa: BLE001 - execute_codex_run already reports failure via Redis
+        pass
+
+
+def _spawn_codex_run(job: dict) -> None:
+    # A coding turn can run for minutes - handle it on its own thread so the main loop keeps
+    # popping other control/deployment jobs instead of stalling behind it. Not routed through
+    # run_control_action: that returns one dict for a Redis RPC result key nobody polls here -
+    # codex_run's caller (agent/codex_runtime.py) polls a live events list instead.
+    threading.Thread(target=_run_codex_job, args=(job,), daemon=True).start()
+
+
 def process_control_job(job: dict) -> None:
     job_id = job.get("job_id", "")
     action = job.get("action")
     project_id = job.get("project_id")
+    if action == "codex_run":
+        _spawn_codex_run(job)
+        return
     # Drop Redis envelope keys so run_control_action only sees action-specific extras.
     extra = {
         key: value

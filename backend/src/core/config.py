@@ -47,6 +47,14 @@ class Settings(BaseSettings):
     smtp_from: str = "noreply@airuntime.ru"
     smtp_use_tls: bool = True
 
+    # Codex CLI runner (replaces direct provider HTTP calls for the "openai" path - see
+    # backend/src/services/agent/codex_runtime.py). Other providers keep the old HTTP path.
+    codex_container_name: str = "airuntime-codex"
+    # A real coding turn (write/fix a multi-file project, rebuild until it passes) can
+    # legitimately run long - give it room to work without getting cut off mid-task.
+    codex_turn_timeout_seconds: int = 1800
+    codex_simple_timeout_seconds: int = 45
+
     docker_binary: str = "docker"
     deployment_port_base: int = 18000
     deployment_memory_limit: str = "512m"
