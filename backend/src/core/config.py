@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     max_running_projects_per_user: int = 3
     deployment_public_network: str | None = None
     deployment_expose_host_ports: bool = True
+    deployment_service_memory_limit: str = "256m"
+    deployment_service_cpu_limit: str = "0.5"
+    max_services_per_project: int = 100
 
     cf_zone_id: str | None = None
     cf_api_token: str | None = None

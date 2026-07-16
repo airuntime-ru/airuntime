@@ -42,6 +42,7 @@ from src.services.moderation import check_project_safety
 from src.services.project_git import ProjectGitError, commit_snapshot
 from src.services.project_intent import update_project_type_from_prompt
 from src.services.project_runtime import RunningProjectLimitError, block_project
+from src.services.project_services import ProjectServiceError, ensure_service_request
 from src.services.project_subdomain import (
     assert_subdomain_available,
     normalize_deploy_subdomain,
@@ -118,7 +119,9 @@ def _compose_user_message(*, content: str, attachment_ids: list[UUID], db: Sessi
         parts.append(content.strip())
     if attachment_context:
         parts.append(attachment_context)
-    return "\n\n".join(parts) if parts else "Пользователь прикрепил файлы без текста - изучи вложения."
+    return (
+        "\n\n".join(parts) if parts else "Пользователь прикрепил файлы без текста - изучи вложения."
+    )
 
 
 def _tool_status_label(name: str, arguments: dict) -> str:
@@ -136,6 +139,9 @@ def _tool_status_label(name: str, arguments: dict) -> str:
     if name == "request_secret":
         key = arguments.get("key", "") if isinstance(arguments, dict) else ""
         return f"Запрашиваю секрет {key}" if key else "Запрашиваю секрет"
+    if name == "request_service":
+        kind = arguments.get("kind", "") if isinstance(arguments, dict) else ""
+        return f"Запрашиваю сервис {kind}" if kind else "Запрашиваю сервис"
     return f"Инструмент: {name}"
 
 
@@ -180,43 +186,60 @@ def _needs_clarification(project: Project, content: str, attachment_ids: list[UU
         "напиши бота",
         "сделай бота",
     )
-    has_context = any(
-        marker in text
-        for marker in (
-            "для ",
-            "чтобы ",
-            "котор",
-            "клиент",
-            "продаж",
-            "заяв",
-            "бренд",
-            "стиль",
-            "целевая",
+    has_context = (
+        any(
+            marker in text
+            for marker in (
+                "для ",
+                "чтобы ",
+                "котор",
+                "клиент",
+                "продаж",
+                "заяв",
+                "бренд",
+                "стиль",
+                "целевая",
+            )
         )
-    ) or _extract_deploy_subdomain(text) is not None
+        or _extract_deploy_subdomain(text) is not None
+    )
     if len(text) < 26:
         return True
-    return any(phrase in text for phrase in vague_phrases) and not has_context and not project.description
+    return (
+        any(phrase in text for phrase in vague_phrases)
+        and not has_context
+        and not project.description
+    )
 
 
 def _clarifying_questions(project: Project, content: str) -> str:
-    if project.type == "telegram_bot":
-        token_help_url = f"{settings.resolved_frontend_url}/help/telegram-token"
-        return (
-            "Перед разработкой бота нужно уточнить пару вещей:\n\n"
-            "1. Где бот должен брать данные и что отвечать по умолчанию?\n"
-            "2. Нужны ли команды вроде /start, /help, заявка, меню или сценарии?\n"
-            "3. Добавьте секрет TELEGRAM_BOT_TOKEN в настройках проекта, чтобы я смог запустить бота.\n\n"
-            "Как получить токен: откройте @BotFather в Telegram, выполните /newbot и скопируйте выданный token. "
-            f"[Подробная инструкция]({token_help_url})\n\n"
-            "После этого я соберу файлы, проверю Docker-сборку и запущу polling."
-        )
-    return (
-        "Перед разработкой стоит уточнить основу проекта:\n\n"
+    token_help_url = f"{settings.resolved_frontend_url}/help/telegram-token"
+    bot_questions = (
+        "1. Где бот должен брать данные и что отвечать по умолчанию?\n"
+        "2. Нужны ли команды вроде /start, /help, заявка, меню или сценарии?\n"
+        "3. Добавьте секрет TELEGRAM_BOT_TOKEN в настройках проекта, чтобы я смог запустить бота.\n\n"
+        "Как получить токен: откройте @BotFather в Telegram, выполните /newbot и скопируйте выданный token. "
+        f"[Подробная инструкция]({token_help_url})\n"
+    )
+    site_questions = (
         "1. Для кого этот продукт и какое действие пользователь должен совершить?\n"
         "2. Какие 3-5 блоков или функций точно нужны?\n"
         "3. Какой стиль ближе: минимальный, премиальный, playful, SaaS, editorial?\n"
-        "4. Нужен ли конкретный поддомен или можно подобрать автоматически?\n\n"
+        "4. Нужен ли конкретный поддомен или можно подобрать автоматически?\n"
+    )
+    if project.type == "mixed":
+        return (
+            "Перед разработкой сайта и бота в одном проекте нужно уточнить пару вещей:\n\n"
+            f"По сайту:\n{site_questions}\nПо боту:\n{bot_questions}\n"
+            "Ответьте одним сообщением, и я соберу оба сразу."
+        )
+    if project.type == "telegram_bot":
+        return (
+            f"Перед разработкой бота нужно уточнить пару вещей:\n\n{bot_questions}\n"
+            "После этого я соберу файлы, проверю Docker-сборку и запущу polling."
+        )
+    return (
+        f"Перед разработкой стоит уточнить основу проекта:\n\n{site_questions}\n"
         "Ответьте одним сообщением, и я соберу проект уже по нормальному плану."
     )
 
@@ -426,16 +449,14 @@ async def _stream_events(
     if current_user.is_banned:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Аккаунт заблокирован администратором" + (
-                f": {current_user.banned_reason}" if current_user.banned_reason else "."
-            ),
+            detail="Аккаунт заблокирован администратором"
+            + (f": {current_user.banned_reason}" if current_user.banned_reason else "."),
         )
     if project.status == "blocked":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Проект заблокирован модерацией" + (
-                f": {project.blocked_reason}" if project.blocked_reason else "."
-            ),
+            detail="Проект заблокирован модерацией"
+            + (f": {project.blocked_reason}" if project.blocked_reason else "."),
         )
 
     content = user_message.strip()
@@ -448,7 +469,11 @@ async def _stream_events(
     # Only allowed to move away from the initial guess while nothing has been generated yet -
     # once a project has real files/a deploy, a later message mentioning an unrelated word
     # (e.g. any form of "работать") must not silently flip it to a different project type.
-    if content and project.status == "created" and update_project_type_from_prompt(project, content):
+    if (
+        content
+        and project.status == "created"
+        and update_project_type_from_prompt(project, content)
+    ):
         db.add(project)
         db.commit()
         db.refresh(project)
@@ -466,7 +491,9 @@ async def _stream_events(
             db.commit()
             db.refresh(project)
 
-    user_agent_message = _compose_user_message(content=content, attachment_ids=attachment_ids, db=db)
+    user_agent_message = _compose_user_message(
+        content=content, attachment_ids=attachment_ids, db=db
+    )
     try:
         safe_message = sanitize_user_message(user_agent_message)
     except ValueError as exc:
@@ -515,7 +542,7 @@ async def _stream_events(
             return _sse_chunk(text)
 
         if _needs_clarification(project, content, attachment_ids):
-            if project.type == "telegram_bot":
+            if project.type in ("telegram_bot", "mixed"):
                 ensure_secret_placeholder(
                     db, project, "TELEGRAM_BOT_TOKEN", "Нужен для запуска Telegram-бота"
                 )
@@ -556,7 +583,7 @@ async def _stream_events(
             if summary:
                 system_prompt += f"\n\nКонтекст более раннего диалога в этом чате:\n{summary}"
 
-            workspace = WorkspaceTools(artifact_path)
+            workspace = WorkspaceTools(artifact_path, project_id=str(project.id))
             session = CodingAgentSession(
                 provider_name=provider_name,
                 model=model,
@@ -593,6 +620,31 @@ async def _stream_events(
                     "(вкладка «Настройки») эти значения:\n" + "\n".join(new_secret_lines)
                 )
 
+            new_service_lines: list[str] = []
+            for service_request in workspace.requested_services:
+                try:
+                    service_row, created = ensure_service_request(
+                        db,
+                        project,
+                        service_request.kind,
+                        service_request.reason,
+                        image=service_request.image,
+                        env=service_request.env,
+                        data_path=service_request.data_path,
+                    )
+                except ProjectServiceError:
+                    continue
+                reason = service_request.reason
+                if created:
+                    label = f"**{service_row.kind}** ({service_row.image})"
+                    new_service_lines.append(f"- {label} - {reason}" if reason else f"- {label}")
+            if new_service_lines:
+                yield append_visible(
+                    "\n\nПодключаю для проекта:\n"
+                    + "\n".join(new_service_lines)
+                    + "\n\nСервис поднимется автоматически при следующем запуске проекта."
+                )
+
             if agent_error:
                 lowered = (agent_error or "").lower()
                 if "api key" in lowered or "not configured" in lowered:
@@ -608,9 +660,7 @@ async def _stream_events(
             try:
                 ensure_required_files(project, artifact_path)
             except ArtifactError:
-                yield _sse_status(
-                    "verify", "Не хватает обязательных файлов - собираю по шаблону"
-                )
+                yield _sse_status("verify", "Не хватает обязательных файлов - собираю по шаблону")
                 artifact_path = generate_fallback_artifact(db, project, safe_message)
             for rel_path in _generated_files(artifact_path):
                 yield _sse_status("module", f"Файл готов: {rel_path}")
@@ -627,13 +677,51 @@ async def _stream_events(
 
             project.status = "ready"
             if git_commit_hash:
-                project.logs = (
-                    f"Generated artifact: {artifact_path}\nGit commit: {git_commit_hash}"
-                )
+                project.logs = f"Generated artifact: {artifact_path}\nGit commit: {git_commit_hash}"
             elif not project.logs:
                 project.logs = f"Generated artifact: {artifact_path}"
             db.add(project)
-            if project.type == "website" and settings.auto_deploy_websites:
+            has_website = project.type in ("website", "mixed")
+            has_bot = project.type in ("telegram_bot", "mixed")
+            if has_bot and not _telegram_token(db, project):
+                ensure_secret_placeholder(
+                    db, project, "TELEGRAM_BOT_TOKEN", "Нужен для запуска Telegram-бота"
+                )
+                project.status = "needs_configuration"
+                if "TELEGRAM_BOT_TOKEN" in requested_secret_keys:
+                    # Already explained above (agent called request_secret this turn) -
+                    # avoid repeating the same instructions twice in one reply.
+                    token_note = "Запуск отложен до заполнения токена."
+                else:
+                    token_help_url = f"{settings.resolved_frontend_url}/help/telegram-token"
+                    token_note = (
+                        "Файлы бота созданы, но запуск остановлен: добавьте секрет "
+                        "TELEGRAM_BOT_TOKEN в настройках проекта и повторите запуск.\n\n"
+                        "Как получить токен: откройте @BotFather в Telegram, выполните /newbot "
+                        f"и скопируйте выданный token. [Подробная инструкция]({token_help_url})"
+                    )
+                project.logs = f"{project.logs}\n{token_note}".strip()
+                db.add(project)
+                yield _sse_status("needs_configuration", "Нужен TELEGRAM_BOT_TOKEN", "error")
+                yield append_visible(f"\n\n{token_note}")
+                raise _StopDeployment
+            if has_website and has_bot:
+                yield _sse_status("deploy", "Ставлю сайт и бота в очередь запуска")
+                planned_url = planned_public_url(project)
+                limit_message = _queue_deployment_or_notify_limit(db, project)
+                if limit_message:
+                    yield _sse_status("limit", limit_message, "error")
+                    yield append_visible(f"\n\n{limit_message}")
+                elif planned_url:
+                    yield append_visible(
+                        "\n\nСайт и бот собраны в один проект и поставлены в очередь на "
+                        f"запуск. URL сайта: {planned_url}"
+                    )
+                else:
+                    yield append_visible(
+                        "\n\nСайт и бот собраны в один проект и поставлены в очередь на запуск."
+                    )
+            elif has_website and settings.auto_deploy_websites:
                 yield _sse_status("deploy", "Ставлю сайт в очередь запуска")
                 planned_url = planned_public_url(project)
                 limit_message = _queue_deployment_or_notify_limit(db, project)
@@ -645,32 +733,8 @@ async def _stream_events(
                         f"\n\nСайт собран и поставлен в очередь на запуск. URL: {planned_url}"
                     )
                 else:
-                    yield append_visible(
-                        "\n\nСайт собран и поставлен в очередь на запуск."
-                    )
-            elif project.type == "telegram_bot":
-                if not _telegram_token(db, project):
-                    ensure_secret_placeholder(
-                        db, project, "TELEGRAM_BOT_TOKEN", "Нужен для запуска Telegram-бота"
-                    )
-                    project.status = "needs_configuration"
-                    if "TELEGRAM_BOT_TOKEN" in requested_secret_keys:
-                        # Already explained above (agent called request_secret this turn) -
-                        # avoid repeating the same instructions twice in one reply.
-                        token_note = "Запуск отложен до заполнения токена."
-                    else:
-                        token_help_url = f"{settings.resolved_frontend_url}/help/telegram-token"
-                        token_note = (
-                            "Файлы бота созданы, но запуск остановлен: добавьте секрет "
-                            "TELEGRAM_BOT_TOKEN в настройках проекта и повторите запуск.\n\n"
-                            "Как получить токен: откройте @BotFather в Telegram, выполните /newbot "
-                            f"и скопируйте выданный token. [Подробная инструкция]({token_help_url})"
-                        )
-                    project.logs = f"{project.logs}\n{token_note}".strip()
-                    db.add(project)
-                    yield _sse_status("needs_configuration", "Нужен TELEGRAM_BOT_TOKEN", "error")
-                    yield append_visible(f"\n\n{token_note}")
-                    raise _StopDeployment
+                    yield append_visible("\n\nСайт собран и поставлен в очередь на запуск.")
+            elif has_bot:
                 yield _sse_status("deploy", "Ставлю бота в очередь запуска")
                 limit_message = _queue_deployment_or_notify_limit(db, project)
                 if limit_message:

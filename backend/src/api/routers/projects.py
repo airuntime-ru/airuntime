@@ -31,7 +31,6 @@ from src.services.project_runtime import (
 from src.services.project_subdomain import assert_subdomain_available, normalize_deploy_subdomain
 from src.services.system_settings import get_system_setting_number
 from src.services.workspace import project_dir
-from src.core.config import settings
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -52,7 +51,9 @@ def list_projects(
     deployed_total = base_query.filter(Project.deployment_url.isnot(None)).count()
     rows = base_query.order_by(Project.created_at.desc()).offset(offset).limit(limit).all()
     return ProjectListResponse(
-        items=[_to_response(project) for project in rows], total=total, deployed_total=deployed_total
+        items=[_to_response(project) for project in rows],
+        total=total,
+        deployed_total=deployed_total,
     )
 
 
@@ -108,7 +109,7 @@ def update_project(
     if payload.status is not None:
         project.status = payload.status
     if "deploy_subdomain" in payload.model_fields_set:
-        if project.type != "website":
+        if project.type not in ("website", "mixed"):
             raise HTTPException(status_code=400, detail="Поддомен доступен только для сайтов")
         normalized = normalize_deploy_subdomain(payload.deploy_subdomain)
         if normalized:

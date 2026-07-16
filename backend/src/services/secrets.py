@@ -2,13 +2,12 @@ import base64
 import hashlib
 import re
 
+from cryptography.fernet import Fernet
 from sqlalchemy.orm import Session
 
 from src.core.config import settings
 from src.db.models.project import Project
 from src.db.models.secret import Secret
-
-from cryptography.fernet import Fernet
 
 
 def _get_fernet() -> Fernet:
@@ -58,7 +57,11 @@ def normalize_secret_key(value: str, *, project_type: str | None = None) -> str:
     # A bare "token"/"токен"/"ключ" only means the Telegram token when the project itself is a
     # Telegram bot (otherwise it's ambiguous - e.g. a website's payment provider key).
     bare_token = lowered in {"token", "токен", "ключ", "key"}
-    if looks_like_telegram_token or looks_like_bot_token or (bare_token and project_type == "telegram_bot"):
+    if (
+        looks_like_telegram_token
+        or looks_like_bot_token
+        or (bare_token and project_type in ("telegram_bot", "mixed"))
+    ):
         return TELEGRAM_BOT_TOKEN_KEY
     normalized = re.sub(r"[^A-Za-z0-9]+", "_", raw.upper()).strip("_")
     return normalized or "SECRET"

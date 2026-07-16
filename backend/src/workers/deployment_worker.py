@@ -5,14 +5,20 @@ from sqlalchemy.orm import Session
 
 from src.db.models.deployment import Deployment
 from src.db.models.project import Project
+from src.db.models.project_service import ProjectService
 from src.db.session import SessionLocal
-from src.services.artifacts import build_project_image
+from src.services.artifacts import build_project_image, try_build_project_image
 from src.services.billing import run_billing_maintenance
 from src.services.cloudflare_dns import CloudflareDnsError, sync_dns_for_website_deploy
 from src.services.deployment.docker_adapter import DeployRequest, DockerDeploymentAdapter
 from src.services.deployment_check import check_and_repair_deployment
 from src.services.deployment_queue import pop_deployment_job
 from src.services.docker_control_queue import pop_control_job, push_control_result
+from src.services.project_services import (
+    build_connection_env,
+    ensure_service_containers,
+    teardown_service_containers,
+)
 from src.services.project_subdomain import resolve_deploy_subdomain
 from src.services.telegram_profile import TelegramProfileError, fetch_bot_profile
 
@@ -32,14 +38,40 @@ def process_control_job(job: dict) -> None:
     action = job.get("action")
     project_id = job.get("project_id")
     try:
-        if action in ("stop", "cleanup") and project_id:
+        if action == "stop" and project_id:
+            # App container only - sidecar services/volumes/network are left running so a
+            # later restart is fast and doesn't lose data.
             DockerDeploymentAdapter().stop_project(str(project_id))
+            push_control_result(job_id, {"ok": True})
+        elif action == "cleanup" and project_id:
+            adapter = DockerDeploymentAdapter()
+            adapter.stop_project(str(project_id))
+            db: Session = SessionLocal()
+            try:
+                has_services = (
+                    db.query(ProjectService).filter(ProjectService.project_id == project_id).first()
+                    is not None
+                )
+            finally:
+                db.close()
+            if has_services:
+                teardown_service_containers(adapter.client, str(project_id), remove_volumes=True)
             push_control_result(job_id, {"ok": True})
         elif action == "logs":
             container_id = job.get("container_id")
             tail = job.get("tail", 400)
             logs = DockerDeploymentAdapter().fetch_container_logs(str(container_id), tail=tail)
             push_control_result(job_id, {"ok": True, "logs": logs})
+        elif action == "build_check" and project_id:
+            db = SessionLocal()
+            try:
+                project = db.get(Project, project_id)
+                if not project:
+                    push_control_result(job_id, {"ok": False, "log": "Project not found"})
+                else:
+                    push_control_result(job_id, try_build_project_image(project))
+            finally:
+                db.close()
         else:
             push_control_result(job_id, {"ok": True})
     except Exception as exc:  # noqa: BLE001 - always report back, never crash the worker loop
@@ -77,9 +109,11 @@ def process_job(job: dict) -> None:
 
         image_ref, environment = build_project_image(db, project)
         subdomain = resolve_deploy_subdomain(project)
-        expose_http = project.type == "website"
+        has_website = project.type in ("website", "mixed")
+        has_bot = project.type in ("telegram_bot", "mixed")
+        expose_http = has_website
         telegram_url = None
-        if project.type == "telegram_bot":
+        if has_bot:
             token = environment.get("TELEGRAM_BOT_TOKEN")
             if not token:
                 raise RuntimeError("Telegram bot token is not configured")
@@ -88,13 +122,22 @@ def process_job(job: dict) -> None:
             except TelegramProfileError as telegram_exc:
                 raise RuntimeError(str(telegram_exc)) from telegram_exc
 
-        result = DockerDeploymentAdapter().deploy(
+        adapter = DockerDeploymentAdapter()
+        services = db.query(ProjectService).filter(ProjectService.project_id == project.id).all()
+        service_network = None
+        if services:
+            service_network = adapter.ensure_private_network(str(project.id))
+            ensure_service_containers(adapter.client, str(project.id), services)
+            environment.update(build_connection_env(db, project))
+
+        result = adapter.deploy(
             DeployRequest(
                 project_id=str(project.id),
                 image_ref=image_ref,
                 subdomain=subdomain,
                 environment=environment,
                 expose_http=expose_http,
+                service_network=service_network,
             )
         )
 
@@ -121,6 +164,11 @@ def process_job(job: dict) -> None:
             except CloudflareDnsError as dns_exc:
                 dns_note = f"Cloudflare DNS warning: {dns_exc}"
                 project.logs = f"{project.logs}\n{dns_note}".strip() if project.logs else dns_note
+        if has_website and has_bot and telegram_url:
+            # deployment_url holds the site's public link (the primary "open project" link) -
+            # the bot's own link has nowhere else to live yet, so it goes into the log feed.
+            bot_note = f"Telegram-бот доступен: {telegram_url}"
+            project.logs = f"{project.logs}\n{bot_note}".strip() if project.logs else bot_note
         db.add(project)
         db.commit()
 

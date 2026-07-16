@@ -38,6 +38,8 @@ def infer_project_type(text: str) -> ProjectType:
     normalized = text.lower()
     bot_score = _count_word_matches(_BOT_TERMS, normalized)
     site_score = _count_word_matches(_SITE_TERMS, normalized)
+    if bot_score > 0 and site_score > 0:
+        return ProjectType.mixed
     if bot_score > site_score:
         return ProjectType.telegram_bot
     return ProjectType.website
@@ -48,7 +50,6 @@ def update_project_type_from_prompt(project: Project, prompt: str) -> bool:
     if project.type == inferred:
         return False
     project.type = inferred
-    if inferred != ProjectType.website:
+    if inferred == ProjectType.telegram_bot:
         project.deploy_subdomain = None
     return True
-

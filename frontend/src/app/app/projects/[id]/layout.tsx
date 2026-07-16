@@ -20,7 +20,7 @@ const STATUS_GUIDANCE: Record<
   needs_configuration: (project) => ({
     title: "Нужна настройка",
     body:
-      project.type === "telegram_bot"
+      project.type === "telegram_bot" || project.type === "mixed"
         ? "Файлы бота уже собраны, но запустить его пока нельзя: не хватает токена. Откройте настройки проекта, вставьте TELEGRAM_BOT_TOKEN (его выдаёт @BotFather в Telegram после команды /newbot) и запуск продолжится автоматически."
         : "Проекту не хватает данных для запуска - откройте настройки проекта и заполните то, что запрашивается в разделе «Ключи и токены».",
     cta: "Перейти в настройки",

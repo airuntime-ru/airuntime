@@ -2,20 +2,40 @@
 
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { Activity, AlertCircle, CheckCircle2, RefreshCw, Terminal } from "lucide-react";
+import { Activity, AlertCircle, CheckCircle2, Maximize2, RefreshCw, ShieldCheck, Terminal } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState, PageLoader } from "@/components/ui/loader";
-import { getProjectLogs, type ProjectLogsType } from "@/lib/api";
+import { Modal } from "@/components/ui/modal";
+import { checkDeployment, getProjectLogs, type ProjectLogsType } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { deploymentStatusLabel } from "@/lib/project-status";
 
-function LogBlock({ title, value }: { title: string; value: string }) {
+function LogBlock({
+  title,
+  value,
+  onExpand,
+}: {
+  title: string;
+  value: string;
+  onExpand: () => void;
+}) {
   return (
     <section className="overflow-hidden rounded-xl border border-black/10 bg-white/70">
-      <div className="flex items-center gap-2 border-b border-black/8 px-4 py-3">
-        <Terminal size={15} className="text-[var(--ar-sky)]" />
-        <h2 className="text-sm font-semibold text-[var(--ar-black)]">{title}</h2>
+      <div className="flex items-center justify-between gap-2 border-b border-black/8 px-4 py-3">
+        <div className="flex items-center gap-2">
+          <Terminal size={15} className="text-[var(--ar-sky)]" />
+          <h2 className="text-sm font-semibold text-[var(--ar-black)]">{title}</h2>
+        </div>
+        <button
+          type="button"
+          onClick={onExpand}
+          className="rounded-[var(--ar-radius-sm)] p-1.5 text-[var(--ar-stone)] hover:bg-black/5 hover:text-[var(--ar-black)]"
+          aria-label={`Раскрыть логи: ${title}`}
+        >
+          <Maximize2 size={14} />
+        </button>
       </div>
       <pre className="max-h-[42vh] overflow-auto whitespace-pre-wrap bg-[#fbfdff] p-4 font-mono text-xs leading-relaxed text-[var(--ar-graphite)]">
         {value}
@@ -29,6 +49,10 @@ export default function ProjectLogsPage() {
   const [logs, setLogs] = useState<ProjectLogsType | null>(null);
   const [error, setError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
+  const [expanded, setExpanded] = useState<{ title: string; value: string } | null>(null);
+  const [analyzeLoading, setAnalyzeLoading] = useState(false);
+  const [analyzeResult, setAnalyzeResult] = useState("");
+  const [analyzeError, setAnalyzeError] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -71,6 +95,21 @@ export default function ProjectLogsPage() {
         logs.runtime_error
     );
   }, [logs]);
+
+  const onAnalyzeRuntimeLogs = async () => {
+    if (!params.id) return;
+    setAnalyzeLoading(true);
+    setAnalyzeResult("");
+    setAnalyzeError("");
+    try {
+      const result = await checkDeployment(params.id);
+      setAnalyzeResult(result.summary);
+    } catch (err) {
+      setAnalyzeError(err instanceof Error ? err.message : "Не удалось проанализировать логи");
+    } finally {
+      setAnalyzeLoading(false);
+    }
+  };
 
   if (logs === null && !error) return <PageLoader />;
 
@@ -123,11 +162,57 @@ export default function ProjectLogsPage() {
         </div>
       ) : null}
 
+      {logs?.container_id ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-black/10 bg-white/70 px-4 py-3">
+          <p className="text-sm text-[var(--ar-mist)]">
+            ИИ прочитает runtime-логи, найдёт причину ошибки и, если дело в коде, сразу же
+            исправит и пересоберёт проект.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full sm:w-auto"
+            disabled={analyzeLoading}
+            onClick={() => void onAnalyzeRuntimeLogs()}
+          >
+            <ShieldCheck size={15} />
+            {analyzeLoading ? "Анализируем…" : "Анализ логов с помощью ИИ"}
+          </Button>
+        </div>
+      ) : null}
+      {analyzeError ? <p className="text-sm text-rose-600">{analyzeError}</p> : null}
+      {analyzeResult ? (
+        <Card hover={false} className="border-[var(--ar-sky)]/20 bg-[var(--ar-sky)]/5">
+          <p className="flex items-start gap-2 text-sm text-[var(--ar-black)]">
+            <ShieldCheck size={16} className="mt-0.5 shrink-0 text-[var(--ar-sky)]" />
+            {analyzeResult}
+          </p>
+        </Card>
+      ) : null}
+
       {hasLogs && logs ? (
         <div className="grid gap-4">
-          {logs.project_logs.trim() ? <LogBlock title="Проект" value={logs.project_logs} /> : null}
-          {logs.deployment_logs.trim() ? <LogBlock title="Деплой" value={logs.deployment_logs} /> : null}
-          {logs.runtime_logs.trim() ? <LogBlock title="Runtime" value={logs.runtime_logs} /> : null}
+          {logs.project_logs.trim() ? (
+            <LogBlock
+              title="Проект"
+              value={logs.project_logs}
+              onExpand={() => setExpanded({ title: "Проект", value: logs.project_logs })}
+            />
+          ) : null}
+          {logs.deployment_logs.trim() ? (
+            <LogBlock
+              title="Деплой"
+              value={logs.deployment_logs}
+              onExpand={() => setExpanded({ title: "Деплой", value: logs.deployment_logs })}
+            />
+          ) : null}
+          {logs.runtime_logs.trim() ? (
+            <LogBlock
+              title="Runtime"
+              value={logs.runtime_logs}
+              onExpand={() => setExpanded({ title: "Runtime", value: logs.runtime_logs })}
+            />
+          ) : null}
         </div>
       ) : (
         <Card hover={false}>
@@ -137,6 +222,17 @@ export default function ProjectLogsPage() {
           />
         </Card>
       )}
+
+      <Modal
+        open={expanded !== null}
+        onClose={() => setExpanded(null)}
+        title={expanded ? `Логи: ${expanded.title}` : ""}
+        className="max-w-4xl"
+      >
+        <pre className="max-h-[75vh] overflow-auto whitespace-pre-wrap bg-[#fbfdff] p-4 font-mono text-xs leading-relaxed text-[var(--ar-graphite)]">
+          {expanded?.value}
+        </pre>
+      </Modal>
     </div>
   );
 }

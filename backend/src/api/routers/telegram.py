@@ -53,7 +53,7 @@ def _telegram_project_and_token(
     )
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    if project.type != "telegram_bot":
+    if project.type not in ("telegram_bot", "mixed"):
         raise HTTPException(status_code=400, detail="Project is not a Telegram bot")
     secret = (
         db.query(Secret)
@@ -81,7 +81,7 @@ def save_bot_token(
     )
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    if project.type != "telegram_bot":
+    if project.type not in ("telegram_bot", "mixed"):
         raise HTTPException(status_code=400, detail="Project is not a Telegram bot")
     try:
         profile = fetch_bot_profile(payload.bot_token)
@@ -185,7 +185,7 @@ def start_bot(
     )
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    if project.type != "telegram_bot":
+    if project.type not in ("telegram_bot", "mixed"):
         raise HTTPException(status_code=400, detail="Project is not a Telegram bot")
     token = (
         db.query(Secret)

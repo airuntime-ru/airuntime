@@ -14,6 +14,7 @@ class DeployRequest:
     subdomain: str
     environment: dict[str, str] | None = None
     expose_http: bool = True
+    service_network: str | None = None
 
 
 class DockerDeploymentAdapter:
@@ -22,6 +23,10 @@ class DockerDeploymentAdapter:
     def __init__(self) -> None:
         self._client = docker.from_env()
 
+    @property
+    def client(self):
+        return self._client
+
     def fetch_container_logs(self, container_id: str, *, tail: int = 400) -> str:
         try:
             container = self._client.containers.get(container_id)
@@ -29,6 +34,23 @@ class DockerDeploymentAdapter:
         except NotFound as exc:
             raise RuntimeError(f"Container {container_id} was not found.") from exc
         return raw_logs.decode("utf-8", errors="replace")
+
+    def ensure_private_network(self, project_id: str) -> str:
+        """Idempotently create the per-project bridge network used by sidecar services, so the
+        app container and any Postgres/Redis sidecar can reach each other by container name."""
+        from src.services.project_services import network_name
+
+        name = network_name(project_id)
+        try:
+            self._client.networks.get(name)
+        except NotFound:
+            self._client.networks.create(name, driver="bridge")
+        return name
+
+    def attach_to_network(self, container_id: str, network_name: str) -> None:
+        """containers.run() only accepts one `network` kwarg at creation time - attaching a
+        second network requires this explicit post-creation connect call."""
+        self._client.networks.get(network_name).connect(container_id)
 
     def stop_project(self, project_id: str) -> None:
         container_name = f"airuntime-{project_id[:8]}"
@@ -90,6 +112,12 @@ class DockerDeploymentAdapter:
             )
         except DockerException as exc:
             raise RuntimeError(str(exc)) from exc
+
+        if request.service_network:
+            try:
+                self.attach_to_network(container.id, request.service_network)
+            except DockerException as exc:
+                raise RuntimeError(str(exc)) from exc
 
         container.reload()
         if container.status != "running":

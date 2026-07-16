@@ -95,6 +95,20 @@ TOOL_DEFS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "build_project",
+        "description": (
+            "Build a real Docker image from the project's current files right now, so you can "
+            "see actual build errors (missing dependency, syntax error, wrong path, bad base "
+            "image, etc.) and fix them yourself before ending your turn - instead of only "
+            "finding out after the automatic build attempt that happens once you're done. Can "
+            "take up to a few minutes (base image pulls). Call it once your files are ready to "
+            "try, read the returned log, and keep fixing + rebuilding until it succeeds or "
+            "you're confident the remaining issue needs the user's input (e.g. a missing "
+            "secret)."
+        ),
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+    {
         "name": "request_secret",
         "description": (
             "Ask the platform to reserve a secret slot (API key, token, credential) that this "
@@ -123,6 +137,70 @@ TOOL_DEFS: list[dict[str, Any]] = [
             "required": ["key", "reason"],
         },
     },
+    {
+        "name": "request_service",
+        "description": (
+            "Ask the platform to provision a real backing service (database, cache, queue, "
+            "search index - anything that runs as its own container) for this project, when "
+            "SQLite genuinely isn't enough. Call this instead of writing a docker-compose.yml "
+            "or assuming an external service already exists - the platform starts the "
+            "container for you on a private network reachable from your app. For "
+            "'postgres'/'redis'/'mysql'/'mongo'/'rabbitmq', just pass kind - the platform picks "
+            "a sensible image, generates credentials, and injects a ready connection-string env "
+            "var (DATABASE_URL/REDIS_URL/MONGO_URL/RABBITMQ_URL) your code should read, not "
+            "invent. For anything else (Elasticsearch, ClickHouse, a Celery worker built from "
+            "this same project's own Dockerfile, or any other image), pass kind as a short "
+            "label plus `image` explicitly - the tool result tells you the exact hostname to "
+            "connect to; use that hostname with whatever port/credentials you configure via "
+            "`env`, since there's no auto-generated connection string for a custom image. Safe "
+            "to call again for the same kind - it won't create a duplicate or change an "
+            "existing service's config."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "description": (
+                        "Short label identifying the service, e.g. postgres, redis, rabbitmq, "
+                        "search, worker. Used to build its hostname/container name."
+                    ),
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "One short sentence: why this project needs it.",
+                },
+                "image": {
+                    "type": "string",
+                    "description": (
+                        "Docker image to run, e.g. 'elasticsearch:8.15.0' or "
+                        "'rabbitmq:3-management'. Required unless kind is one of the built-in "
+                        "presets (postgres/redis/mysql/mongo/rabbitmq)."
+                    ),
+                },
+                "env": {
+                    "type": "object",
+                    "additionalProperties": {"type": "string"},
+                    "description": (
+                        "Extra environment variables to set on the service's own container "
+                        "(its config, not your app's) - e.g. credentials or settings that "
+                        "image's docs call for. Not needed for the built-in presets unless you "
+                        "want to override their defaults."
+                    ),
+                },
+                "data_path": {
+                    "type": "string",
+                    "description": (
+                        "Absolute path inside the service's container where it stores data, "
+                        "e.g. '/var/lib/rabbitmq' - the platform mounts a persistent volume "
+                        "there so data survives restarts. Omit for services that don't need "
+                        "persistence, or for a preset kind (already knows its own path)."
+                    ),
+                },
+            },
+            "required": ["kind", "reason"],
+        },
+    },
 ]
 
 TOOL_NAMES = {tool["name"] for tool in TOOL_DEFS}
@@ -135,13 +213,24 @@ class ToolExecutionResult:
     content: str = ""
 
 
+@dataclass
+class ServiceRequest:
+    kind: str
+    reason: str
+    image: str | None = None
+    env: dict[str, str] | None = None
+    data_path: str | None = None
+
+
 class WorkspaceTools:
     """Executes agent tool calls against one project's workspace directory."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, project_id: str | None = None) -> None:
         self.root = root
+        self.project_id = project_id
         self.touched_files: set[str] = set()
         self.requested_secrets: list[tuple[str, str]] = []
+        self.requested_services: list[ServiceRequest] = []
 
     def call(self, name: str, arguments: dict[str, Any]) -> ToolExecutionResult:
         try:
@@ -150,7 +239,9 @@ class WorkspaceTools:
             if name == "read_file":
                 return self._read_file(str(arguments.get("path", "")))
             if name == "write_file":
-                return self._write_file(str(arguments.get("path", "")), arguments.get("content", ""))
+                return self._write_file(
+                    str(arguments.get("path", "")), arguments.get("content", "")
+                )
             if name == "edit_file":
                 return self._edit_file(
                     str(arguments.get("path", "")),
@@ -159,9 +250,19 @@ class WorkspaceTools:
                 )
             if name == "delete_file":
                 return self._delete_file(str(arguments.get("path", "")))
+            if name == "build_project":
+                return self._build_project()
             if name == "request_secret":
                 return self._request_secret(
                     str(arguments.get("key", "")), str(arguments.get("reason", ""))
+                )
+            if name == "request_service":
+                return self._request_service(
+                    str(arguments.get("kind", "")),
+                    str(arguments.get("reason", "")),
+                    image=arguments.get("image"),
+                    env=arguments.get("env"),
+                    data_path=arguments.get("data_path"),
                 )
             return ToolExecutionResult(ok=False, summary=f"Unknown tool: {name}")
         except WorkspaceError as exc:
@@ -173,7 +274,9 @@ class WorkspaceTools:
         if path and path != ".":
             base = resolve_in_workspace(self.root, path)
             if not base.exists():
-                return ToolExecutionResult(ok=True, summary="Directory does not exist yet.", content="[]")
+                return ToolExecutionResult(
+                    ok=True, summary="Directory does not exist yet.", content="[]"
+                )
             files = [
                 p.relative_to(self.root).as_posix()
                 for p in sorted(base.rglob("*"))
@@ -197,7 +300,9 @@ class WorkspaceTools:
             text = data.decode("utf-8")
         except UnicodeDecodeError:
             return ToolExecutionResult(ok=False, summary="File is not valid UTF-8 text")
-        return ToolExecutionResult(ok=True, summary=f"Read {path} ({len(data)} bytes)", content=text)
+        return ToolExecutionResult(
+            ok=True, summary=f"Read {path} ({len(data)} bytes)", content=text
+        )
 
     def _write_file(self, path: str, content: Any) -> ToolExecutionResult:
         if not isinstance(content, str):
@@ -213,7 +318,9 @@ class WorkspaceTools:
         existing_files = set(list_workspace_files(self.root))
         rel = target.relative_to(self.root).as_posix()
         if rel not in existing_files and len(existing_files) >= MAX_FILES:
-            return ToolExecutionResult(ok=False, summary=f"Too many files in project (max {MAX_FILES})")
+            return ToolExecutionResult(
+                ok=False, summary=f"Too many files in project (max {MAX_FILES})"
+            )
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         self.touched_files.add(rel)
@@ -250,6 +357,25 @@ class WorkspaceTools:
         self.touched_files.add(rel)
         return ToolExecutionResult(ok=True, summary=f"Edited {rel}")
 
+    def _build_project(self) -> ToolExecutionResult:
+        if not self.project_id:
+            return ToolExecutionResult(
+                ok=False, summary="Build tool unavailable outside a project context"
+            )
+        from src.services.docker_control_queue import submit_control_job
+
+        result = submit_control_job(
+            action="build_check", project_id=self.project_id, timeout_seconds=180
+        )
+        if result is None:
+            return ToolExecutionResult(
+                ok=False, summary="Build service did not respond - try again"
+            )
+        log = result.get("log", "")
+        if result.get("ok"):
+            return ToolExecutionResult(ok=True, summary="Build succeeded", content=log)
+        return ToolExecutionResult(ok=False, summary="Build failed", content=log)
+
     def _request_secret(self, key: str, reason: str) -> ToolExecutionResult:
         key = key.strip()
         if not key:
@@ -258,6 +384,58 @@ class WorkspaceTools:
         return ToolExecutionResult(
             ok=True,
             summary=f"Requested secret {key} - the user will fill in the value in Settings",
+        )
+
+    def _request_service(
+        self,
+        kind: str,
+        reason: str,
+        *,
+        image: Any = None,
+        env: Any = None,
+        data_path: Any = None,
+    ) -> ToolExecutionResult:
+        from src.services.project_services import (
+            container_name_for,
+            is_known_preset,
+            normalize_service_kind,
+        )
+
+        normalized_kind = normalize_service_kind(kind)
+        resolved_image = image.strip() if isinstance(image, str) and image.strip() else None
+        if not resolved_image and not is_known_preset(normalized_kind):
+            return ToolExecutionResult(
+                ok=False,
+                summary=(
+                    f"Unknown service kind '{normalized_kind}' - call again with an explicit "
+                    "image, e.g. image='elasticsearch:8.15.0'"
+                ),
+            )
+        resolved_env = env if isinstance(env, dict) else None
+        resolved_data_path = (
+            data_path.strip() if isinstance(data_path, str) and data_path.strip() else None
+        )
+
+        self.requested_services.append(
+            ServiceRequest(
+                kind=normalized_kind,
+                reason=reason.strip(),
+                image=resolved_image,
+                env=resolved_env,
+                data_path=resolved_data_path,
+            )
+        )
+        hostname = (
+            container_name_for(self.project_id, normalized_kind)
+            if self.project_id
+            else normalized_kind
+        )
+        return ToolExecutionResult(
+            ok=True,
+            summary=(
+                f"Requested service '{normalized_kind}' - will be reachable at host "
+                f"'{hostname}' once deployed"
+            ),
         )
 
     def _delete_file(self, path: str) -> ToolExecutionResult:

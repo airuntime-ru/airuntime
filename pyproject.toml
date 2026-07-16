@@ -13,3 +13,11 @@ known-first-party = ["src", "agents"]
 
 [tool.ruff.format]
 quote-style = "double"
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["*/db/migrations/*"]
+
+[tool.coverage.report]
+show_missing = true
+

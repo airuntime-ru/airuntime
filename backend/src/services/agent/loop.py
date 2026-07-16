@@ -8,6 +8,7 @@ loop shape used by tool-using coding assistants (read -> edit -> verify).
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
@@ -16,7 +17,7 @@ from src.services.agent.providers import get_agent_provider
 from src.services.agent.tools import TOOL_DEFS, WorkspaceTools
 from src.services.file_context import ImageAttachment
 
-MAX_ITERATIONS = 30
+MAX_ITERATIONS = 100_000
 
 
 @dataclass
@@ -119,7 +120,10 @@ class CodingAgentSession:
             results: list[ToolCallResult] = []
             for call in turn_final.tool_calls:
                 yield call
-                outcome = self.workspace.call(call.name, call.arguments)
+                # Off the event loop: some tools (build_project) block on a real Docker build
+                # via a synchronous Redis round-trip that can take minutes - a plain call here
+                # would freeze every other request this process is serving for that long.
+                outcome = await asyncio.to_thread(self.workspace.call, call.name, call.arguments)
                 result = ToolCallResult(
                     call_id=call.call_id,
                     name=call.name,

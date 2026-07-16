@@ -268,7 +268,7 @@ export default function ProjectSettingsPage() {
 
   return (
     <div className="grid gap-4 md:grid-cols-2">
-      {project.type === "website" ? (
+      {project.type === "website" || project.type === "mixed" ? (
         <Card hover={false} className="md:col-span-2">
           <div className="flex items-start gap-3">
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--ar-radius-sm)] bg-white/80 text-emerald-600 shadow-sm shadow-sky-950/5">
@@ -326,7 +326,7 @@ export default function ProjectSettingsPage() {
         </Card>
       ) : null}
 
-      {project.type === "telegram_bot" && botTokenConfigured ? (
+      {(project.type === "telegram_bot" || project.type === "mixed") && botTokenConfigured ? (
         <TelegramBotAppearanceCard projectId={params.id} />
       ) : null}
 

@@ -14,14 +14,6 @@ from src.services.project_runtime import (
 from tests.conftest import auth_tokens
 
 
-class _FakeDockerAdapter:
-    def __init__(self) -> None:
-        self.stopped: list[str] = []
-
-    def stop_project(self, project_id: str) -> None:
-        self.stopped.append(project_id)
-
-
 def _user(db, email: str, client) -> User:
     auth_tokens(client, email)
     user = db.query(User).filter(User.email == email).first()
@@ -71,16 +63,21 @@ def test_stop_project_runtime_sets_stopped(client, db, monkeypatch):
     project = _project(db, user, name="site", status="live")
     db.commit()
 
-    fake = _FakeDockerAdapter()
+    calls = []
+
+    def fake_submit_control_job(*, action, project_id, **kwargs):
+        calls.append((action, project_id))
+        return {"ok": True}
+
     monkeypatch.setattr(
-        "src.services.project_runtime.DockerDeploymentAdapter",
-        lambda: fake,
+        "src.services.project_runtime.submit_control_job",
+        fake_submit_control_job,
     )
 
     stopped = stop_project_runtime(db, project)
 
     assert stopped.status == "stopped"
-    assert fake.stopped == [str(project.id)]
+    assert calls == [("stop", str(project.id))]
 
 
 def test_start_project_runtime_queues_deploy_when_slot_available(client, db, monkeypatch):
@@ -141,8 +138,8 @@ def test_stop_project_endpoint(client, db, monkeypatch):
     db.commit()
 
     monkeypatch.setattr(
-        "src.services.project_runtime.DockerDeploymentAdapter",
-        lambda: _FakeDockerAdapter(),
+        "src.services.project_runtime.submit_control_job",
+        lambda *, action, project_id, **kwargs: {"ok": True},
     )
 
     response = client.post(f"/api/v1/projects/{project.id}/stop", headers=headers)

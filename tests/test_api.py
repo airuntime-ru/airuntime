@@ -1,10 +1,11 @@
 import json
+import uuid
 from types import SimpleNamespace
 
 from tests.conftest import auth_tokens
 
 
-def _fake_agent_session_class(calls: list, *, extra_text: str = ""):
+def _fake_agent_session_class(calls: list, *, extra_text: str = "", requested_service=None):
     """Builds a fake CodingAgentSession that skips real LLM/tool calls.
 
     It doesn't write any workspace files, so the router's ensure_required_files
@@ -18,10 +19,12 @@ def _fake_agent_session_class(calls: list, *, extra_text: str = ""):
             self.provider_name = provider_name
             self.workspace = workspace
 
-        async def run(self, *, history, user_message):
+        async def run(self, *, history, user_message, images=None):
             calls.append(
                 {"history": history, "user_message": user_message, "provider": self.provider_name}
             )
+            if requested_service:
+                self.workspace.requested_services.append(requested_service)
             yield TextDelta(text="Готово: ")
             yield TextDelta(text=user_message[:20])
             if extra_text:
@@ -74,7 +77,8 @@ def test_projects_crud(client):
 
     listed = client.get("/api/v1/projects", headers=headers)
     assert listed.status_code == 200
-    assert len(listed.json()) == 1
+    assert len(listed.json()["items"]) == 1
+    assert listed.json()["total"] == 1
 
     patch = client.patch(
         f"/api/v1/projects/{project['id']}",
@@ -241,17 +245,20 @@ def test_telegram_token_secret_sets_public_bot_url(client, monkeypatch):
         lambda token: SimpleNamespace(public_url="https://t.me/secret_url_bot"),
     )
 
-    created = client.post(
+    secret = client.post(
         f"/api/v1/projects/{project['id']}/secrets",
         headers=headers,
-        json={
-            "key": "telegram bot token",
-            "value": "12345678901234567890:abcdefghijklmnopqrstuvwxyz",
-        },
+        json={"key": "telegram bot token"},
+    ).json()
+
+    updated = client.patch(
+        f"/api/v1/projects/{project['id']}/secrets/{secret['id']}",
+        headers=headers,
+        json={"value": "12345678901234567890:abcdefghijklmnopqrstuvwxyz"},
     )
 
-    assert created.status_code == 200
-    assert created.json()["url"] == "https://t.me/secret_url_bot"
+    assert updated.status_code == 200
+    assert updated.json()["url"] == "https://t.me/secret_url_bot"
 
     refreshed = client.get(f"/api/v1/projects/{project['id']}", headers=headers)
     assert refreshed.json()["deployment_url"] == "https://t.me/secret_url_bot"
@@ -288,6 +295,7 @@ def test_telegram_token_save_sets_public_bot_url(client, monkeypatch):
 
 
 def test_telegram_start_refreshes_public_bot_url_from_token(client, monkeypatch):
+    from src.api.routers import secrets as secrets_router
     from src.api.routers import telegram as telegram_router
 
     headers = auth_tokens(client, "telegram-start-url@airuntime.dev")
@@ -296,10 +304,21 @@ def test_telegram_start_refreshes_public_bot_url_from_token(client, monkeypatch)
         headers=headers,
         json={"type": "telegram_bot", "name": "Start URL Bot", "description": ""},
     ).json()
-    client.post(
+
+    monkeypatch.setattr(
+        secrets_router,
+        "fetch_bot_profile",
+        lambda token: SimpleNamespace(public_url="https://t.me/start_url_bot"),
+    )
+    secret = client.post(
         f"/api/v1/projects/{project['id']}/secrets",
         headers=headers,
-        json={"key": "telegram bot token", "value": "12345678901234567890:abc"},
+        json={"key": "telegram bot token"},
+    ).json()
+    client.patch(
+        f"/api/v1/projects/{project['id']}/secrets/{secret['id']}",
+        headers=headers,
+        json={"value": "12345678901234567890:abcdefghijklmnopqrstuvwxyz"},
     )
 
     monkeypatch.setattr(
@@ -318,6 +337,7 @@ def test_telegram_start_refreshes_public_bot_url_from_token(client, monkeypatch)
 
 
 def test_telegram_profile_settings_are_applied(client, monkeypatch):
+    from src.api.routers import secrets as secrets_router
     from src.api.routers import telegram as telegram_router
 
     headers = auth_tokens(client, "telegram-profile@airuntime.dev")
@@ -326,10 +346,21 @@ def test_telegram_profile_settings_are_applied(client, monkeypatch):
         headers=headers,
         json={"type": "telegram_bot", "name": "Profile Bot", "description": ""},
     ).json()
-    client.post(
+
+    monkeypatch.setattr(
+        secrets_router,
+        "fetch_bot_profile",
+        lambda token: SimpleNamespace(public_url="https://t.me/profile_bot_initial"),
+    )
+    secret = client.post(
         f"/api/v1/projects/{project['id']}/secrets",
         headers=headers,
-        json={"key": "telegram bot token", "value": "12345678901234567890:abc"},
+        json={"key": "telegram bot token"},
+    ).json()
+    client.patch(
+        f"/api/v1/projects/{project['id']}/secrets/{secret['id']}",
+        headers=headers,
+        json={"value": "12345678901234567890:abcdefghijklmnopqrstuvwxyz"},
     )
 
     captured = {}
@@ -366,11 +397,12 @@ def test_telegram_profile_settings_are_applied(client, monkeypatch):
     assert saved.status_code == 200
     assert saved.json()["url"] == "https://t.me/profile_bot"
     assert saved.json()["name"] == "Support Angel"
-    assert captured["token"] == "12345678901234567890:abc"
+    assert captured["token"] == "12345678901234567890:abcdefghijklmnopqrstuvwxyz"
     assert captured["description"] == "Answers support questions"
 
 
 def test_telegram_profile_photo_is_applied(client, monkeypatch):
+    from src.api.routers import secrets as secrets_router
     from src.api.routers import telegram as telegram_router
 
     headers = auth_tokens(client, "telegram-photo@airuntime.dev")
@@ -379,10 +411,21 @@ def test_telegram_profile_photo_is_applied(client, monkeypatch):
         headers=headers,
         json={"type": "telegram_bot", "name": "Photo Bot", "description": ""},
     ).json()
-    client.post(
+
+    monkeypatch.setattr(
+        secrets_router,
+        "fetch_bot_profile",
+        lambda token: SimpleNamespace(public_url="https://t.me/photo_bot_initial"),
+    )
+    secret = client.post(
         f"/api/v1/projects/{project['id']}/secrets",
         headers=headers,
-        json={"key": "telegram bot token", "value": "12345678901234567890:abc"},
+        json={"key": "telegram bot token"},
+    ).json()
+    client.patch(
+        f"/api/v1/projects/{project['id']}/secrets/{secret['id']}",
+        headers=headers,
+        json={"value": "12345678901234567890:abcdefghijklmnopqrstuvwxyz"},
     )
 
     captured = {}
@@ -470,14 +513,14 @@ def test_project_stop_cancels_active_deployments(client, db, monkeypatch):
 
     stopped_ids = []
 
-    class FakeDockerDeploymentAdapter:
-        def stop_project(self, project_id: str) -> None:
-            stopped_ids.append(project_id)
+    def fake_submit_control_job(*, action, project_id, **kwargs):
+        stopped_ids.append(project_id)
+        return {"ok": True}
 
     monkeypatch.setattr(
         project_runtime,
-        "DockerDeploymentAdapter",
-        lambda: FakeDockerDeploymentAdapter(),
+        "submit_control_job",
+        fake_submit_control_job,
     )
 
     stopped = client.post(f"/api/v1/projects/{project['id']}/stop", headers=headers)
@@ -489,13 +532,12 @@ def test_project_stop_cancels_active_deployments(client, db, monkeypatch):
     assert deployment.status == "cancelled"
 
 
-def test_stream_prompt_generates_artifact_and_queues_deployment(
-    client, monkeypatch, tmp_path
-):
+def test_stream_prompt_generates_artifact_and_queues_deployment(client, monkeypatch, tmp_path):
     from src.api.routers import chat as chat_router
     from src.core.config import settings
 
     monkeypatch.setattr(settings, "generated_projects_dir", str(tmp_path))
+    monkeypatch.setattr(settings, "openai_api_key", "test-key")
     calls: list = []
     deployments = []
 
@@ -533,7 +575,7 @@ def test_stream_prompt_generates_artifact_and_queues_deployment(
     assert any("Сайт собран и поставлен в очередь на запуск" in chunk for chunk in chunks)
     assert "data: [DONE]" in response.text
     assert calls
-    assert deployments == [project["id"]]
+    assert deployments == [uuid.UUID(project["id"])]
 
     messages = client.get(
         f"/api/v1/projects/{project['id']}/chats/{chat['id']}/messages",
@@ -548,11 +590,60 @@ def test_stream_prompt_generates_artifact_and_queues_deployment(
     assert updated["status"] == "ready"
 
 
+def test_request_service_tool_creates_project_service_row(client, monkeypatch, tmp_path, db):
+    from src.api.routers import chat as chat_router
+    from src.core.config import settings
+    from src.db.models.project_service import ProjectService
+    from src.services.agent.tools import ServiceRequest
+
+    monkeypatch.setattr(settings, "generated_projects_dir", str(tmp_path))
+    monkeypatch.setattr(settings, "openai_api_key", "test-key")
+    calls: list = []
+
+    def fake_create_deployment(db, project):
+        return None
+
+    monkeypatch.setattr(
+        chat_router,
+        "CodingAgentSession",
+        _fake_agent_session_class(
+            calls, requested_service=ServiceRequest(kind="postgres", reason="нужна БД")
+        ),
+    )
+    monkeypatch.setattr(chat_router, "create_deployment_for_project", fake_create_deployment)
+
+    headers = auth_tokens(client, "request-service@airuntime.dev")
+    project = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={"type": "website", "name": "Service Site", "description": ""},
+    ).json()
+    chat = client.post(f"/api/v1/projects/{project['id']}/chats", headers=headers).json()
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/chats/{chat['id']}/stream",
+        headers=headers,
+        json={"content": "Сделай сайт с базой данных для интернет-магазина"},
+    )
+
+    assert response.status_code == 200
+    assert "postgres" in response.text
+
+    row = (
+        db.query(ProjectService)
+        .filter(ProjectService.project_id == uuid.UUID(project["id"]))
+        .first()
+    )
+    assert row is not None
+    assert row.kind == "postgres"
+
+
 def test_stream_accepts_files_already_linked_to_user_message(client, monkeypatch, tmp_path):
     from src.api.routers import chat as chat_router
     from src.core.config import settings
 
     monkeypatch.setattr(settings, "generated_projects_dir", str(tmp_path))
+    monkeypatch.setattr(settings, "openai_api_key", "test-key")
     calls: list = []
 
     def fake_create_deployment(db, project):
@@ -671,4 +762,38 @@ def test_stream_prompt_reclassifies_project_before_generation(client, monkeypatc
     assert "TELEGRAM_BOT_TOKEN" in response.text
     updated = client.get(f"/api/v1/projects/{project['id']}", headers=headers).json()
     assert updated["type"] == "telegram_bot"
+    assert updated["status"] == "needs_configuration"
+
+
+def test_project_combining_site_and_bot_signals_is_classified_mixed(client, monkeypatch, tmp_path):
+    from src.api.routers import chat as chat_router
+    from src.core.config import settings
+
+    monkeypatch.setattr(settings, "generated_projects_dir", str(tmp_path))
+    monkeypatch.setattr(settings, "openai_api_key", "test-key")
+    calls: list = []
+
+    monkeypatch.setattr(chat_router, "CodingAgentSession", _fake_agent_session_class(calls))
+    monkeypatch.setattr(chat_router, "commit_snapshot", lambda artifact_path, message: "abc123")
+
+    headers = auth_tokens(client, "mixed-project@airuntime.dev")
+    project = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={"name": "Studio", "description": "Сайт студии и Telegram-бот для заявок"},
+    ).json()
+    assert project["type"] == "mixed"
+    chat = client.post(f"/api/v1/projects/{project['id']}/chats", headers=headers).json()
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/chats/{chat['id']}/stream",
+        headers=headers,
+        json={"content": "Сделай сайт для студии дизайна интерьеров и бота для приёма заявок"},
+    )
+
+    assert response.status_code == 200
+    assert "TELEGRAM_BOT_TOKEN" in response.text
+
+    updated = client.get(f"/api/v1/projects/{project['id']}", headers=headers).json()
+    assert updated["type"] == "mixed"
     assert updated["status"] == "needs_configuration"

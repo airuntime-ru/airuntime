@@ -1,7 +1,5 @@
 import asyncio
 import uuid
-from collections.abc import AsyncIterator
-from pathlib import Path
 
 import pytest
 
@@ -53,7 +51,8 @@ def test_workspace_tools_edit_file_requires_unique_match(tmp_path):
 
     (tmp_path / "app.py").write_text("print('unique')\n", encoding="utf-8")
     ok = tools.call(
-        "edit_file", {"path": "app.py", "old_text": "print('unique')", "new_text": "print('changed')"}
+        "edit_file",
+        {"path": "app.py", "old_text": "print('unique')", "new_text": "print('changed')"},
     )
     assert ok.ok
     assert (tmp_path / "app.py").read_text(encoding="utf-8") == "print('changed')\n"
@@ -78,6 +77,83 @@ def test_workspace_tools_list_files(tmp_path):
     assert listing.ok
     assert "public/index.html" in listing.content
     assert "public/styles.css" in listing.content
+
+
+def test_workspace_tools_request_service_arbitrary_image(tmp_path):
+    tools = WorkspaceTools(tmp_path, project_id="11111111-2222-3333-4444-555555555555")
+    result = tools.call(
+        "request_service",
+        {
+            "kind": "search",
+            "reason": "нужен полнотекстовый поиск",
+            "image": "elasticsearch:8.15.0",
+            "env": {"discovery.type": "single-node"},
+            "data_path": "/usr/share/elasticsearch/data",
+        },
+    )
+    assert result.ok
+    assert "airuntime-11111111-search" in result.summary
+    assert len(tools.requested_services) == 1
+    request = tools.requested_services[0]
+    assert request.kind == "search"
+    assert request.image == "elasticsearch:8.15.0"
+    assert request.env == {"discovery.type": "single-node"}
+    assert request.data_path == "/usr/share/elasticsearch/data"
+
+
+def test_workspace_tools_request_service_rejects_unknown_kind_without_image(tmp_path):
+    tools = WorkspaceTools(tmp_path)
+    result = tools.call("request_service", {"kind": "search", "reason": "нужен поиск"})
+    assert not result.ok
+    assert not tools.requested_services
+
+
+def test_workspace_tools_request_service_preset_needs_no_image(tmp_path):
+    tools = WorkspaceTools(tmp_path)
+    result = tools.call("request_service", {"kind": "postgres", "reason": "нужна БД"})
+    assert result.ok
+    assert tools.requested_services[0].image is None
+
+
+def test_workspace_tools_build_project_calls_control_queue(tmp_path, monkeypatch):
+    import src.services.docker_control_queue as control_queue
+
+    calls = []
+
+    def fake_submit_control_job(*, action, project_id, timeout_seconds):
+        calls.append((action, project_id, timeout_seconds))
+        return {"ok": True, "log": "Build succeeded: airuntime-generated-site:latest"}
+
+    monkeypatch.setattr(control_queue, "submit_control_job", fake_submit_control_job)
+
+    tools = WorkspaceTools(tmp_path, project_id="project-123")
+    result = tools.call("build_project", {})
+
+    assert result.ok
+    assert "Build succeeded" in result.content
+    assert calls == [("build_check", "project-123", 180)]
+
+
+def test_workspace_tools_build_project_reports_failure(tmp_path, monkeypatch):
+    import src.services.docker_control_queue as control_queue
+
+    monkeypatch.setattr(
+        control_queue,
+        "submit_control_job",
+        lambda **kwargs: {"ok": False, "log": "SyntaxError: line 3"},
+    )
+
+    tools = WorkspaceTools(tmp_path, project_id="project-123")
+    result = tools.call("build_project", {})
+
+    assert not result.ok
+    assert "SyntaxError" in result.content
+
+
+def test_workspace_tools_build_project_without_project_id(tmp_path):
+    tools = WorkspaceTools(tmp_path)
+    result = tools.call("build_project", {})
+    assert not result.ok
 
 
 def test_ensure_required_files_injects_default_dockerfile(tmp_path):
@@ -111,6 +187,35 @@ def test_generate_fallback_artifact_produces_required_files(tmp_path, monkeypatc
     assert path == project_dir(project.id)
 
 
+def test_ensure_required_files_mixed_requires_both_entry_files(tmp_path):
+    project = _project("mixed")
+    (tmp_path / "public").mkdir()
+    (tmp_path / "public" / "index.html").write_text("<h1>hi</h1>", encoding="utf-8")
+    with pytest.raises(ArtifactError, match="app.py"):
+        ensure_required_files(project, tmp_path)
+
+    (tmp_path / "app.py").write_text("os.environ['TELEGRAM_BOT_TOKEN']", encoding="utf-8")
+    ensure_required_files(project, tmp_path)
+
+    dockerfile = (tmp_path / "Dockerfile").read_text(encoding="utf-8")
+    assert "nginx" in dockerfile
+    assert "app.py" in dockerfile
+
+
+def test_generate_fallback_artifact_mixed_produces_both_without_wiping_either(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(settings, "generated_projects_dir", str(tmp_path))
+    project = _project("mixed")
+    path = generate_fallback_artifact(DummyDb(), project, "Сайт и бот для студии")
+    assert (path / "public" / "index.html").exists()
+    assert (path / "app.py").exists()
+    assert (path / "requirements.txt").exists()
+    dockerfile = (path / "Dockerfile").read_text(encoding="utf-8")
+    assert "nginx" in dockerfile
+    assert "app.py" in dockerfile
+
+
 class FakeProvider:
     def __init__(self, turns):
         self._turns = turns
@@ -119,7 +224,7 @@ class FakeProvider:
     def supports_tools(self):
         return True
 
-    def build_messages(self, history, user_message):
+    def build_messages(self, history, user_message, *, images=None):
         return [*history, {"role": "user", "content": user_message}]
 
     def build_tool_result_messages(self, results):
@@ -183,6 +288,10 @@ def test_agent_session_writes_a_file_then_stops(tmp_path, monkeypatch):
 
 
 def test_agent_session_stops_at_max_iterations(tmp_path, monkeypatch):
+    import src.services.agent.loop as loop_module
+
+    monkeypatch.setattr(loop_module, "MAX_ITERATIONS", 3)
+
     looping_turn = [
         TurnFinished(
             stop_reason="tool_use",
@@ -190,7 +299,7 @@ def test_agent_session_stops_at_max_iterations(tmp_path, monkeypatch):
             tool_calls=[ToolCallRequested(call_id="c", name="list_files", arguments={"path": "."})],
         )
     ]
-    fake = FakeProvider([looping_turn for _ in range(20)])
+    fake = FakeProvider([looping_turn for _ in range(3)])
     _patch_provider(monkeypatch, fake)
 
     workspace = WorkspaceTools(tmp_path)

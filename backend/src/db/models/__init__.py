@@ -7,6 +7,7 @@ from src.db.models.message import Message
 from src.db.models.moderation_event import ModerationEvent
 from src.db.models.plan import Plan
 from src.db.models.project import Project
+from src.db.models.project_service import ProjectService
 from src.db.models.refresh_token import RefreshToken
 from src.db.models.system_setting import SystemSetting
 from src.db.models.secret import Secret
@@ -26,4 +27,5 @@ __all__ = [
     "Plan",
     "CreditTopUp",
     "CreditLedgerEntry",
+    "ProjectService",
 ]

@@ -50,7 +50,7 @@ def _clean_project_dir(path: Path) -> None:
 
 
 def _image_tag(project: Project) -> str:
-    prefix = "site" if project.type == "website" else "bot"
+    prefix = {"website": "site", "telegram_bot": "bot", "mixed": "mixed"}.get(project.type, "app")
     return f"airuntime-generated-{prefix}-{str(project.id)[:12]}:latest"
 
 
@@ -68,6 +68,15 @@ def _safe_title(project: Project) -> str:
 def generate_website_artifact(project: Project, prompt: str = "") -> Path:
     path = _project_dir(project.id)
     _clean_project_dir(path)
+    _write_website_content(project, prompt, path)
+    (path / "Dockerfile").write_text(
+        "FROM nginx:1.27-alpine\nCOPY public/ /usr/share/nginx/html/\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _write_website_content(project: Project, prompt: str, path: Path) -> None:
     public_dir = path / "public"
     public_dir.mkdir(parents=True, exist_ok=True)
 
@@ -366,11 +375,6 @@ def generate_website_artifact(project: Project, prompt: str = "") -> Path:
 </html>
 """
     (public_dir / "index.html").write_text(index_html, encoding="utf-8")
-    (path / "Dockerfile").write_text(
-        "FROM nginx:1.27-alpine\nCOPY public/ /usr/share/nginx/html/\n",
-        encoding="utf-8",
-    )
-    return path
 
 
 def _telegram_token(db: Session, project: Project) -> str | None:
@@ -387,6 +391,40 @@ def _telegram_token(db: Session, project: Project) -> str | None:
 def generate_telegram_bot_artifact(project: Project, prompt: str = "") -> Path:
     path = _project_dir(project.id)
     _clean_project_dir(path)
+    _write_telegram_content(project, prompt, path)
+    (path / "Dockerfile").write_text(_TELEGRAM_DOCKERFILE, encoding="utf-8")
+    return path
+
+
+_TELEGRAM_DOCKERFILE = "\n".join(
+    [
+        "FROM python:3.12-slim",
+        "WORKDIR /app",
+        "COPY requirements.txt .",
+        "RUN pip install --no-cache-dir -r requirements.txt",
+        "COPY app.py .",
+        'CMD ["python", "app.py"]',
+        "",
+    ]
+)
+
+MIXED_DOCKERFILE = """FROM python:3.12-slim
+RUN apt-get update && apt-get install -y --no-install-recommends nginx \\
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY app.py .
+COPY public/ /var/www/html/
+RUN rm -f /etc/nginx/sites-enabled/default \\
+    && printf 'server {\\n    listen 80;\\n    root /var/www/html;\\n    index index.html;\\n}\\n' > /etc/nginx/conf.d/site.conf
+RUN printf '#!/bin/sh\\nset -e\\nnginx\\nexec python app.py\\n' > /docker-entrypoint.sh \\
+    && chmod +x /docker-entrypoint.sh
+ENTRYPOINT ["/docker-entrypoint.sh"]
+"""
+
+
+def _write_telegram_content(project: Project, prompt: str, path: Path) -> None:
     safe_name = json.dumps(project.name, ensure_ascii=False)
     app_py = f"""
 import logging
@@ -426,42 +464,38 @@ if __name__ == "__main__":
 """
     (path / "app.py").write_text(textwrap.dedent(app_py).strip() + "\n", encoding="utf-8")
     (path / "requirements.txt").write_text("python-telegram-bot==21.10\n", encoding="utf-8")
-    (path / "Dockerfile").write_text(
-        "\n".join(
-            [
-                "FROM python:3.12-slim",
-                "WORKDIR /app",
-                "COPY requirements.txt .",
-                "RUN pip install --no-cache-dir -r requirements.txt",
-                "COPY app.py .",
-                "CMD [\"python\", \"app.py\"]",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
+
+
+def generate_mixed_artifact(project: Project, prompt: str = "") -> Path:
+    """A project that's both a website and a Telegram bot at once - one container running
+    both, nginx serving the site in the background and the bot process in the foreground."""
+    path = _project_dir(project.id)
+    _clean_project_dir(path)
+    _write_website_content(project, prompt, path)
+    _write_telegram_content(project, prompt, path)
+    (path / "Dockerfile").write_text(MIXED_DOCKERFILE, encoding="utf-8")
     return path
 
 
 def generate_project_artifact(db: Session, project: Project, prompt: str = "") -> Path:
+    needs_bot = project.type in ("telegram_bot", "mixed")
+    if needs_bot and not _telegram_token(db, project):
+        raise ArtifactError("Telegram bot requires TELEGRAM_BOT_TOKEN secret before deployment")
     if project.type == "website":
         return generate_website_artifact(project, prompt)
     if project.type == "telegram_bot":
-        if not _telegram_token(db, project):
-            raise ArtifactError(
-                "Telegram bot requires TELEGRAM_BOT_TOKEN secret before deployment"
-            )
         return generate_telegram_bot_artifact(project, prompt)
+    if project.type == "mixed":
+        return generate_mixed_artifact(project, prompt)
     raise ArtifactError(f"Unsupported project type: {project.type}")
 
 
 def ensure_project_artifact(db: Session, project: Project, prompt: str = "") -> Path:
     path = _project_dir(project.id)
     if (path / "Dockerfile").exists():
-        if project.type == "telegram_bot" and not _telegram_token(db, project):
-            raise ArtifactError(
-                "Telegram bot requires TELEGRAM_BOT_TOKEN secret before deployment"
-            )
+        needs_bot = project.type in ("telegram_bot", "mixed")
+        if needs_bot and not _telegram_token(db, project):
+            raise ArtifactError("Telegram bot requires TELEGRAM_BOT_TOKEN secret before deployment")
         return path
     artifact_dir = generate_project_artifact(db, project, prompt)
     try:
@@ -493,7 +527,27 @@ def _build_error_message(exc: DockerException) -> str:
     return str(exc)
 
 
-def build_project_image(db: Session, project: Project, prompt: str = "") -> tuple[str, dict[str, str]]:
+def try_build_project_image(project: Project) -> dict:
+    """Raw build attempt against the project's current files, no AI auto-repair - backs the
+    interactive build_project agent tool (src/services/agent/tools.py) so the agent can see a
+    real build log and fix things itself mid-conversation, instead of only reacting to the
+    automatic build-then-repair pipeline that runs after its turn ends (build_project_image
+    below, which does include AI auto-repair)."""
+    path = _project_dir(project.id)
+    if not (path / "Dockerfile").exists():
+        return {"ok": False, "log": "No Dockerfile in the project yet - write one before building."}
+    tag = _image_tag(project)
+    try:
+        with with_project_git_lock(project.id):
+            _docker_build(path, tag)
+    except DockerException as exc:
+        return {"ok": False, "log": _build_error_message(exc)}
+    return {"ok": True, "log": f"Build succeeded: {tag}"}
+
+
+def build_project_image(
+    db: Session, project: Project, prompt: str = ""
+) -> tuple[str, dict[str, str]]:
     # Prevent races between git checkout/commit and docker builds.
     with with_project_git_lock(project.id):
         path = ensure_project_artifact(db, project, prompt)
@@ -540,7 +594,7 @@ def build_project_image(db: Session, project: Project, prompt: str = "") -> tupl
                     ) from repair_exc
 
     environment: dict[str, str] = {}
-    if project.type == "telegram_bot":
+    if project.type in ("telegram_bot", "mixed"):
         token = _telegram_token(db, project)
         if not token:
             raise ArtifactError("Telegram bot token is missing")

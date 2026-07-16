@@ -60,7 +60,7 @@ def resolve_deploy_subdomain(project: Project) -> str:
 
 
 def planned_public_url(project: Project) -> str | None:
-    if project.type != "website":
+    if project.type not in ("website", "mixed"):
         return None
     return settings.build_project_url(resolve_deploy_subdomain(project))
 

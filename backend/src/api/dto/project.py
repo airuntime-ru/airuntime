@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 class ProjectType(StrEnum):
     telegram_bot = "telegram_bot"
     website = "website"
+    mixed = "mixed"
 
 
 class ProjectCreateRequest(BaseModel):

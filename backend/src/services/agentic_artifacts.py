@@ -13,7 +13,9 @@ from src.services.agent.loop import CodingAgentSession
 from src.services.agent.prompt import build_repair_prompt
 from src.services.agent.tools import WorkspaceTools
 from src.services.artifacts import (
+    MIXED_DOCKERFILE,
     ArtifactError,
+    generate_mixed_artifact,
     generate_telegram_bot_artifact,
     generate_website_artifact,
 )
@@ -88,16 +90,20 @@ def _fix_job_queue_v13_api(app_py: str) -> str:
 
 
 def ensure_required_files(project: Project, root: Path) -> None:
-    """Fill in a default Dockerfile if missing; raise if the entry file is missing."""
+    """Fill in a default Dockerfile if missing; raise if a required entry file is missing for
+    whichever capability(ies) this project has - website, telegram_bot, or "mixed" (both)."""
 
-    if project.type == "website":
-        if not (root / WEBSITE_REQUIRED).exists():
-            raise ArtifactError(
-                f"Agent did not produce the required {WEBSITE_REQUIRED} - website has no content"
-            )
-        if not (root / "Dockerfile").exists():
-            (root / "Dockerfile").write_text(_DEFAULT_WEBSITE_DOCKERFILE, encoding="utf-8")
-    elif project.type == "telegram_bot":
+    needs_website = project.type in ("website", "mixed")
+    needs_bot = project.type in ("telegram_bot", "mixed")
+    if not needs_website and not needs_bot:
+        raise ArtifactError(f"Unsupported project type: {project.type}")
+
+    if needs_website and not (root / WEBSITE_REQUIRED).exists():
+        raise ArtifactError(
+            f"Agent did not produce the required {WEBSITE_REQUIRED} - website has no content"
+        )
+
+    if needs_bot:
         if not (root / TELEGRAM_REQUIRED).exists():
             raise ArtifactError(
                 f"Agent did not produce the required {TELEGRAM_REQUIRED} - bot has no code"
@@ -113,7 +119,11 @@ def ensure_required_files(project: Project, root: Path) -> None:
                 (root / TELEGRAM_REQUIRED).write_text(app_py, encoding="utf-8")
         requirements_path = root / "requirements.txt"
         if not requirements_path.exists():
-            default_pkg = "python-telegram-bot[job-queue]==21.10" if uses_job_queue else "python-telegram-bot==21.10"
+            default_pkg = (
+                "python-telegram-bot[job-queue]==21.10"
+                if uses_job_queue
+                else "python-telegram-bot==21.10"
+            )
             requirements_path.write_text(f"{default_pkg}\n", encoding="utf-8")
         elif uses_job_queue:
             # app.py uses JobQueue but the agent may have listed the bare package - without the
@@ -126,10 +136,14 @@ def ensure_required_files(project: Project, root: Path) -> None:
                     ),
                     encoding="utf-8",
                 )
-        if not (root / "Dockerfile").exists():
+
+    if not (root / "Dockerfile").exists():
+        if needs_website and needs_bot:
+            (root / "Dockerfile").write_text(MIXED_DOCKERFILE, encoding="utf-8")
+        elif needs_website:
+            (root / "Dockerfile").write_text(_DEFAULT_WEBSITE_DOCKERFILE, encoding="utf-8")
+        else:
             (root / "Dockerfile").write_text(_DEFAULT_TELEGRAM_DOCKERFILE, encoding="utf-8")
-    else:
-        raise ArtifactError(f"Unsupported project type: {project.type}")
 
 
 def generate_fallback_artifact(db: Session, project: Project, prompt: str = "") -> Path:
@@ -140,6 +154,8 @@ def generate_fallback_artifact(db: Session, project: Project, prompt: str = "") 
         path = generate_website_artifact(project, prompt)
     elif project.type == "telegram_bot":
         path = generate_telegram_bot_artifact(project, prompt)
+    elif project.type == "mixed":
+        path = generate_mixed_artifact(project, prompt)
     else:
         raise ArtifactError(f"Unsupported project type: {project.type}")
 
