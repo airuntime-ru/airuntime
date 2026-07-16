@@ -274,64 +274,74 @@ export default function ProjectSettingsPage() {
 
   if (!project || !params.id) return <PageLoader />;
 
+  const hasTelegramTokenSlot =
+    secrets?.some((secret) => secret.key === "TELEGRAM_BOT_TOKEN") ?? false;
+  // Subdomain is only meaningful for projects that actually have a website.
+  // Backend sets planned_site_url=null for telegram_bot; also hide a misclassified
+  // "website" that already has a Telegram token slot.
+  const showSubdomainCard =
+    Boolean(project.planned_site_url) &&
+    !(project.type === "website" && hasTelegramTokenSlot);
+
   return (
     <div className="grid gap-4 md:grid-cols-2">
-      <Card hover={false} className="md:col-span-2">
-        <div className="flex items-start gap-3">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--ar-radius-sm)] bg-white/80 text-emerald-600 shadow-sm shadow-sky-950/5">
-            <Globe2 size={18} />
-          </span>
-          <div className="min-w-0 flex-1 space-y-4">
-            <div>
-              <p className="text-sm font-semibold text-[var(--ar-black)]">Поддомен сайта</p>
-              <p className="mt-1 text-sm leading-7 text-[var(--ar-mist)]">
-                Адрес, на котором откроется проект после следующего деплоя. Действует, только
-                если в проекте есть сайт - для чистого Telegram-бота это поле ни на что не влияет.
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-              <div className="flex-1 space-y-2">
-                <label htmlFor="deploy-subdomain" className="text-xs font-medium text-[var(--ar-stone)]">
-                  Поддомен
-                </label>
-                <div className="flex overflow-hidden rounded-[var(--ar-radius-sm)] border border-white/70 bg-white/72 shadow-sm shadow-sky-950/5">
-                  <Input
-                    id="deploy-subdomain"
-                    value={subdomain}
-                    onChange={(event) => {
-                      setSubdomain(event.target.value.toLowerCase());
-                      setSaved(false);
-                    }}
-                    placeholder="my-landing"
-                    className="border-0 bg-transparent shadow-none focus:ring-0"
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                  <span className="flex items-center border-l border-white/70 bg-white/58 px-3 text-sm text-[var(--ar-mist)]">
-                    .{baseDomain}
-                  </span>
-                </div>
+      {showSubdomainCard ? (
+        <Card hover={false} className="md:col-span-2">
+          <div className="flex items-start gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--ar-radius-sm)] bg-white/80 text-emerald-600 shadow-sm shadow-sky-950/5">
+              <Globe2 size={18} />
+            </span>
+            <div className="min-w-0 flex-1 space-y-4">
+              <div>
+                <p className="text-sm font-semibold text-[var(--ar-black)]">Поддомен сайта</p>
+                <p className="mt-1 text-sm leading-7 text-[var(--ar-mist)]">
+                  Адрес, на котором откроется сайт после следующего деплоя.
+                </p>
               </div>
-              <Button variant="accent" onClick={() => void onSaveSubdomain()} disabled={saving}>
-                {saving ? "Сохраняем..." : "Сохранить"}
-              </Button>
-            </div>
 
-            <p className="text-sm text-[var(--ar-mist)]">
-              Будет доступен по адресу: <span className="font-medium text-[var(--ar-black)]">{previewUrl}</span>
-            </p>
-            <p className="text-xs text-[var(--ar-stone)]">Поддомен проверяется на уникальность по всей системе.</p>
-            {project.deployment_url ? (
-              <p className="text-xs leading-6 text-[var(--ar-stone)]">
-                Текущий деплой: {project.deployment_url}. Новый поддомен применится при следующем запуске.
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                <div className="flex-1 space-y-2">
+                  <label htmlFor="deploy-subdomain" className="text-xs font-medium text-[var(--ar-stone)]">
+                    Поддомен
+                  </label>
+                  <div className="flex overflow-hidden rounded-[var(--ar-radius-sm)] border border-white/70 bg-white/72 shadow-sm shadow-sky-950/5">
+                    <Input
+                      id="deploy-subdomain"
+                      value={subdomain}
+                      onChange={(event) => {
+                        setSubdomain(event.target.value.toLowerCase());
+                        setSaved(false);
+                      }}
+                      placeholder="my-landing"
+                      className="border-0 bg-transparent shadow-none focus:ring-0"
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                    <span className="flex items-center border-l border-white/70 bg-white/58 px-3 text-sm text-[var(--ar-mist)]">
+                      .{baseDomain}
+                    </span>
+                  </div>
+                </div>
+                <Button variant="accent" onClick={() => void onSaveSubdomain()} disabled={saving}>
+                  {saving ? "Сохраняем..." : "Сохранить"}
+                </Button>
+              </div>
+
+              <p className="text-sm text-[var(--ar-mist)]">
+                Будет доступен по адресу: <span className="font-medium text-[var(--ar-black)]">{previewUrl}</span>
               </p>
-            ) : null}
-            {error ? <p className="text-sm text-rose-600">{error}</p> : null}
-            {saved ? <p className="text-sm text-emerald-600">Поддомен сохранен</p> : null}
+              <p className="text-xs text-[var(--ar-stone)]">Поддомен проверяется на уникальность по всей системе.</p>
+              {project.deployment_url ? (
+                <p className="text-xs leading-6 text-[var(--ar-stone)]">
+                  Текущий деплой: {project.deployment_url}. Новый поддомен применится при следующем запуске.
+                </p>
+              ) : null}
+              {error ? <p className="text-sm text-rose-600">{error}</p> : null}
+              {saved ? <p className="text-sm text-emerald-600">Поддомен сохранен</p> : null}
+            </div>
           </div>
-        </div>
-      </Card>
+        </Card>
+      ) : null}
 
       {(project.type === "telegram_bot" || project.type === "mixed") && botTokenConfigured ? (
         <TelegramBotAppearanceCard projectId={params.id} />
