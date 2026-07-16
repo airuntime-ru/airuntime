@@ -14,6 +14,7 @@ from src.services.project_services import (
     build_connection_env,
     ensure_service_containers,
     ensure_service_request,
+    is_likely_service_credential_key,
     network_name,
     teardown_service_containers,
 )
@@ -179,6 +180,27 @@ def test_ensure_service_request_accepts_arbitrary_image(client, db):
     # Custom kinds don't get an auto-generated connection string - only presets do.
     env = build_connection_env(db, project)
     assert env == {}
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "POSTGRES_PASSWORD",
+        "POSTGRES_USER",
+        "MYSQL_ROOT_PASSWORD",
+        "REDIS_PASSWORD",
+        "DATABASE_URL",
+    ],
+)
+def test_is_likely_service_credential_key_flags_component_credentials(key):
+    assert is_likely_service_credential_key(key, {"postgres", "mysql", "redis"}) == (
+        any(kind in key for kind in ("POSTGRES", "MYSQL", "REDIS"))
+    )
+
+
+def test_is_likely_service_credential_key_ignores_unrelated_secret():
+    assert not is_likely_service_credential_key("STRIPE_SECRET_KEY", {"postgres"})
+    assert not is_likely_service_credential_key("TELEGRAM_BOT_TOKEN", {"postgres", "redis"})
 
 
 def test_build_connection_env_postgres_and_redis(client, db):

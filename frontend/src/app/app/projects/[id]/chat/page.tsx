@@ -77,6 +77,10 @@ const PROVIDER_LABELS: Record<string, string> = {
   openrouter: "OpenRouter",
 };
 
+function agentStatusStorageKey(projectId: string, chatId: string) {
+  return `airuntime_agent_status_${projectId}_${chatId}`;
+}
+
 function readPinned(): string[] {
   if (typeof window === "undefined") return [];
   try {
@@ -99,6 +103,29 @@ function writeSelectedProvider(value: string) {
   if (typeof window === "undefined") return;
   if (value) localStorage.setItem(PROVIDER_KEY, value);
   else localStorage.removeItem(PROVIDER_KEY);
+}
+
+function readPersistedAgentStatus(projectId: string, chatId: string): AgentStatus | null {
+  if (typeof window === "undefined" || !projectId || !chatId) return null;
+  try {
+    const raw = sessionStorage.getItem(agentStatusStorageKey(projectId, chatId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as AgentStatus;
+    if (!parsed?.phase || !parsed?.label || !parsed?.state) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writePersistedAgentStatus(projectId: string, chatId: string, status: AgentStatus | null) {
+  if (typeof window === "undefined" || !projectId || !chatId) return;
+  const key = agentStatusStorageKey(projectId, chatId);
+  if (!status) {
+    sessionStorage.removeItem(key);
+    return;
+  }
+  sessionStorage.setItem(key, JSON.stringify(status));
 }
 
 function toolIcon(label: string) {
@@ -146,25 +173,31 @@ function AiTypingIndicator() {
   );
 }
 
-function AgentStatusPanel({ status }: { status: AgentStatus }) {
+function AgentStatusPanel({
+  status,
+  projectId,
+}: {
+  status: AgentStatus;
+  projectId: string;
+}) {
   const waiting = status.state === "waiting" || status.phase === "questions";
   const done = status.state === "done" && !waiting;
   const error = status.state === "error";
   const steps = ["thinking", "context", "tool", "verify", "module", "version", "deploy", "done"];
   const currentIndex = Math.max(0, steps.indexOf(status.phase));
-  const helpHref =
-    error && status.label.includes("TELEGRAM_BOT_TOKEN") ? "/help/telegram-token" : null;
+  const needsToken = error && status.label.includes("TELEGRAM_BOT_TOKEN");
+  const secretsHref = `/app/projects/${projectId}/settings#secrets`;
+  const helpHref = `/help/telegram-token?projectId=${encodeURIComponent(projectId)}`;
 
-  const panel = (
+  return (
     <div
       className={cn(
-        "sticky bottom-3 z-10 mb-5 overflow-hidden rounded-2xl border px-4 py-3 shadow-[0_14px_36px_rgba(70,130,180,0.10)] transition backdrop-blur-xl",
-        helpHref && "cursor-pointer hover:-translate-y-0.5 hover:shadow-[0_18px_42px_rgba(244,63,94,0.16)]",
+        "sticky bottom-3 z-10 mb-5 overflow-hidden rounded-2xl border px-4 py-3 shadow-[0_14px_36px_rgba(70,130,180,0.10)] backdrop-blur-xl",
         error
           ? "border-rose-200 bg-rose-50"
           : waiting
             ? "border-amber-200 bg-amber-50"
-          : "border-sky-100 bg-[linear-gradient(135deg,rgba(255,255,255,0.94),rgba(235,249,255,0.86))]"
+            : "border-sky-100 bg-[linear-gradient(135deg,rgba(255,255,255,0.94),rgba(235,249,255,0.86))]"
       )}
     >
       <div className="flex items-center justify-between gap-3">
@@ -186,12 +219,16 @@ function AgentStatusPanel({ status }: { status: AgentStatus }) {
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold text-[var(--ar-black)]">{status.label}</p>
             <p className="text-xs text-[var(--ar-stone)]">
-              {waiting ? "Ответьте в чат, и агент продолжит сборку" : "Статус сборки обновляется в реальном времени"}
+              {needsToken
+                ? "Добавьте токен в секреты проекта — после этого запуск продолжится"
+                : waiting
+                  ? "Ответьте в чат, и агент продолжит сборку"
+                  : "Статус сборки обновляется в реальном времени"}
             </p>
           </div>
         </div>
         <span className="hidden rounded-full border border-white/70 bg-white/70 px-2.5 py-1 text-xs font-medium text-[var(--ar-mist)] sm:inline-flex">
-          {waiting ? "ожидание" : "агент работает"}
+          {needsToken ? "нужен токен" : waiting ? "ожидание" : "агент работает"}
         </span>
       </div>
 
@@ -209,18 +246,25 @@ function AgentStatusPanel({ status }: { status: AgentStatus }) {
           ))}
         </div>
       ) : null}
+
+      {needsToken ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <a
+            href={secretsHref}
+            className="inline-flex items-center rounded-lg bg-[var(--ar-black)] px-3 py-1.5 text-xs font-medium text-white hover:bg-black/85"
+          >
+            В секреты
+          </a>
+          <a
+            href={helpHref}
+            className="inline-flex items-center rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50"
+          >
+            Как получить токен
+          </a>
+        </div>
+      ) : null}
     </div>
   );
-
-  if (helpHref) {
-    return (
-      <a href={helpHref} className="block no-underline" aria-label="Открыть инструкцию по получению Telegram token">
-        {panel}
-      </a>
-    );
-  }
-
-  return panel;
 }
 
 function MessageBody({
@@ -232,14 +276,6 @@ function MessageBody({
 }) {
   if (message.role === "assistant" && isStreaming && !message.content) {
     return <AiTypingIndicator />;
-  }
-
-  if (message.role === "assistant" && isStreaming) {
-    return (
-      <div className="cursor-chat-assistant whitespace-pre-wrap text-[15px] leading-[1.65] text-[var(--ar-black)]">
-        {message.content}
-      </div>
-    );
   }
 
   if (message.role === "assistant") {
@@ -282,10 +318,22 @@ export default function ProjectChatPage() {
   const toolActivityIdRef = useRef(0);
   const providerMenuRef = useRef<HTMLDivElement>(null);
 
-  const updateAgentStatus = useCallback((status: AgentStatus | null) => {
-    agentStatusRef.current = status;
-    setAgentStatus(status);
-  }, []);
+  const updateAgentStatus = useCallback(
+    (status: AgentStatus | null) => {
+      agentStatusRef.current = status;
+      setAgentStatus(status);
+      if (projectId && chatId) {
+        // Keep sticky statuses (token needed / waiting / done) across leaving the chat page.
+        // Clear ephemeral "running" snapshots so a remount doesn't show a stale spinner.
+        if (!status || status.state === "running") {
+          writePersistedAgentStatus(projectId, chatId, null);
+        } else {
+          writePersistedAgentStatus(projectId, chatId, status);
+        }
+      }
+    },
+    [projectId, chatId]
+  );
 
   useEffect(() => {
     getProviders()
@@ -339,7 +387,8 @@ export default function ProjectChatPage() {
         }))
       );
       setPendingFiles([]);
-      updateAgentStatus(null);
+      const restored = readPersistedAgentStatus(projectId, chatId);
+      updateAgentStatus(restored);
     };
     void loadMessages();
   }, [projectId, chatId, updateAgentStatus]);
@@ -362,6 +411,7 @@ export default function ProjectChatPage() {
 
   const onNewChat = async () => {
     if (!projectId) return;
+    if (chatId) writePersistedAgentStatus(projectId, chatId, null);
     const chat = await createChat(projectId);
     setChats((prev) => [chat, ...prev]);
     setChatId(chat.id);
@@ -694,7 +744,7 @@ export default function ProjectChatPage() {
               </div>
             )}
             {loading && toolActivity.length > 0 ? <ToolActivityFeed items={toolActivity} /> : null}
-            {agentStatus ? <AgentStatusPanel status={agentStatus} /> : null}
+            {agentStatus ? <AgentStatusPanel status={agentStatus} projectId={projectId} /> : null}
             <div ref={bottomRef} className="h-4" />
           </div>
         </div>

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { KeyRound, Settings } from "lucide-react";
+import { BookOpen, KeyRound, MessageSquare, Settings } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,15 +15,23 @@ import { projectStatusLabel } from "@/lib/project-status";
 
 const STATUS_GUIDANCE: Record<
   string,
-  (project: ProjectType) => { title: string; body: string; cta?: string }
+  (project: ProjectType) => {
+    title: string;
+    body: string;
+    showSecrets?: boolean;
+    showChat?: boolean;
+    showHelp?: boolean;
+  }
 > = {
   needs_configuration: (project) => ({
     title: "Нужна настройка",
     body:
       project.type === "telegram_bot" || project.type === "mixed"
-        ? "Файлы бота уже собраны, но запустить его пока нельзя: не хватает токена. Откройте настройки проекта, вставьте TELEGRAM_BOT_TOKEN (его выдаёт @BotFather в Telegram после команды /newbot) и запуск продолжится автоматически."
+        ? "Файлы бота уже собраны, но запустить его пока нельзя: не хватает токена. Откройте секреты проекта, вставьте TELEGRAM_BOT_TOKEN (его выдаёт @BotFather в Telegram после команды /newbot) и запуск продолжится автоматически."
         : "Проекту не хватает данных для запуска - откройте настройки проекта и заполните то, что запрашивается в разделе «Ключи и токены».",
-    cta: "Перейти в настройки",
+    showSecrets: true,
+    showChat: true,
+    showHelp: project.type === "telegram_bot" || project.type === "mixed",
   }),
   blocked: (project) => ({
     title: "Заблокирован модерацией",
@@ -143,18 +151,44 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
               </span>
               <p className="text-sm leading-7 text-[var(--ar-mist)]">{guidance.body}</p>
             </div>
-            {guidance.cta ? (
-              <div className="flex justify-end">
-                <Button
-                  variant="accent"
-                  onClick={() => {
-                    setStatusModalOpen(false);
-                    router.push(`${base}/settings`);
-                  }}
-                >
-                  <Settings size={16} />
-                  {guidance.cta}
-                </Button>
+            {guidance.showSecrets || guidance.showChat || guidance.showHelp ? (
+              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+                {guidance.showChat ? (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setStatusModalOpen(false);
+                      router.push(`${base}/chat`);
+                    }}
+                  >
+                    <MessageSquare size={16} />
+                    В чат
+                  </Button>
+                ) : null}
+                {guidance.showHelp ? (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setStatusModalOpen(false);
+                      router.push(`/help/telegram-token?projectId=${encodeURIComponent(projectId)}`);
+                    }}
+                  >
+                    <BookOpen size={16} />
+                    Как получить токен
+                  </Button>
+                ) : null}
+                {guidance.showSecrets ? (
+                  <Button
+                    variant="accent"
+                    onClick={() => {
+                      setStatusModalOpen(false);
+                      router.push(`${base}/settings#secrets`);
+                    }}
+                  >
+                    <Settings size={16} />
+                    В секреты
+                  </Button>
+                ) : null}
               </div>
             ) : null}
           </div>

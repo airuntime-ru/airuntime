@@ -5,7 +5,9 @@ from types import SimpleNamespace
 from tests.conftest import auth_tokens
 
 
-def _fake_agent_session_class(calls: list, *, extra_text: str = "", requested_service=None):
+def _fake_agent_session_class(
+    calls: list, *, extra_text: str = "", requested_service=None, requested_secret=None
+):
     """Builds a fake CodingAgentSession that skips real LLM/tool calls.
 
     It doesn't write any workspace files, so the router's ensure_required_files
@@ -25,6 +27,8 @@ def _fake_agent_session_class(calls: list, *, extra_text: str = "", requested_se
             )
             if requested_service:
                 self.workspace.requested_services.append(requested_service)
+            if requested_secret:
+                self.workspace.requested_secrets.append(requested_secret)
             yield TextDelta(text="Готово: ")
             yield TextDelta(text=user_message[:20])
             if extra_text:
@@ -636,6 +640,58 @@ def test_request_service_tool_creates_project_service_row(client, monkeypatch, t
     )
     assert row is not None
     assert row.kind == "postgres"
+
+
+def test_requesting_service_credential_as_secret_is_suppressed(client, monkeypatch, tmp_path, db):
+    """Regression test: the agent sometimes calls request_service for a database AND also
+    request_secret for its password (e.g. POSTGRES_PASSWORD) - the platform already generates
+    and wires up that credential automatically, so the user must never be asked to fill it in."""
+    from src.api.routers import chat as chat_router
+    from src.core.config import settings
+    from src.db.models.secret import Secret
+    from src.services.agent.tools import ServiceRequest
+
+    monkeypatch.setattr(settings, "generated_projects_dir", str(tmp_path))
+    monkeypatch.setattr(settings, "openai_api_key", "test-key")
+    calls: list = []
+
+    def fake_create_deployment(db, project):
+        return None
+
+    monkeypatch.setattr(
+        chat_router,
+        "CodingAgentSession",
+        _fake_agent_session_class(
+            calls,
+            requested_service=ServiceRequest(kind="postgres", reason="нужна БД"),
+            requested_secret=("POSTGRES_PASSWORD", "Пароль к базе данных PostgreSQL"),
+        ),
+    )
+    monkeypatch.setattr(chat_router, "create_deployment_for_project", fake_create_deployment)
+
+    headers = auth_tokens(client, "service-credential@airuntime.dev")
+    project = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={"type": "website", "name": "Service Site", "description": ""},
+    ).json()
+    chat = client.post(f"/api/v1/projects/{project['id']}/chats", headers=headers).json()
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/chats/{chat['id']}/stream",
+        headers=headers,
+        json={"content": "Сделай сайт с базой данных для интернет-магазина"},
+    )
+
+    assert response.status_code == 200
+    assert "POSTGRES_PASSWORD" not in response.text
+
+    secret = (
+        db.query(Secret)
+        .filter(Secret.project_id == uuid.UUID(project["id"]), Secret.key == "POSTGRES_PASSWORD")
+        .first()
+    )
+    assert secret is None
 
 
 def test_stream_accepts_files_already_linked_to_user_message(client, monkeypatch, tmp_path):

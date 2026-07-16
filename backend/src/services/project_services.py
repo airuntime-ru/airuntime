@@ -43,6 +43,34 @@ _PRESETS: dict[str, dict[str, str]] = {
 
 KNOWN_PRESET_KINDS = frozenset(_PRESETS)
 
+_CREDENTIAL_KEY_MARKERS = (
+    "PASSWORD",
+    "USERNAME",
+    "USER",
+    "HOST",
+    "PORT",
+    "DATABASE",
+    "_DB",
+    "URL",
+    "URI",
+    "CONNECTION",
+)
+
+
+def is_likely_service_credential_key(key: str, service_kinds: set[str]) -> bool:
+    """True if `key` looks like a credential/connection-detail for a service kind the project
+    already has (e.g. "POSTGRES_PASSWORD" when a "postgres" ProjectService exists) - a strong
+    signal the agent asked the user for something request_service already generated and wired
+    up automatically, and the secret request should be suppressed rather than shown to the user.
+    """
+    upper_key = key.upper()
+    for kind in service_kinds:
+        kind_upper = re.sub(r"[^A-Z0-9]+", "_", kind.upper()).strip("_")
+        if kind_upper and kind_upper in upper_key:
+            if any(marker in upper_key for marker in _CREDENTIAL_KEY_MARKERS):
+                return True
+    return False
+
 
 def is_known_preset(kind: str) -> bool:
     return kind in _PRESETS

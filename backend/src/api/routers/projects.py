@@ -19,7 +19,7 @@ from src.db.models.user import User
 from src.db.session import get_db
 from src.services.deployment_check import check_and_repair_deployment
 from src.services.docker_control_queue import submit_control_job
-from src.services.project_intent import infer_project_type
+from src.services.project_intent import infer_project_type, reconcile_mixed_type_without_website
 from src.services.project_logs import read_project_logs
 from src.services.project_runtime import (
     RunningProjectLimitError,
@@ -241,4 +241,8 @@ def get_project(
     )
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    if reconcile_mixed_type_without_website(project):
+        db.add(project)
+        db.commit()
+        db.refresh(project)
     return _to_response(project)

@@ -235,6 +235,14 @@ export default function ProjectSettingsPage() {
     };
   }, [params.id]);
 
+  useEffect(() => {
+    if (typeof window === "undefined" || window.location.hash !== "#secrets") return;
+    const timer = window.setTimeout(() => {
+      document.getElementById("secrets")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [project?.id]);
+
   const previewUrl = useMemo(() => {
     if (subdomain.trim()) {
       return `https://${subdomain.trim()}.${baseDomain}`;

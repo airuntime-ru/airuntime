@@ -21,6 +21,7 @@ from src.db.models.chat_file import ChatFile
 from src.db.models.message import Message
 from src.db.models.moderation_event import ModerationEvent
 from src.db.models.project import Project
+from src.db.models.project_service import ProjectService
 from src.db.models.user import User
 from src.db.session import get_db
 from src.services.agent.events import AgentDone, TextDelta, ToolCallRequested, ToolCallResult
@@ -40,9 +41,16 @@ from src.services.file_context import (
 )
 from src.services.moderation import check_project_safety
 from src.services.project_git import ProjectGitError, commit_snapshot
-from src.services.project_intent import update_project_type_from_prompt
+from src.services.project_intent import (
+    reconcile_mixed_type_without_website,
+    update_project_type_from_prompt,
+)
 from src.services.project_runtime import RunningProjectLimitError, block_project
-from src.services.project_services import ProjectServiceError, ensure_service_request
+from src.services.project_services import (
+    ProjectServiceError,
+    ensure_service_request,
+    is_likely_service_credential_key,
+)
 from src.services.project_subdomain import (
     assert_subdomain_available,
     normalize_deploy_subdomain,
@@ -213,7 +221,9 @@ def _needs_clarification(project: Project, content: str, attachment_ids: list[UU
 
 
 def _clarifying_questions(project: Project, content: str) -> str:
-    token_help_url = f"{settings.resolved_frontend_url}/help/telegram-token"
+    token_help_url = (
+        f"{settings.resolved_frontend_url}/help/telegram-token?projectId={project.id}"
+    )
     bot_questions = (
         "1. Где бот должен брать данные и что отвечать по умолчанию?\n"
         "2. Нужны ли команды вроде /start, /help, заявка, меню или сценарии?\n"
@@ -607,18 +617,12 @@ async def _stream_events(
                 elif isinstance(event, AgentDone) and event.reason == "error":
                     agent_error = event.error
 
-            new_secret_lines: list[str] = []
-            for key, reason in workspace.requested_secrets:
-                secret_row, created = ensure_secret_placeholder(db, project, key, reason)
-                requested_secret_keys.add(secret_row.key)
-                if created:
-                    label = f"**{secret_row.key}**"
-                    new_secret_lines.append(f"- {label} - {reason}" if reason else f"- {label}")
-            if new_secret_lines:
-                yield append_visible(
-                    "\n\nЧтобы проект заработал, заполните в настройках проекта "
-                    "(вкладка «Настройки») эти значения:\n" + "\n".join(new_secret_lines)
-                )
+            existing_service_kinds = {
+                row.kind
+                for row in db.query(ProjectService)
+                .filter(ProjectService.project_id == project.id)
+                .all()
+            }
 
             new_service_lines: list[str] = []
             for service_request in workspace.requested_services:
@@ -634,10 +638,29 @@ async def _stream_events(
                     )
                 except ProjectServiceError:
                     continue
+                existing_service_kinds.add(service_row.kind)
                 reason = service_request.reason
                 if created:
                     label = f"**{service_row.kind}** ({service_row.image})"
                     new_service_lines.append(f"- {label} - {reason}" if reason else f"- {label}")
+
+            new_secret_lines: list[str] = []
+            for key, reason in workspace.requested_secrets:
+                if is_likely_service_credential_key(key, existing_service_kinds):
+                    # The agent asked for a piece of a service it already provisioned via
+                    # request_service (e.g. POSTGRES_PASSWORD) - that's already generated and
+                    # wired up automatically, so there's nothing for the user to fill in here.
+                    continue
+                secret_row, created = ensure_secret_placeholder(db, project, key, reason)
+                requested_secret_keys.add(secret_row.key)
+                if created:
+                    label = f"**{secret_row.key}**"
+                    new_secret_lines.append(f"- {label} - {reason}" if reason else f"- {label}")
+            if new_secret_lines:
+                yield append_visible(
+                    "\n\nЧтобы проект заработал, заполните в настройках проекта "
+                    "(вкладка «Настройки») эти значения:\n" + "\n".join(new_secret_lines)
+                )
             if new_service_lines:
                 yield append_visible(
                     "\n\nПодключаю для проекта:\n"
@@ -683,6 +706,9 @@ async def _stream_events(
             db.add(project)
             has_website = project.type in ("website", "mixed")
             has_bot = project.type in ("telegram_bot", "mixed")
+            if has_website and has_bot and reconcile_mixed_type_without_website(project, artifact_path):
+                has_website = False
+                db.add(project)
             if has_bot and not _telegram_token(db, project):
                 ensure_secret_placeholder(
                     db, project, "TELEGRAM_BOT_TOKEN", "Нужен для запуска Telegram-бота"
@@ -693,7 +719,10 @@ async def _stream_events(
                     # avoid repeating the same instructions twice in one reply.
                     token_note = "Запуск отложен до заполнения токена."
                 else:
-                    token_help_url = f"{settings.resolved_frontend_url}/help/telegram-token"
+                    token_help_url = (
+                        f"{settings.resolved_frontend_url}/help/telegram-token"
+                        f"?projectId={project.id}"
+                    )
                     token_note = (
                         "Файлы бота созданы, но запуск остановлен: добавьте секрет "
                         "TELEGRAM_BOT_TOKEN в настройках проекта и повторите запуск.\n\n"
