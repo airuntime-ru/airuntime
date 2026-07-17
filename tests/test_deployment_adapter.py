@@ -93,6 +93,7 @@ def test_deploy_uses_traefik_labels_without_host_ports(monkeypatch):
     assert result["url"] == "https://demo-11111111.airuntime.ru"
     assert client.containers.run_kwargs["ports"] is None
     assert client.containers.run_kwargs["network"] == "airuntime_public"
+    assert client.containers.run_kwargs["restart_policy"] == {"Name": "unless-stopped"}
     assert labels["traefik.enable"] == "true"
     assert labels["traefik.http.routers.airuntime-11111111.rule"] == (
         "Host(`demo-11111111.airuntime.ru`)"

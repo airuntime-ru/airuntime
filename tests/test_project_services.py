@@ -267,6 +267,7 @@ def test_ensure_service_containers_creates_network_and_container():
     assert run_call["name"] == "airuntime-44444444-postgres"
     assert "ports" not in run_call
     assert run_call["network"] == network_name(project_id)
+    assert run_call["restart_policy"] == {"Name": "unless-stopped"}
     assert run_call["volumes"] == {
         host_volume_path(project_id, "postgres"): {
             "bind": "/var/lib/postgresql/data",

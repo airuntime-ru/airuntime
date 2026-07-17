@@ -383,6 +383,7 @@ def ensure_service_containers(client: Any, project_id: str, services: list[Proje
                 labels=_service_labels(project_id),
                 mem_limit=settings.deployment_service_memory_limit,
                 nano_cpus=int(float(settings.deployment_service_cpu_limit) * 1_000_000_000),
+                restart_policy={"Name": "unless-stopped"},
             )
 
         if row.kind == "postgres":

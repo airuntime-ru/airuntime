@@ -147,6 +147,10 @@ class DockerDeploymentAdapter:
                         f"traefik.http.services.{service_name}.loadbalancer.server.port": "80",
                     }
                 )
+            # unless-stopped: survive process crashes / host reboots until the user
+            # (or billing/control) explicitly stops the project. Without this, an exited
+            # container stays dead and Traefik drops the route — sites look "private"
+            # until someone redeploys from the cabinet.
             container = self._client.containers.run(
                 request.image_ref,
                 detach=True,
@@ -157,6 +161,7 @@ class DockerDeploymentAdapter:
                 mem_limit=settings.deployment_memory_limit,
                 nano_cpus=int(float(settings.deployment_cpu_limit) * 1_000_000_000),
                 network=primary_network,
+                restart_policy={"Name": "unless-stopped"},
             )
         except DockerException as exc:
             raise RuntimeError(str(exc)) from exc
