@@ -241,8 +241,16 @@ async function runStreamLoop(projectId: string, chatId: string, handlers: Stream
   notify(session);
 
   const applyStatus = (status: AgentStatus) => {
-    session.agentStatus = status;
-    writePersistedStatus(projectId, chatId, status);
+    // A "tool" phase frame with state done/error is one finished tool call (e.g. a shell
+    // command that happened to exit non-zero) - normal mid-turn agent activity, logged in the
+    // activity feed below, but never the reason the whole request "failed". Only a tool
+    // *request* (state running) should become the sticky top-level headline; a per-call
+    // result must not overwrite it with e.g. "⚠ exit 1: ..." styled as a fatal turn error.
+    const isToolResult = status.phase === "tool" && status.state !== "running";
+    if (!isToolResult) {
+      session.agentStatus = status;
+      writePersistedStatus(projectId, chatId, status);
+    }
     if (status.phase === "tool") {
       session.toolActivityId += 1;
       session.toolActivity = [

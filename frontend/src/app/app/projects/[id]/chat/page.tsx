@@ -153,15 +153,19 @@ function AgentStatusPanel({
   projectId: string;
   onContinue: () => void;
 }) {
-  const waiting = status.state === "waiting" || status.phase === "questions";
+  const needsSecret = status.phase === "needs_configuration";
+  // needs_configuration is an actionable pause (fill in a secret), not a failure - group it
+  // with "waiting", not "error", even though the backend reuses state="error" to mean
+  // "stop and wait for the user" here too.
+  const waiting = status.state === "waiting" || status.phase === "questions" || needsSecret;
   const done = status.state === "done" && !waiting;
-  const error =
-    status.state === "error" ||
-    status.phase === "error" ||
-    /не удался|ошибка|failed/i.test(status.label);
+  // Deliberately just state/phase - chat-stream-runtime.ts never lets a single tool call's
+  // result (a command that happened to exit non-zero) reach this component's status, only real
+  // turn-level failures do. A free-text regex on the label used to also catch here (e.g. a
+  // running "Выполняю: grep -r error ." tool label contains "error" while nothing has failed).
+  const error = !waiting && (status.state === "error" || status.phase === "error");
   const steps = ["thinking", "context", "tool", "verify", "module", "version", "deploy", "done"];
   const currentIndex = Math.max(0, steps.indexOf(status.phase));
-  const needsSecret = status.phase === "needs_configuration";
   const needsToken = needsSecret && status.label.includes("TELEGRAM_BOT_TOKEN");
   const secretsHref = `/app/projects/${projectId}/settings#secrets`;
   const helpHref = `/help/telegram-token?projectId=${encodeURIComponent(projectId)}`;
@@ -265,6 +269,21 @@ function AgentStatusPanel({
   );
 }
 
+// Kept in sync with backend/src/services/agent/prompt.py's REPORT_HEADING - both the model's
+// own end-of-turn self-report and the platform's objective timing/usage line land under this
+// exact heading, so it can be split out and rendered as a separate, muted, collapsible block
+// instead of ordinary chat prose (the "wall of text" complaint this was written to address).
+const REPORT_HEADING = "### Отчёт о выполнении";
+
+function splitReport(content: string): { main: string; report: string } {
+  const idx = content.indexOf(REPORT_HEADING);
+  if (idx === -1) return { main: content, report: "" };
+  return {
+    main: content.slice(0, idx).trimEnd(),
+    report: content.slice(idx + REPORT_HEADING.length).trim(),
+  };
+}
+
 function MessageBody({
   message,
   isStreaming,
@@ -277,9 +296,21 @@ function MessageBody({
   }
 
   if (message.role === "assistant") {
+    const { main, report } = splitReport(message.content);
     return (
       <div className="cursor-chat-assistant prose-chat prose-chat-cursor text-[15px] text-[var(--ar-black)]">
-        <ReactMarkdown rehypePlugins={[rehypeHighlight]}>{message.content}</ReactMarkdown>
+        <ReactMarkdown rehypePlugins={[rehypeHighlight]}>{main}</ReactMarkdown>
+        {report ? (
+          <details className="mt-2 rounded-xl border border-black/8 bg-[#fafafa] text-[13px]">
+            <summary className="flex cursor-pointer select-none items-center gap-1.5 px-3 py-2 text-[var(--ar-stone)] hover:text-[var(--ar-mist)]">
+              <Activity size={12} />
+              Отчёт о выполнении
+            </summary>
+            <div className="prose-chat prose-chat-compact border-t border-black/8 px-3 py-2 text-[var(--ar-mist)]">
+              <ReactMarkdown rehypePlugins={[rehypeHighlight]}>{report}</ReactMarkdown>
+            </div>
+          </details>
+        ) : null}
       </div>
     );
   }

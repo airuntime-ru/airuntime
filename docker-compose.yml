@@ -120,17 +120,40 @@ services:
       minio:
         condition: service_started
 
+  # Build source only, as of the per-turn isolation rework (see codex_worker.py) - the worker
+  # launches a fresh, single-purpose container from this image per Codex turn instead of `docker
+  # exec`-ing into one long-lived instance, so nothing here needs to actually run by default.
+  # `docker compose build codex` (or `up --build`, which still builds every service regardless of
+  # profile) produces the image; profile keeps `up` from also starting an idle instance of it.
   codex:
     build:
       context: .
       dockerfile: deployment/codex/Dockerfile
-    container_name: airuntime-codex
+    profiles: ["build-only"]
+
+  # Narrows the per-turn Codex container's Docker access from the raw host socket down to a
+  # vetted API subset - opt in by setting CODEX_DOCKER_HOST=tcp://docker-socket-proxy:2375 (see
+  # config.py's codex_docker_host). Until that's set, Codex containers fall back to the raw
+  # socket, same trust level as before this service existed.
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    environment:
+      CONTAINERS: 1
+      IMAGES: 1
+      EXEC: 1
+      BUILD: 1
+      POST: 1
+      NETWORKS: 1
+      VOLUMES: 0
+      SWARM: 0
+      SERVICES: 0
+      NODES: 0
+      PLUGINS: 0
+      SECRETS: 0
+      CONFIGS: 0
+      SYSTEM: 0
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - airruntime_projects_data:/data/airruntime-projects
-    depends_on:
-      redis:
-        condition: service_started
+      - /var/run/docker.sock:/var/run/docker.sock:ro
 
   django-admin:
     build:

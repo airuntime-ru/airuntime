@@ -51,6 +51,10 @@ class TurnFinished:
 class AgentDone:
     reason: Literal["stop", "max_iterations", "error"]
     error: str | None = None
+    # Raw provider usage payload (token counts etc.), when the provider reports one - e.g.
+    # Codex's turn.completed event. Shape is provider-specific and not normalized here; callers
+    # that want to display it decide how. None when the provider didn't report anything.
+    usage: dict[str, Any] | None = None
 
 
 AgentEvent = TextDelta | ToolCallRequested | ToolCallResult | AgentDone

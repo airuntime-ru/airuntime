@@ -83,8 +83,16 @@ build_project - таких инструментов здесь нет, их за
 "image": "...", "env": {}, "data_path": "..."} (image/env/data_path необязательны для \
 стандартных kind: postgres/redis/mysql/mongo/rabbitmq).
 
-Никогда не трогай файлы или Docker-контейнеры других проектов (соседние директории в \
-/data/airruntime-projects/) - работай только в своей текущей директории.\
+Никогда не трогай файлы или Docker-контейнеры других проектов - работай только в своей текущей \
+директории. Обычно физически ничего другого и не видно (у тебя примонтирован только этот \
+проект), но не пытайся обойти это через Docker (например через `docker exec` в чужой контейнер \
+по угаданному имени).
+
+Если задача явно распадается на независимые крупные куски (например: инфраструктура/окружение, \
+бэкенд, фронтенд/дизайн - части, которые не зависят от результата друг друга) и это ускорит \
+работу без потери качества - можешь делегировать часть работы своим subagent'ами параллельно \
+вместо последовательной работы в одиночку. Не дели ради самого деления: для большинства задач \
+(один сайт, один бот) быстрее и надёжнее сделать самому последовательно.\
 """
 
 
@@ -254,6 +262,26 @@ def _map_event(
     return []
 
 
+def _with_paragraph_breaks(
+    events: list[TextDelta | ToolCallRequested | ToolCallResult], seen_text: list[bool]
+) -> list[TextDelta | ToolCallRequested | ToolCallResult]:
+    """Codex delivers each agent_message item as one whole TextDelta, not token deltas (see
+    _map_event's docstring). A turn that produces more than one - an early "here's my plan"
+    message, then a later "adjusting because X" one - would otherwise get glued together with no
+    separator once chat.py concatenates them into assistant_full (observed in the wild as
+    sentences fused mid-word, e.g. "...сборку.В каталоге..."). Insert a paragraph break before
+    every message after the first one seen in this run.
+    """
+    out: list[TextDelta | ToolCallRequested | ToolCallResult] = []
+    for event in events:
+        if isinstance(event, TextDelta) and event.text:
+            if seen_text[0]:
+                event = TextDelta(text="\n\n" + event.text)
+            seen_text[0] = True
+        out.append(event)
+    return out
+
+
 def _write_temp_images(root: Path, images: list[ImageAttachment]) -> list[str]:
     tmp_dir = root / ".airuntime" / "tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -313,9 +341,7 @@ def _collect_requests(workspace: WorkspaceTools) -> None:
         path.unlink(missing_ok=True)
 
 
-def _compose_prompt(
-    *, system_prompt: str, history: list[dict[str, str]], user_message: str
-) -> str:
+def _compose_prompt(*, system_prompt: str, history: list[dict[str, str]], user_message: str) -> str:
     parts = [system_prompt.strip(), _CODEX_BRIDGE_INSTRUCTIONS]
     if history:
         transcript = "\n\n".join(f"{item['role']}: {item['content']}" for item in history)
@@ -329,9 +355,7 @@ class CodexAgentSession:
     TextDelta/ToolCallRequested/ToolCallResult/AgentDone), backed by Codex CLI instead of a
     direct provider HTTP stream."""
 
-    def __init__(
-        self, *, model: str, workspace: WorkspaceTools | None, system_prompt: str
-    ) -> None:
+    def __init__(self, *, model: str, workspace: WorkspaceTools | None, system_prompt: str) -> None:
         self.model = model
         self.workspace = workspace
         self.system_prompt = system_prompt
@@ -347,7 +371,8 @@ class CodexAgentSession:
         if kind == "turn.completed":
             if self.workspace:
                 _collect_requests(self.workspace)
-            return AgentDone(reason="stop")
+            usage = payload.get("usage")
+            return AgentDone(reason="stop", usage=usage if isinstance(usage, dict) else None)
         if kind == "turn.failed":
             error = payload.get("error")
             message = error.get("message") if isinstance(error, dict) else None
@@ -375,7 +400,9 @@ class CodexAgentSession:
 
         try:
             if in_worker_inline_docker():
-                async for event in self._run_inline(cwd=cwd, prompt=prompt, image_paths=image_paths):
+                async for event in self._run_inline(
+                    cwd=cwd, prompt=prompt, image_paths=image_paths
+                ):
                     yield event
             else:
                 async for event in self._run_via_queue(
@@ -400,14 +427,16 @@ class CodexAgentSession:
             "image_paths": image_paths,
         }
         saw_event = False
+        seen_text = [False]
         for payload in iter_codex_events(job):
             saw_event = True
             terminal = self._handle_terminal(payload)
             if terminal is not None:
                 yield terminal
                 return
-            for event in _map_event(
-                payload, workspace_root=self.workspace.root if self.workspace else None
+            for event in _with_paragraph_breaks(
+                _map_event(payload, workspace_root=self.workspace.root if self.workspace else None),
+                seen_text,
             ):
                 yield event
 
@@ -431,6 +460,7 @@ class CodexAgentSession:
         )
 
         saw_event = False
+        seen_text = [False]
         async for payload in _stream_events(
             run_id, timeout_seconds=settings.codex_turn_timeout_seconds
         ):
@@ -439,8 +469,9 @@ class CodexAgentSession:
             if terminal is not None:
                 yield terminal
                 return
-            for event in _map_event(
-                payload, workspace_root=self.workspace.root if self.workspace else None
+            for event in _with_paragraph_breaks(
+                _map_event(payload, workspace_root=self.workspace.root if self.workspace else None),
+                seen_text,
             ):
                 yield event
 

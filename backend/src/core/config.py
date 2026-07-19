@@ -49,11 +49,36 @@ class Settings(BaseSettings):
 
     # Codex CLI runner (replaces direct provider HTTP calls for the "openai" path - see
     # backend/src/services/agent/codex_runtime.py). Other providers keep the old HTTP path.
-    codex_container_name: str = "airuntime-codex"
+    # A fresh, single-purpose container per turn (see codex_worker.py) built from this image -
+    # not a long-lived named container anymore, so codex_container_name is gone.
+    codex_image: str = "airuntime-codex"
     # A real coding turn (write/fix a multi-file project, rebuild until it passes) can
     # legitimately run long - give it room to work without getting cut off mid-task.
     codex_turn_timeout_seconds: int = 1800
     codex_simple_timeout_seconds: int = 45
+    codex_memory_limit: str = "2g"
+    codex_cpu_limit: str = "2.0"
+    # Docker network the per-turn Codex container joins - needed so it can resolve
+    # docker-socket-proxy by name when codex_docker_host is set. Compose's default network name
+    # for this project is "airuntime_default" (<compose project name>_default); override via env
+    # if deployed under a different COMPOSE_PROJECT_NAME / -p.
+    codex_network: str | None = "airuntime_default"
+    # docker-socket-proxy address (e.g. "tcp://docker-socket-proxy:2375") for the per-turn
+    # container's own docker build/run calls. None (default) keeps the pre-isolation behavior of
+    # bind-mounting the raw host socket into it - opt in once the proxy service is deployed (see
+    # docker-compose.yml's docker-socket-proxy service).
+    codex_docker_host: str | None = None
+    # Real host path of the named volume backing generated_projects_dir, looked up via the
+    # Docker API at run time (see codex_worker.py's _resolve_project_mount) so a per-turn
+    # container can bind-mount just one project's subtree instead of the whole shared volume.
+    # Compose prefixes volume names with the project name ("airuntime" from this file's `name:`
+    # key) - verify against `docker volume ls` on the target host if COMPOSE_PROJECT_NAME differs.
+    generated_projects_volume_name: str = "airruntime_airruntime_projects_data"
+
+    # Off by default - see backend/src/services/agent/orchestrator.py's module docstring for why
+    # this is the least-tested piece of the 2026-07-17 architecture work (no live model run to
+    # validate the planning call's output against) and docs/architecture.md for the design.
+    enable_agent_orchestrator: bool = False
 
     docker_binary: str = "docker"
     deployment_port_base: int = 18000

@@ -29,10 +29,13 @@ def _fake_live_deployment(db, project):
     return deployment
 
 
-def _fake_agent_session_class(
+def _fake_run_agent_turn(
     calls: list, *, extra_text: str = "", requested_service=None, requested_secret=None
 ):
-    """Builds a fake CodingAgentSession that skips real LLM/tool calls.
+    """Builds a fake run_agent_turn() (backend/src/services/agent/orchestrator.py) that skips
+    real LLM/tool calls - chat.py calls this directly (it replaced constructing
+    CodingAgentSession itself when the orchestrator layer was added, see orchestrator.py), so
+    that's the seam tests patch now.
 
     It doesn't write any workspace files, so the router's ensure_required_files
     check fails and falls back to the deterministic template generator - which is
@@ -40,26 +43,29 @@ def _fake_agent_session_class(
     """
     from src.services.agent.events import AgentDone, TextDelta
 
-    class _FakeCodingAgentSession:
-        def __init__(self, *, provider_name, model, api_key, workspace, system_prompt):
-            self.provider_name = provider_name
-            self.workspace = workspace
+    async def _fake(
+        *,
+        provider_name,
+        model,
+        api_key,
+        workspace,
+        system_prompt,
+        history,
+        user_message,
+        images=None,
+    ):
+        calls.append({"history": history, "user_message": user_message, "provider": provider_name})
+        if requested_service:
+            workspace.requested_services.append(requested_service)
+        if requested_secret:
+            workspace.requested_secrets.append(requested_secret)
+        yield TextDelta(text="Готово: ")
+        yield TextDelta(text=user_message[:20])
+        if extra_text:
+            yield TextDelta(text=extra_text)
+        yield AgentDone(reason="stop")
 
-        async def run(self, *, history, user_message, images=None):
-            calls.append(
-                {"history": history, "user_message": user_message, "provider": self.provider_name}
-            )
-            if requested_service:
-                self.workspace.requested_services.append(requested_service)
-            if requested_secret:
-                self.workspace.requested_secrets.append(requested_secret)
-            yield TextDelta(text="Готово: ")
-            yield TextDelta(text=user_message[:20])
-            if extra_text:
-                yield TextDelta(text=extra_text)
-            yield AgentDone(reason="stop")
-
-    return _FakeCodingAgentSession
+    return _fake
 
 
 def test_health(client):
@@ -573,7 +579,7 @@ def test_stream_prompt_generates_artifact_and_queues_deployment(client, monkeypa
         deployments.append(project.id)
         return _fake_live_deployment(db, project)
 
-    monkeypatch.setattr(chat_router, "CodingAgentSession", _fake_agent_session_class(calls))
+    monkeypatch.setattr(chat_router, "run_agent_turn", _fake_run_agent_turn(calls))
     monkeypatch.setattr(chat_router, "create_deployment_for_project", fake_create_deployment)
 
     headers = auth_tokens(client, "stream@airuntime.dev")
@@ -631,8 +637,8 @@ def test_request_service_tool_creates_project_service_row(client, monkeypatch, t
 
     monkeypatch.setattr(
         chat_router,
-        "CodingAgentSession",
-        _fake_agent_session_class(
+        "run_agent_turn",
+        _fake_run_agent_turn(
             calls, requested_service=ServiceRequest(kind="postgres", reason="нужна БД")
         ),
     )
@@ -682,8 +688,8 @@ def test_requesting_service_credential_as_secret_is_suppressed(client, monkeypat
 
     monkeypatch.setattr(
         chat_router,
-        "CodingAgentSession",
-        _fake_agent_session_class(
+        "run_agent_turn",
+        _fake_run_agent_turn(
             calls,
             requested_service=ServiceRequest(kind="postgres", reason="нужна БД"),
             requested_secret=("POSTGRES_PASSWORD", "Пароль к базе данных PostgreSQL"),
@@ -727,7 +733,7 @@ def test_stream_accepts_files_already_linked_to_user_message(client, monkeypatch
     def fake_create_deployment(db, project):
         return _fake_live_deployment(db, project)
 
-    monkeypatch.setattr(chat_router, "CodingAgentSession", _fake_agent_session_class(calls))
+    monkeypatch.setattr(chat_router, "run_agent_turn", _fake_run_agent_turn(calls))
     monkeypatch.setattr(chat_router, "create_deployment_for_project", fake_create_deployment)
 
     headers = auth_tokens(client, "stream-file@airuntime.dev")
@@ -781,7 +787,7 @@ def test_stream_subdomain_from_prompt_sets_deploy_subdomain(client, monkeypatch,
             project.deployment_url = f"https://{project.deploy_subdomain}.airuntime.ru"
         return _fake_live_deployment(db, project)
 
-    monkeypatch.setattr(chat_router, "CodingAgentSession", _fake_agent_session_class(calls))
+    monkeypatch.setattr(chat_router, "run_agent_turn", _fake_run_agent_turn(calls))
     monkeypatch.setattr(chat_router, "create_deployment_for_project", fake_create_deployment)
 
     headers = auth_tokens(client, "subdomain@airuntime.dev")
@@ -812,7 +818,7 @@ def test_stream_prompt_reclassifies_project_before_generation(client, monkeypatc
     calls: list = []
     deployments = []
 
-    monkeypatch.setattr(chat_router, "CodingAgentSession", _fake_agent_session_class(calls))
+    monkeypatch.setattr(chat_router, "run_agent_turn", _fake_run_agent_turn(calls))
     monkeypatch.setattr(chat_router, "commit_snapshot", lambda artifact_path, message: "abc123")
 
     def fake_create_deployment(db, project):
@@ -855,7 +861,7 @@ def test_project_combining_site_and_bot_signals_is_classified_mixed(client, monk
     monkeypatch.setattr(settings, "openai_api_key", "test-key")
     calls: list = []
 
-    monkeypatch.setattr(chat_router, "CodingAgentSession", _fake_agent_session_class(calls))
+    monkeypatch.setattr(chat_router, "run_agent_turn", _fake_run_agent_turn(calls))
     monkeypatch.setattr(chat_router, "commit_snapshot", lambda artifact_path, message: "abc123")
 
     headers = auth_tokens(client, "mixed-project@airuntime.dev")

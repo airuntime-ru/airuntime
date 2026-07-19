@@ -253,3 +253,27 @@ class ToolExecutor(Protocol):
 - [x] Data model and API surface outlined.
 - [x] Security constraints captured (secrets isolation, rate limiting, RBAC-ready).
 - [x] Iterative implementation order aligned to request.
+
+## 14) Codex Execution Isolation
+
+Every coding-agent turn on the `openai` path runs the actual Codex CLI in its own throwaway
+Docker container (`backend/src/services/agent/codex_worker.py`), launched fresh per turn and
+removed when it finishes - not a single long-lived container that every turn `docker exec`s into.
+
+- **Filesystem**: the container gets *only* the current project's own subdirectory bind-mounted,
+  at `/workspace` - resolved at run time from the shared projects volume's real host path, so no
+  compose/volume changes (and no data migration) were needed to adopt this. A turn for one
+  project cannot `cd`/read/write into another project's files; that path simply isn't mounted.
+  If the volume's host path can't be resolved on a given deployment (see the production
+  checklist), the run falls back to the pre-isolation full-tree mount rather than failing
+  outright - loudly logged, not silent.
+- **Docker access**: Codex still runs `docker build`/`docker run` itself as part of testing a
+  project (see the bridge instructions in `codex_runtime.py`). By default this still goes through
+  the raw host socket, same trust level as before. Setting `CODEX_DOCKER_HOST` to a
+  `docker-socket-proxy` address (service included in `docker-compose.yml`, off by default)
+  narrows this to a vetted subset of the Docker API instead of the full daemon - opt-in, since it
+  needs the proxy service verified reachable first.
+- **Not covered yet**: the Docker daemon (raw or proxied) is still shared across every project's
+  containers, so this stops cross-project *file* access but not a Codex turn naming another
+  project's *container* through that same daemon. Stronger isolation (gVisor, microVM-based
+  sandboxes) is a further step, not required to get the filesystem-isolation win above.

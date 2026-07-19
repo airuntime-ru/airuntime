@@ -4,7 +4,7 @@ import re
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -20,6 +20,7 @@ from src.api.dto.chat import (
 from src.api.dto.files import RepairStreamRequest
 from src.api.mappers.chat_files import chat_file_to_response
 from src.core.config import settings
+from src.db.models.agent_run_metric import AgentRunMetric
 from src.db.models.chat import Chat
 from src.db.models.chat_file import ChatFile
 from src.db.models.deployment import Deployment
@@ -30,8 +31,8 @@ from src.db.models.project_service import ProjectService
 from src.db.models.user import User
 from src.db.session import get_db
 from src.services.agent.events import AgentDone, TextDelta, ToolCallRequested, ToolCallResult
-from src.services.agent.loop import CodingAgentSession
-from src.services.agent.prompt import build_system_prompt
+from src.services.agent.orchestrator import run_agent_turn
+from src.services.agent.prompt import REPORT_HEADING, build_system_prompt
 from src.services.agent.tools import WorkspaceTools
 from src.services.agentic_artifacts import (
     ensure_dockerfile,
@@ -395,9 +396,7 @@ def _launch_failure_message(deployment: Deployment | None, project: Project) -> 
             detail = project.logs.strip().splitlines()[-1][:500]
     if detail:
         return f"\n\nНе удалось запустить проект: {detail}"
-    return (
-        "\n\nНе удалось запустить проект. Подробности — во вкладках «Деплои» и «Логи»."
-    )
+    return "\n\nНе удалось запустить проект. Подробности — во вкладках «Деплои» и «Логи»."
 
 
 def _message_response(db: Session, message: Message) -> MessageResponse:
@@ -651,7 +650,10 @@ async def _stream_events(
 
         artifact_path = project_dir(project.id)
         agent_error: str | None = None
+        agent_usage: dict[str, object] | None = None
         requested_secret_keys: set[str] = set()
+        turn_started = time.monotonic()
+        agent_elapsed: float | None = None
 
         if not api_key:
             yield append_visible(
@@ -668,28 +670,48 @@ async def _stream_events(
                 system_prompt += f"\n\nКонтекст более раннего диалога в этом чате:\n{summary}"
 
             workspace = WorkspaceTools(artifact_path, project_id=str(project.id))
-            session = CodingAgentSession(
-                provider_name=provider_name,
-                model=model,
-                api_key=api_key,
-                workspace=workspace,
-                system_prompt=system_prompt,
-            )
 
-            async for event in session.run(
-                history=history, user_message=safe_message, images=image_attachments
-            ):
-                if isinstance(event, TextDelta):
-                    yield append_visible(event.text)
-                elif isinstance(event, ToolCallRequested):
-                    yield _sse_status("tool", _tool_status_label(event.name, event.arguments))
-                elif isinstance(event, ToolCallResult):
-                    icon = "✓" if event.ok else "⚠"
-                    yield _sse_status(
-                        "tool", f"{icon} {event.summary}", "done" if event.ok else "error"
-                    )
-                elif isinstance(event, AgentDone) and event.reason == "error":
-                    agent_error = event.error
+            agent_started = time.monotonic()
+            try:
+                async for event in run_agent_turn(
+                    provider_name=provider_name,
+                    model=model,
+                    api_key=api_key,
+                    workspace=workspace,
+                    system_prompt=system_prompt,
+                    history=history,
+                    user_message=safe_message,
+                    images=image_attachments,
+                ):
+                    if isinstance(event, TextDelta):
+                        yield append_visible(event.text)
+                    elif isinstance(event, ToolCallRequested):
+                        yield _sse_status("tool", _tool_status_label(event.name, event.arguments))
+                    elif isinstance(event, ToolCallResult):
+                        # A single failed shell command (e.g. `rg --files` on an empty new
+                        # project) is routine mid-turn agent behavior, not a turn failure - the
+                        # agent sees this result and keeps going. Still reported with
+                        # state="error" so the tool activity feed can flag it, but
+                        # chat-stream-runtime.ts deliberately does not let a "tool" phase frame
+                        # drive the top-level status panel, so it can't look like the whole
+                        # request failed.
+                        icon = "✓" if event.ok else "⚠"
+                        yield _sse_status(
+                            "tool", f"{icon} {event.summary}", "done" if event.ok else "error"
+                        )
+                    elif isinstance(event, AgentDone):
+                        if event.usage:
+                            agent_usage = event.usage
+                        if event.reason == "error":
+                            agent_error = event.error
+                            label = (agent_error or "Агент завершился с ошибкой").strip()[:160]
+                            yield _sse_status("error", label, "error")
+            except Exception as exc:  # noqa: BLE001 - the SSE stream must end with a status the
+                # user can see (and the turn still needs to persist/close out below) rather than
+                # silently dying mid-turn and leaving a stale status frame on screen.
+                agent_error = str(exc) or "Неизвестная ошибка агента"
+                yield _sse_status("error", f"Внутренний сбой агента: {agent_error}"[:160], "error")
+            agent_elapsed = time.monotonic() - agent_started
 
             existing_service_kinds = {
                 row.kind
@@ -915,7 +937,11 @@ async def _stream_events(
                     )
                     if newer is not None and newer.started_at is not None:
                         watched = db.get(Deployment, watched_id)
-                        if watched and watched.started_at and newer.started_at >= watched.started_at:
+                        if (
+                            watched
+                            and watched.started_at
+                            and newer.started_at >= watched.started_at
+                        ):
                             if newer.status not in _DEPLOYMENT_TERMINAL:
                                 yield _sse_status(
                                     "deploy",
@@ -955,9 +981,7 @@ async def _stream_events(
                     and project.status == "live"
                 ):
                     yield append_visible(
-                        _launch_success_message(
-                            project, has_website=has_website, has_bot=has_bot
-                        )
+                        _launch_success_message(project, has_website=has_website, has_bot=has_bot)
                     )
                     yield _sse_status("done", "Проект запущен и работает", "done")
                 elif deployment is not None and deployment.status == "failed":
@@ -1051,10 +1075,58 @@ async def _stream_events(
             yield _sse_status("error", f"Нужно действие: {exc}", "error")
             yield append_visible(f"\n\nНужно действие: {exc}")
 
+        deploy_elapsed = 0.0
+        if agent_elapsed is not None:
+            # Objective numbers, deliberately kept separate from the agent's own qualitative
+            # self-report (see prompt.py's REPORT_HEADING instructions) - the model isn't asked
+            # to guess elapsed time/tokens, this is measured server-side and from the provider's
+            # own usage payload instead. Appended under the SAME heading the model was told to
+            # use (adding it here too if the model's turn didn't produce one - trivial turns, or
+            # a non-Codex provider not given the same instructions) so the frontend has exactly
+            # one marker to split the message on when styling this as a separate, muted block.
+            deploy_elapsed = max(0.0, time.monotonic() - turn_started - agent_elapsed)
+            timing_bits = [
+                f"генерация ~{agent_elapsed:.1f}с",
+                f"сборка/проверка ~{deploy_elapsed:.1f}с",
+            ]
+            lines = [f"_Время: {', '.join(timing_bits)}._"]
+            if agent_usage:
+                usage_line = ", ".join(f"{k}: {v}" for k, v in agent_usage.items())
+                if usage_line:
+                    lines.append(f"_Использование провайдера: {usage_line}._")
+            if REPORT_HEADING in assistant_full:
+                footer = "\n" + "\n".join(lines)
+            else:
+                footer = f"\n\n{REPORT_HEADING}\n" + "\n".join(lines)
+            yield append_visible(footer)
+
+        # Explicit id (rather than relying on the column's client-side default at flush time) so
+        # the same id can link an AgentRunMetric row below without an extra round-trip.
         assistant_message = Message(
-            chat_id=chat_id, role="assistant", content_markdown=assistant_full
+            id=uuid4(), chat_id=chat_id, role="assistant", content_markdown=assistant_full
         )
         db.add(assistant_message)
+        # Flush now: AgentRunMetric.message_id below is a bare FK column with no ORM
+        # relationship() linking the two mappers, so the unit-of-work has no dependency edge
+        # telling it to insert the message first - without this flush the two INSERTs can be
+        # emitted in either order within the same transaction, and a metric-before-message
+        # ordering trips agent_run_metrics_message_id_fkey (confirmed by a real
+        # ForeignKeyViolation while testing this against Postgres).
+        db.flush()
+        if agent_elapsed is not None:
+            db.add(
+                AgentRunMetric(
+                    project_id=project.id,
+                    chat_id=chat_id,
+                    message_id=assistant_message.id,
+                    provider=provider_name,
+                    model=model,
+                    agent_seconds=agent_elapsed,
+                    deploy_seconds=deploy_elapsed,
+                    usage_json=json.dumps(agent_usage) if agent_usage else None,
+                    agent_error=agent_error,
+                )
+            )
         usage_cost = max(100, len(safe_message) + len(assistant_full))
         record_usage(db, current_user, project_id=project.id, amount=usage_cost)
         db.commit()
