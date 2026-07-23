@@ -43,6 +43,11 @@ jobs:
           python-version: "3.12"
       - name: Install backend dependencies
         run: pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+      - name: Install Playwright Chromium
+        # Only for test_run_preview_browser.py, which exercises deployment/preview/
+        # run_preview.py's detection logic against a real browser. That test skips cleanly
+        # (not a failure) if this step is ever removed or fails.
+        run: playwright install --with-deps chromium
       - name: Run migrations
         working-directory: backend
         run: alembic upgrade head

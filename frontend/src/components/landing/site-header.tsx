@@ -6,7 +6,6 @@ import { Menu, X } from "lucide-react";
 
 import { Logo } from "@/components/brand/logo";
 import { LOGIN_HREF, navItems } from "@/lib/landing/content";
-import { trackLandingEvent } from "@/lib/landing/analytics";
 import { cn } from "@/lib/cn";
 
 export function SiteHeader() {
@@ -67,10 +66,9 @@ export function SiteHeader() {
           </Link>
           <Link
             href={LOGIN_HREF}
-            onClick={() => trackLandingEvent("hero_start_project", { source: "header" })}
             className="inline-flex h-9 items-center justify-center rounded-[0.55rem] bg-[var(--ar-black)] px-3.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ar-sky)]/40 sm:h-10 sm:px-4"
           >
-            Запустить проект
+            Создать проект
           </Link>
           <button
             type="button"

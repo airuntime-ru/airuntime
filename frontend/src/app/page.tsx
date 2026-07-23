@@ -1,18 +1,14 @@
 import type { Metadata } from "next";
 
-import { AudienceSection } from "@/components/landing/audience-section";
-import { ComparisonSection } from "@/components/landing/comparison-section";
 import { FaqSection } from "@/components/landing/faq-section";
 import { FinalCtaSection } from "@/components/landing/final-cta-section";
 import { HeroSection } from "@/components/landing/hero-section";
 import { HowItWorksSection } from "@/components/landing/how-it-works";
-import { InfraSection } from "@/components/landing/infra-section";
 import { ResultSection } from "@/components/landing/result-section";
-import { SecuritySection } from "@/components/landing/security-section";
 import { SiteFooter } from "@/components/landing/site-footer";
 import { SiteHeader } from "@/components/landing/site-header";
+import { TrustSection } from "@/components/landing/trust-section";
 import { UseCasesSection } from "@/components/landing/use-cases-section";
-import { VersionsSection } from "@/components/landing/versions-section";
 import { seoCopy } from "@/lib/landing/content";
 
 export const metadata: Metadata = {
@@ -60,11 +56,7 @@ export default function Home() {
           <ResultSection />
           <HowItWorksSection />
           <UseCasesSection />
-          <ComparisonSection />
-          <InfraSection />
-          <VersionsSection />
-          <SecuritySection />
-          <AudienceSection />
+          <TrustSection />
           <FaqSection />
           <FinalCtaSection />
         </main>

@@ -24,6 +24,7 @@ Shared macros live in `templates/macros.html.j2` (button, OTP, badges, billing s
 - Public asset: `frontend/public/brand/email-logo.png` → `{FRONTEND_URL}/brand/email-logo.png`
 - Send path embeds the same PNG as CID `airuntime-logo` for clients that block remote images
 - Backend copy: `backend/src/assets/brand/email-logo.png`
+- Opaque RGB wordmark on solid `#FFFFFF` (no transparency). Header uses a white logo plate plus `color-scheme: light only` so dark-mode clients are less likely to invert the brand mark into a floating stamp.
 
 ## Local preview (no SMTP)
 

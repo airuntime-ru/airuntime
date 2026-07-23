@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { CheckCircle2, CreditCard, History, Layers, Sparkles, UserRound, Zap } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { CheckCircle2, ChevronLeft, ChevronRight, CreditCard, History, Layers, Sparkles, UserRound, Zap } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import {
   type BillingSummaryType,
   type CreditLedgerEntryType,
   type CreditTopUpType,
+  type LedgerDirection,
   type PlanType,
   createTopUp,
   getBillingSummary,
@@ -23,6 +24,7 @@ import {
 import { useProfile } from "@/lib/use-profile";
 
 const TOPUP_PRESETS = [10_000, 50_000, 200_000];
+const LEDGER_PAGE_SIZE = 10;
 
 function formatDate(value: string | null): string {
   if (!value) return "—";
@@ -46,6 +48,25 @@ const LEDGER_REASON_LABEL: Record<CreditLedgerEntryType["reason"], string> = {
   plan_change: "Смена тарифа",
 };
 
+const LEDGER_DIRECTION_OPTIONS: { value: LedgerDirection; label: string }[] = [
+  { value: "all", label: "Все" },
+  { value: "debit", label: "Списания" },
+  { value: "credit", label: "Начисления" },
+];
+
+function ledgerTitle(entry: CreditLedgerEntryType): string {
+  if (entry.project_name) return entry.project_name;
+  return LEDGER_REASON_LABEL[entry.reason] ?? entry.reason;
+}
+
+function ledgerSubtitle(entry: CreditLedgerEntryType): string {
+  const reason = LEDGER_REASON_LABEL[entry.reason] ?? entry.reason;
+  if (entry.project_name && entry.reason === "chat_message") {
+    return `${reason} · ${formatDateTime(entry.created_at)}`;
+  }
+  return formatDateTime(entry.created_at);
+}
+
 // "до N проектов": genitive case throughout, so only the "N=1" form differs ("до 1 проекта" vs "до 5 проектов").
 function pluralizeProjects(count: number): string {
   const mod10 = count % 10;
@@ -64,6 +85,10 @@ export default function ProfilePage() {
   const [billing, setBilling] = useState<BillingSummaryType | null>(null);
   const [topups, setTopups] = useState<CreditTopUpType[]>([]);
   const [usage, setUsage] = useState<CreditLedgerEntryType[]>([]);
+  const [usageTotal, setUsageTotal] = useState(0);
+  const [usagePage, setUsagePage] = useState(0);
+  const [usageDirection, setUsageDirection] = useState<LedgerDirection>("all");
+  const [usageLoading, setUsageLoading] = useState(false);
   const [plans, setPlans] = useState<PlanType[]>([]);
   const [topupOpen, setTopupOpen] = useState(false);
   const [topupCredits, setTopupCredits] = useState(TOPUP_PRESETS[0]);
@@ -74,32 +99,57 @@ export default function ProfilePage() {
   const [planBusy, setPlanBusy] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
 
-  const loadBilling = async () => {
-    const [summary, invoices, usageRows, planRows] = await Promise.all([
+  const loadUsage = useCallback(async (page: number, direction: LedgerDirection) => {
+    setUsageLoading(true);
+    try {
+      const usagePageResult = await getUsageHistory(LEDGER_PAGE_SIZE, page * LEDGER_PAGE_SIZE, direction);
+      setUsage(usagePageResult.items);
+      setUsageTotal(usagePageResult.total);
+    } finally {
+      setUsageLoading(false);
+    }
+  }, []);
+
+  const loadBilling = useCallback(async () => {
+    const [summary, invoices, planRows] = await Promise.all([
       getBillingSummary(),
       listTopUps(),
-      getUsageHistory(),
       listPlans(),
     ]);
     setBilling(summary);
     setTopups(invoices);
-    setUsage(usageRows);
     setPlans(planRows);
-  };
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void loadBilling();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [loadBilling]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadUsage(usagePage, usageDirection);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [usagePage, usageDirection, loadUsage]);
+
+  const usagePageCount = Math.max(1, Math.ceil(usageTotal / LEDGER_PAGE_SIZE));
+
+  const onDirectionChange = (direction: LedgerDirection) => {
+    setUsageDirection(direction);
+    setUsagePage(0);
+  };
 
   const onRequestTopup = async () => {
     setTopupBusy(true);
     setTopupError(null);
     try {
       await createTopUp(topupCredits);
+      setUsagePage(0);
       await loadBilling();
+      await loadUsage(0, usageDirection);
       setTopupOpen(false);
     } catch (err) {
       setTopupError(err instanceof Error ? err.message : "Не удалось создать счёт");
@@ -114,7 +164,9 @@ export default function ProfilePage() {
     setPlanError(null);
     try {
       await switchPlan(confirmPlan.id);
+      setUsagePage(0);
       await loadBilling();
+      await loadUsage(0, usageDirection);
       setConfirmPlan(null);
       setPlanModalOpen(false);
     } catch (err) {
@@ -234,24 +286,42 @@ export default function ProfilePage() {
             </div>
           ) : null}
 
-          {usage.length > 0 ? (
-            <div className="border-t border-white/60 pt-4">
-              <p className="mb-2 flex items-center gap-1.5 text-sm text-[var(--ar-stone)]">
+          <div className="border-t border-white/60 pt-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <p className="flex items-center gap-1.5 text-sm text-[var(--ar-stone)]">
                 <History size={14} />
                 История списаний и начислений
               </p>
-              <div className="space-y-2">
+              <div className="flex flex-wrap gap-1">
+                {LEDGER_DIRECTION_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => onDirectionChange(option.value)}
+                    className={`rounded-[var(--ar-radius-sm)] border px-2.5 py-1 text-xs font-medium transition ${
+                      usageDirection === option.value
+                        ? "border-[var(--ar-sky)] bg-[var(--ar-sky)]/10 text-[var(--ar-sky)]"
+                        : "border-black/10 text-[var(--ar-mist)] hover:border-black/20 hover:text-[var(--ar-black)]"
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {usage.length > 0 ? (
+              <div className={`space-y-2 ${usageLoading ? "opacity-60" : ""}`}>
                 {usage.map((entry) => (
                   <div
                     key={entry.id}
                     className="flex items-center justify-between rounded-[var(--ar-radius-sm)] border border-black/5 bg-white/60 px-3 py-2 text-sm"
                   >
-                    <div>
-                      <p className="font-medium text-[var(--ar-black)]">{LEDGER_REASON_LABEL[entry.reason]}</p>
-                      <p className="text-xs text-[var(--ar-stone)]">{formatDateTime(entry.created_at)}</p>
+                    <div className="min-w-0 pr-3">
+                      <p className="truncate font-medium text-[var(--ar-black)]">{ledgerTitle(entry)}</p>
+                      <p className="text-xs text-[var(--ar-stone)]">{ledgerSubtitle(entry)}</p>
                     </div>
                     <span
-                      className={`font-semibold tabular-nums ${entry.amount >= 0 ? "text-emerald-600" : "text-[var(--ar-black)]"}`}
+                      className={`shrink-0 font-semibold tabular-nums ${entry.amount >= 0 ? "text-emerald-600" : "text-[var(--ar-black)]"}`}
                     >
                       {entry.amount >= 0 ? "+" : ""}
                       {entry.amount.toLocaleString()}
@@ -259,8 +329,37 @@ export default function ProfilePage() {
                   </div>
                 ))}
               </div>
-            </div>
-          ) : null}
+            ) : (
+              <p className="text-sm text-[var(--ar-mist)]">
+                {usageLoading ? "Загружаем историю…" : "Пока нет записей по выбранному фильтру"}
+              </p>
+            )}
+            {usageTotal > LEDGER_PAGE_SIZE ? (
+              <div className="mt-3 flex items-center justify-center gap-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={usagePage <= 0 || usageLoading}
+                  onClick={() => setUsagePage((page) => Math.max(0, page - 1))}
+                >
+                  <ChevronLeft size={15} />
+                  Назад
+                </Button>
+                <span className="text-xs tabular-nums text-[var(--ar-stone)]">
+                  {usagePage + 1} / {usagePageCount}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={usagePage >= usagePageCount - 1 || usageLoading}
+                  onClick={() => setUsagePage((page) => Math.min(usagePageCount - 1, page + 1))}
+                >
+                  Вперёд
+                  <ChevronRight size={15} />
+                </Button>
+              </div>
+            ) : null}
+          </div>
         </Card>
       ) : null}
 

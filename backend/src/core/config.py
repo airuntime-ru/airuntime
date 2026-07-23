@@ -85,6 +85,39 @@ class Settings(BaseSettings):
     # validate the planning call's output against) and docs/architecture.md for the design.
     enable_agent_orchestrator: bool = False
 
+    # Product-quality pipeline (brief -> UX -> visual -> implement -> build -> preview ->
+    # review -> fix) - see backend/src/services/agent/product_pipeline.py. The single call
+    # site (chat.py's _stream_events) falls straight back to plain run_agent_turn when this is
+    # False, so leaving it off is byte-identical to the pre-pipeline behavior. The four
+    # sub-switches below are only consulted when this master flag is on - each can be turned
+    # off independently (e.g. brief-only, or preview-without-review).
+    #
+    # On by explicit request, to see the full current flow without extra setup. Known
+    # consequence, accepted by the user: tests/test_api.py's chat-streaming tests monkeypatch
+    # chat_router.run_agent_turn directly - with this on they no longer exercise the code path
+    # they think they do (chat.py now calls run_product_pipeline instead) and will fail/need
+    # updating to also patch run_product_pipeline or set this False. Not fixed here on purpose.
+    enable_product_pipeline: bool = True
+    enable_ux_planning: bool = True
+    enable_visual_planning: bool = True
+    enable_browser_preview: bool = True
+    enable_design_review: bool = True
+    # Hard ceiling on fix->re-preview->re-review loops per turn (product_pipeline.py). Keep small -
+    # each extra iteration is a full extra agent turn plus a preview+review call.
+    max_review_iterations: int = 2
+    # None (default) means "use this turn's own provider/model" for the review call. Set to pin
+    # review to a specific stronger/cheaper model regardless of what the project is generating
+    # with - e.g. always review with a strong model even if generation runs on a cheaper one.
+    reviewer_provider: str | None = None
+    reviewer_model: str | None = None
+    # Dedicated per-turn Playwright container image (deployment/preview/Dockerfile), built the
+    # same way as codex_image (`docker compose build preview`, profiles: [build-only]). Kept out
+    # of backend/worker's own Dockerfile so neither image carries browser weight.
+    preview_image: str = "airuntime-preview"
+    preview_timeout_seconds: int = 90
+    preview_memory_limit: str = "1g"
+    preview_cpu_limit: str = "1.0"
+
     # Periodic sweep of ad-hoc images Codex builds on its own while self-testing a turn (see
     # image_janitor.py for the safety checks). On by default - flip off if you'd rather review
     # `docker images` and clean up manually.

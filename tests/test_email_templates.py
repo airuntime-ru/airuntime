@@ -29,6 +29,12 @@ def test_login_code_email_contains_branding():
     assert "482913" in content.plain
     assert "Код для входа: 482913" in content.plain
     assert f"cid:{LOGO_CID}" in content.html
+    assert 'alt="AIRuntime"' in content.html
+    assert 'content="light only"' in content.html
+    assert "color-scheme: light only" in content.html
+    assert 'class="email-header"' in content.html
+    assert 'bgcolor="#FFFFFF"' in content.html
+    assert "email-logo-plate" in content.html
     assert "Код для входа" in content.html
     assert "10 минут" in content.html
     assert "preheader" not in content.html.lower() or "482913" in content.html

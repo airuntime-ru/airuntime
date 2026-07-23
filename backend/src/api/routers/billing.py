@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -8,9 +10,11 @@ from src.db.models.credit_topup import CreditTopUp
 from src.db.models.plan import Plan
 from src.db.models.user import User
 from src.db.session import get_db
-from src.services.billing import list_recent_ledger, request_topup, switch_plan
+from src.services.billing import list_ledger, request_topup, switch_plan
 
 router = APIRouter(prefix="/billing", tags=["billing"])
+
+LedgerDirectionParam = Literal["all", "credit", "debit"]
 
 
 class TopUpRequest(BaseModel):
@@ -50,6 +54,7 @@ def _ledger_response(entry: CreditLedgerEntry) -> dict:
         "amount": entry.amount,
         "reason": entry.reason,
         "project_id": str(entry.project_id) if entry.project_id else None,
+        "project_name": entry.project_name,
         "created_at": entry.created_at,
     }
 
@@ -118,6 +123,16 @@ def change_plan(
 
 @router.get("/usage")
 def get_usage_history(
-    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
-) -> list[dict]:
-    return [_ledger_response(row) for row in list_recent_ledger(db, current_user)]
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    direction: LedgerDirectionParam = Query(default="all"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    rows, total = list_ledger(
+        db, current_user, limit=limit, offset=offset, direction=direction
+    )
+    return {
+        "items": [_ledger_response(row) for row in rows],
+        "total": total,
+    }

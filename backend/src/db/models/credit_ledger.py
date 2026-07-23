@@ -25,6 +25,8 @@ class CreditLedgerEntry(Base):
     project_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
     )
+    # Snapshot of project.name at spend time so history stays readable after project delete.
+    project_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     amount: Mapped[int] = mapped_column(Integer, nullable=False)
     reason: Mapped[str] = mapped_column(String(32), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

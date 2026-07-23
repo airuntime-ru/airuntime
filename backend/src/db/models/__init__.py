@@ -6,6 +6,7 @@ from src.db.models.credit_topup import CreditTopUp
 from src.db.models.deployment import Deployment
 from src.db.models.message import Message
 from src.db.models.moderation_event import ModerationEvent
+from src.db.models.pipeline_run_metric import PipelineRunMetric
 from src.db.models.plan import Plan
 from src.db.models.project import Project
 from src.db.models.project_service import ProjectService
@@ -30,4 +31,5 @@ __all__ = [
     "CreditLedgerEntry",
     "ProjectService",
     "AgentRunMetric",
+    "PipelineRunMetric",
 ]

@@ -191,6 +191,7 @@ export default function ProjectChatPage() {
         setChats(rows);
         setChatId(rows[0].id);
         setMobilePanel("chat");
+        setStickToBottom(true);
       } catch (err) {
         setBootstrapError(err instanceof Error ? err.message : "Не удалось открыть чат");
       } finally {
@@ -203,6 +204,7 @@ export default function ProjectChatPage() {
   useEffect(() => {
     const loadMessages = async () => {
       if (!projectId || !chatId) return;
+      setStickToBottom(true);
       const snap = getChatStreamSnapshot(projectId, chatId);
       if (snap.loading && snap.messages) {
         messagesRef.current = snap.messages;
@@ -411,10 +413,10 @@ export default function ProjectChatPage() {
     loading && streamingMessage?.role === "assistant" ? streamingMessage.content.length : 0;
 
   return (
-    <div className="grid min-h-[calc(100dvh-11rem)] gap-0 overflow-hidden rounded-[var(--ar-radius-md)] border border-black/[0.08] bg-white lg:grid-cols-[220px_1fr]">
+    <div className="grid h-[calc(100dvh-14rem)] max-h-[calc(100dvh-14rem)] min-h-0 gap-0 overflow-hidden rounded-[var(--ar-radius-md)] border border-black/[0.08] bg-white lg:h-[calc(100dvh-9rem)] lg:max-h-[calc(100dvh-9rem)] lg:grid-cols-[220px_1fr]">
       <aside
         className={cn(
-          "flex flex-col border-black/[0.08] bg-[#f7f8fa] lg:border-r",
+          "flex min-h-0 flex-col border-black/[0.08] bg-[#f7f8fa] lg:border-r",
           mobilePanel === "chat" ? "hidden lg:flex" : "flex"
         )}
       >
@@ -475,7 +477,7 @@ export default function ProjectChatPage() {
 
       <section
         className={cn(
-          "flex min-h-0 flex-col",
+          "flex h-full min-h-0 flex-col overflow-hidden",
           mobilePanel === "list" ? "hidden lg:flex" : "flex"
         )}
       >

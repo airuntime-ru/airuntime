@@ -27,12 +27,14 @@ from src.db.models.chat_file import ChatFile
 from src.db.models.deployment import Deployment
 from src.db.models.message import Message
 from src.db.models.moderation_event import ModerationEvent
+from src.db.models.pipeline_run_metric import PipelineRunMetric
 from src.db.models.project import Project
 from src.db.models.project_service import ProjectService
 from src.db.models.user import User
 from src.db.session import get_db
 from src.services.agent.events import AgentDone, TextDelta, ToolCallRequested, ToolCallResult
 from src.services.agent.orchestrator import run_agent_turn
+from src.services.agent.product_pipeline import run_product_pipeline
 from src.services.agent.prompt import REPORT_HEADING, build_system_prompt
 from src.services.agent.tools import WorkspaceTools
 from src.services.agentic_artifacts import (
@@ -200,6 +202,12 @@ def _tool_status_label(name: str, arguments: dict) -> str:
         return f"Правлю {path}"
     if name == "delete_file":
         return f"Удаляю {path}"
+    if name == "product_brief":
+        return "Анализирую задачу и формирую бриф"
+    if name == "preview_project":
+        return "Проверяю проект в браузере"
+    if name == "design_review":
+        return "Проверяю качество продукта"
     if name == "request_secret":
         key = arguments.get("key", "") if isinstance(arguments, dict) else ""
         return f"Запрашиваю секрет {key}" if key else "Запрашиваю секрет"
@@ -702,6 +710,7 @@ async def _stream_events(
         artifact_path = project_dir(project.id)
         agent_error: str | None = None
         agent_usage: dict[str, object] | None = None
+        pipeline_metrics: dict[str, object] | None = None
         requested_secret_keys: set[str] = set()
         turn_started = time.monotonic()
         agent_elapsed: float | None = None
@@ -725,17 +734,34 @@ async def _stream_events(
             agent_started = time.monotonic()
             logger.info(
                 "Agent turn start: project=%s chat=%s provider=%s model=%s orchestrator=%s "
-                "message_chars=%d",
+                "pipeline=%s message_chars=%d",
                 project.id,
                 chat_id,
                 provider_name,
                 model,
                 settings.enable_agent_orchestrator,
+                settings.enable_product_pipeline,
                 len(safe_message),
             )
             try:
-                agent_events = with_heartbeat(
-                    run_agent_turn(
+                # Feature-flagged alternate producer of the same TextDelta/ToolCallRequested/
+                # ToolCallResult/AgentDone event stream (see product_pipeline.py's module
+                # docstring) - off by default, falls straight through to the unchanged
+                # run_agent_turn call below.
+                turn_source = (
+                    run_product_pipeline(
+                        project=project,
+                        provider_name=provider_name,
+                        model=model,
+                        api_key=api_key,
+                        workspace=workspace,
+                        system_prompt=system_prompt,
+                        history=history,
+                        user_message=safe_message,
+                        images=image_attachments,
+                    )
+                    if settings.enable_product_pipeline
+                    else run_agent_turn(
                         provider_name=provider_name,
                         model=model,
                         api_key=api_key,
@@ -746,6 +772,7 @@ async def _stream_events(
                         images=image_attachments,
                     )
                 )
+                agent_events = with_heartbeat(turn_source)
                 async for event in agent_events:
                     if isinstance(event, str):
                         # Heartbeat ping (with_heartbeat's own synthetic frame, not an agent
@@ -795,6 +822,14 @@ async def _stream_events(
                 agent_elapsed,
                 agent_error or "none",
             )
+            # product_pipeline.py folds its own stage timings/iteration counts into
+            # AgentDone.usage["pipeline"] (see that module's _finish_usage) - pull it out here,
+            # before agent_usage is rendered in the chat footer or stored on AgentRunMetric, so
+            # a raw nested dict never leaks into either of those user-facing/simple views. None
+            # when the pipeline was off this turn (plain run_agent_turn never sets this key).
+            pipeline_metrics: dict[str, object] | None = None
+            if isinstance(agent_usage, dict) and "pipeline" in agent_usage:
+                pipeline_metrics = agent_usage.pop("pipeline")
 
             existing_service_kinds = {
                 row.kind
@@ -1220,8 +1255,29 @@ async def _stream_events(
                     agent_error=agent_error,
                 )
             )
+        if pipeline_metrics is not None:
+            db.add(
+                PipelineRunMetric(
+                    project_id=project.id,
+                    chat_id=chat_id,
+                    message_id=assistant_message.id,
+                    provider=provider_name,
+                    model=model,
+                    build_iterations=int(pipeline_metrics.get("build_iterations") or 0),
+                    review_iterations=int(pipeline_metrics.get("review_iterations") or 0),
+                    preview_failures=int(pipeline_metrics.get("preview_failures") or 0),
+                    skipped_reason=pipeline_metrics.get("skipped_reason"),
+                    metrics_json=json.dumps(pipeline_metrics),
+                )
+            )
         usage_cost = max(100, len(safe_message) + len(assistant_full))
-        record_usage(db, current_user, project_id=project.id, amount=usage_cost)
+        record_usage(
+            db,
+            current_user,
+            project_id=project.id,
+            amount=usage_cost,
+            project_name=project.name,
+        )
         db.commit()
         yield "data: [DONE]\n\n"
 

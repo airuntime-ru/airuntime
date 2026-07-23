@@ -80,6 +80,22 @@ services:
       # Splits a big openai-provider turn into sequential subtasks - see orchestrator.py's
       # module docstring before flipping this on (least-verified piece of the Codex work).
       ENABLE_AGENT_ORCHESTRATOR: ${ENABLE_AGENT_ORCHESTRATOR:-false}
+      # Product-quality pipeline (brief -> implement -> preview -> review -> fix) - see
+      # product_pipeline.py's module docstring. On by default here (config.py's own Settings
+      # default is the conservative `false` - see its comment) so a plain `docker compose up`
+      # shows the full current flow. Run `docker compose build preview` once first, or
+      # ENABLE_BROWSER_PREVIEW turns every preview attempt into a graceful "image not built"
+      # failure (never a crash) until you do. Set to false in .env to opt back out.
+      ENABLE_PRODUCT_PIPELINE: ${ENABLE_PRODUCT_PIPELINE:-true}
+      ENABLE_UX_PLANNING: ${ENABLE_UX_PLANNING:-true}
+      ENABLE_VISUAL_PLANNING: ${ENABLE_VISUAL_PLANNING:-true}
+      ENABLE_BROWSER_PREVIEW: ${ENABLE_BROWSER_PREVIEW:-true}
+      ENABLE_DESIGN_REVIEW: ${ENABLE_DESIGN_REVIEW:-true}
+      MAX_REVIEW_ITERATIONS: ${MAX_REVIEW_ITERATIONS:-2}
+      REVIEWER_PROVIDER: ${REVIEWER_PROVIDER:-}
+      REVIEWER_MODEL: ${REVIEWER_MODEL:-}
+      PREVIEW_IMAGE: ${PREVIEW_IMAGE:-airuntime-preview}
+      PREVIEW_TIMEOUT_SECONDS: ${PREVIEW_TIMEOUT_SECONDS:-90}
       DEPLOYMENT_DEFAULT_IMAGE: nginx:alpine
       S3_ENDPOINT_URL: http://minio:9000
       S3_PUBLIC_ENDPOINT_URL: http://localhost:9000
@@ -126,6 +142,12 @@ services:
       S3_SECRET_KEY: airuntime-secret
       S3_BUCKET: airuntime-files
       DEPLOYMENT_VOLUMES_DIR: ${DEPLOYMENT_VOLUMES_DIR:-/var/lib/airuntime/volumes}
+      # preview_runner.py (worker-only) reads these to launch the per-run preview container -
+      # see the `preview` service below and product_pipeline.py for the backend-side flags.
+      PREVIEW_IMAGE: ${PREVIEW_IMAGE:-airuntime-preview}
+      PREVIEW_TIMEOUT_SECONDS: ${PREVIEW_TIMEOUT_SECONDS:-90}
+      PREVIEW_MEMORY_LIMIT: ${PREVIEW_MEMORY_LIMIT:-1g}
+      PREVIEW_CPU_LIMIT: ${PREVIEW_CPU_LIMIT:-1.0}
     command: ["sh", "/app/entrypoint.sh", "worker"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -175,6 +197,17 @@ services:
       SYSTEM: 0
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  # Build source only, same shape as `codex` above - the worker launches a fresh, single-purpose
+  # container from this image per preview_project call (see backend/src/services/
+  # preview_runner.py) instead of a long-lived instance. `docker compose build preview` produces
+  # the image; profile keeps `up` from also starting an idle instance of it.
+  preview:
+    build:
+      context: .
+      dockerfile: deployment/preview/Dockerfile
+    logging: *default-logging
+    profiles: ["build-only"]
 
   django-admin:
     build:

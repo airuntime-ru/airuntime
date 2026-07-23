@@ -51,7 +51,17 @@ export function MessageList({
 
   useEffect(() => {
     if (!stickToBottom || messages.length === 0) return;
-    virtualizer.scrollToIndex(messages.length - 1, { align: "end" });
+    const scrollToEnd = () => {
+      virtualizer.scrollToIndex(messages.length - 1, { align: "end" });
+      const node = parentRef.current;
+      if (node) node.scrollTop = node.scrollHeight;
+    };
+    // Virtualizer needs a frame after layout/measure before scrollToIndex sticks.
+    const frame = window.requestAnimationFrame(() => {
+      scrollToEnd();
+      window.requestAnimationFrame(scrollToEnd);
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [stickToBottom, messages.length, lastContentLen, loading, virtualizer]);
 
   if (messages.length === 0) {

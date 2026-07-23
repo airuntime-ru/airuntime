@@ -601,9 +601,23 @@ export type CreditLedgerEntryType = {
   amount: number;
   reason: "chat_message" | "topup" | "period_renewal" | "plan_change";
   project_id: string | null;
+  project_name: string | null;
   created_at: string;
 };
 
-export async function getUsageHistory(): Promise<CreditLedgerEntryType[]> {
-  return requestJson<CreditLedgerEntryType[]>("/billing/usage");
+export type LedgerDirection = "all" | "credit" | "debit";
+
+export type CreditLedgerPageType = PagedResult<CreditLedgerEntryType>;
+
+export async function getUsageHistory(
+  limit = 20,
+  offset = 0,
+  direction: LedgerDirection = "all",
+): Promise<CreditLedgerPageType> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+    direction,
+  });
+  return requestJson<CreditLedgerPageType>(`/billing/usage?${params.toString()}`);
 }

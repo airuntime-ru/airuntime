@@ -11,6 +11,7 @@ small and auditable.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -109,6 +110,36 @@ TOOL_DEFS: list[dict[str, Any]] = [
             "secret)."
         ),
         "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "preview_project",
+        "description": (
+            "Open the already-built project in an isolated headless browser, scroll the "
+            "page, and check it for real problems before you finish: console/network "
+            "errors, broken images, horizontal overflow, and what the headings/buttons/"
+            "visible text actually say. Requires a successful build_project first. Only "
+            "works for website/mixed projects - there is nothing to render for a bot-only "
+            "project. Call this before ending your turn on any non-trivial website change - "
+            "it catches things a build check cannot, like leftover placeholder text, a "
+            "broken layout, or a picture that doesn't match the brief. Screenshots are "
+            "stored as internal artifacts, not shown to you directly - read the returned "
+            "findings (visible_text_sample, broken_images, overflow_elements, etc.) instead."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "paths": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Same-origin relative paths to check, e.g. ['/', '/services.html']. "
+                        "Must start with '/' - no external URLs, no host/scheme. Defaults to "
+                        "['/'] if omitted. Max 5."
+                    ),
+                }
+            },
+            "required": [],
+        },
     },
     {
         "name": "request_secret",
@@ -252,6 +283,11 @@ class WorkspaceTools:
         self.touched_files: set[str] = set()
         self.requested_secrets: list[tuple[str, str]] = []
         self.requested_services: list[ServiceRequest] = []
+        # None = build_project was never observed this turn (e.g. the Codex shell path,
+        # which builds via `docker build` directly rather than this tool). True/False once a
+        # build_project call has returned - product_pipeline.py uses this to skip preview/
+        # review after an explicit failed build instead of re-deriving build state itself.
+        self.build_succeeded: bool | None = None
 
     def call(self, name: str, arguments: dict[str, Any]) -> ToolExecutionResult:
         try:
@@ -273,6 +309,9 @@ class WorkspaceTools:
                 return self._delete_file(str(arguments.get("path", "")))
             if name == "build_project":
                 return self._build_project()
+            if name == "preview_project":
+                paths = arguments.get("paths") if isinstance(arguments, dict) else None
+                return self._preview_project(paths if isinstance(paths, list) else None)
             if name == "request_secret":
                 return self._request_secret(
                     str(arguments.get("key", "")), str(arguments.get("reason", ""))
@@ -395,6 +434,7 @@ class WorkspaceTools:
         log = result.get("log", "")
         arch_hint = self._thin_bot_architecture_hint()
         if result.get("ok"):
+            self.build_succeeded = True
             content = log + arch_hint if arch_hint else log
             summary = "Build succeeded"
             if arch_hint:
@@ -403,8 +443,64 @@ class WorkspaceTools:
                     "before finishing"
                 )
             return ToolExecutionResult(ok=True, summary=summary, content=content)
+        self.build_succeeded = False
         content = log + arch_hint if arch_hint else log
         return ToolExecutionResult(ok=False, summary="Build failed", content=content)
+
+    @staticmethod
+    def sanitize_preview_paths(paths: list[Any] | None) -> list[str]:
+        """Only same-origin relative paths ever reach the browser - never a scheme, host, or
+        parent traversal. One bad entry is dropped rather than failing the whole call. Reused
+        as-is by preview_runner.py (the worker-side enforcement point) so both layers agree."""
+        cleaned: list[str] = []
+        for raw in paths or ["/"]:
+            if not isinstance(raw, str):
+                continue
+            candidate = raw.strip()
+            if not candidate or not candidate.startswith("/") or candidate.startswith("//"):
+                continue
+            if ".." in candidate or "\\" in candidate or "://" in candidate:
+                continue
+            cleaned.append(candidate)
+            if len(cleaned) >= 5:
+                break
+        return cleaned or ["/"]
+
+    def _preview_project(self, paths: list[Any] | None) -> ToolExecutionResult:
+        if not self.project_id:
+            return ToolExecutionResult(
+                ok=False, summary="Preview tool unavailable outside a project context"
+            )
+        from src.core.config import settings
+        from src.services.docker_control_queue import submit_control_job
+
+        safe_paths = self.sanitize_preview_paths(paths)
+        timeout = max(30, int(settings.preview_timeout_seconds) + 30)
+        result = submit_control_job(
+            action="preview",
+            project_id=self.project_id,
+            timeout_seconds=timeout,
+            extra={"paths": safe_paths},
+        )
+        if result is None:
+            return ToolExecutionResult(
+                ok=False, summary="Preview service did not respond - try again"
+            )
+        if "status" not in result:
+            # docker_control_actions.py's generic failure envelope ({"ok": False, "error":
+            # ...}), e.g. a Docker error before preview_runner could even start.
+            return ToolExecutionResult(
+                ok=False,
+                summary=str(result.get("error") or "Preview failed"),
+                content=json.dumps(result, ensure_ascii=False),
+            )
+        status = str(result.get("status") or "failed")
+        content = json.dumps(result, ensure_ascii=False)
+        if status == "failed":
+            fatals = [str(item) for item in (result.get("fatal_errors") or [])]
+            detail = "; ".join(fatals[:3]) if fatals else "Preview failed"
+            return ToolExecutionResult(ok=False, summary=detail[:200], content=content)
+        return ToolExecutionResult(ok=True, summary=f"Preview {status}", content=content)
 
     def _thin_bot_architecture_hint(self) -> str:
         """Nudge mid-loop when the agent is about to ship a monolith app.py."""

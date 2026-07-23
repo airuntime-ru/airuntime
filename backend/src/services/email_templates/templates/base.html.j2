@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="x-apple-disable-message-reformatting" />
   <meta name="format-detection" content="telephone=no,address=no,email=no,date=no,url=no" />
-  <meta name="color-scheme" content="light" />
-  <meta name="supported-color-schemes" content="light" />
+  <meta name="color-scheme" content="light only" />
+  <meta name="supported-color-schemes" content="light only" />
   <title>{{ subject }}</title>
   <!--[if mso]>
   <noscript>
@@ -19,11 +19,23 @@
   </noscript>
   <![endif]-->
   <style type="text/css">
+    :root {
+      color-scheme: light only;
+      supported-color-schemes: light only;
+    }
+    /* Keep logo plate white if a client still forces dark UI */
+    @media (prefers-color-scheme: dark) {
+      .email-header,
+      .email-logo-plate,
+      .email-logo-plate img {
+        background-color: #ffffff !important;
+      }
+    }
     @media only screen and (max-width: 620px) {
       .email-shell { padding: 16px 12px !important; }
       .email-card { width: 100% !important; }
       .email-body { padding: 24px 20px !important; }
-      .email-header { padding: 18px 20px !important; }
+      .email-header { padding: 14px 20px !important; }
       .email-footer { padding: 16px 20px !important; }
       .email-title { font-size: 26px !important; }
     }
@@ -34,17 +46,17 @@
     {{ preheader }}
     &nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;
   </div>
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:{{ colors.page }};">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="{{ colors.page }}" style="background-color:{{ colors.page }};">
     <tr>
       <td align="center" class="email-shell" style="padding:28px 16px;">
-        <table role="presentation" class="email-card" width="600" cellspacing="0" cellpadding="0" border="0" style="width:600px;max-width:600px;background-color:{{ colors.surface }};border:1px solid {{ colors.border }};border-radius:12px;">
+        <table role="presentation" class="email-card" width="600" cellspacing="0" cellpadding="0" border="0" bgcolor="{{ colors.surface }}" style="width:600px;max-width:600px;background-color:{{ colors.surface }};border:1px solid {{ colors.border }};border-radius:12px;">
           <tr>
-            <td class="email-header" style="padding:20px 36px;border-bottom:1px solid {{ colors.border }};height:72px;">
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+            <td class="email-header" bgcolor="#FFFFFF" style="padding:16px 36px;border-bottom:1px solid {{ colors.border }};background-color:#FFFFFF;">
+              <table role="presentation" class="email-logo-plate" cellspacing="0" cellpadding="0" border="0" bgcolor="#FFFFFF" style="background-color:#FFFFFF;">
                 <tr>
-                  <td align="left" valign="middle" style="font-family:Arial,Helvetica,sans-serif;">
+                  <td align="left" valign="middle" bgcolor="#FFFFFF" style="font-family:Arial,Helvetica,sans-serif;background-color:#FFFFFF;padding:4px 0;">
                     <a href="{{ frontend_url }}" style="text-decoration:none;color:{{ colors.ink }};">
-                      <img src="{{ logo_src }}" width="162" height="32" alt="AIRuntime" style="display:block;border:0;outline:none;text-decoration:none;height:32px;width:auto;max-width:162px;" />
+                      <img src="{{ logo_src }}" width="161" height="40" alt="AIRuntime" style="display:block;border:0;outline:none;text-decoration:none;height:40px;width:auto;max-width:161px;background-color:#FFFFFF;" />
                     </a>
                   </td>
                 </tr>

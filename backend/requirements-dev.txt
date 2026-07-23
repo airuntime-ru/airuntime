@@ -4,3 +4,8 @@ httpx>=0.27.0
 moto[s3]>=5.0.0
 ruff>=0.11.0
 pre-commit>=4.2.0
+# Drives a real headless Chromium against a local HTTP fixture in test_run_preview_browser.py -
+# exercises the exact same detection logic deployment/preview/run_preview.py ships with. Needs
+# `playwright install chromium` once after pip install; that test skips cleanly if the browser
+# binary isn't present, so its absence never fails the rest of the suite.
+playwright>=1.48.0

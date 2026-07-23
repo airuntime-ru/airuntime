@@ -19,7 +19,9 @@ export function Tabs({
       aria-label="Разделы проекта"
       className={cn(
         "flex gap-0.5 overflow-x-auto border-b border-[var(--ar-border)] bg-[var(--ar-canvas)] [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
-        sticky && "sticky top-0 z-20 -mx-3 px-3 sm:-mx-4 sm:px-4 lg:top-0 lg:-mx-0 lg:px-0"
+        // Sit below the fixed mobile app header (pt-[3.75rem] on main); flush to top on lg.
+        sticky &&
+          "sticky top-[3.75rem] z-20 -mx-3 px-3 sm:-mx-4 sm:px-4 lg:top-0 lg:-mx-0 lg:px-0"
       )}
     >
       {items.map((item) => {

@@ -7,6 +7,24 @@ x-common-env: &common-env
   ENVIRONMENT: production
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
   IMAGE_JANITOR_ENABLED: ${IMAGE_JANITOR_ENABLED:-true}
+  # Product-quality pipeline (brief -> implement -> preview -> review -> fix) - see
+  # product_pipeline.py's module docstring. On by default here (config.py's own Settings
+  # default is the conservative `false`) - requires building the `preview` image once first:
+  # `docker compose -f docker-compose.prod.yml build preview`. Until that's done,
+  # ENABLE_BROWSER_PREVIEW just makes every preview attempt fail gracefully ("image not
+  # built"), never crash. Set to false in .env to opt back out.
+  ENABLE_PRODUCT_PIPELINE: ${ENABLE_PRODUCT_PIPELINE:-true}
+  ENABLE_UX_PLANNING: ${ENABLE_UX_PLANNING:-true}
+  ENABLE_VISUAL_PLANNING: ${ENABLE_VISUAL_PLANNING:-true}
+  ENABLE_BROWSER_PREVIEW: ${ENABLE_BROWSER_PREVIEW:-true}
+  ENABLE_DESIGN_REVIEW: ${ENABLE_DESIGN_REVIEW:-true}
+  MAX_REVIEW_ITERATIONS: ${MAX_REVIEW_ITERATIONS:-2}
+  REVIEWER_PROVIDER: ${REVIEWER_PROVIDER:-}
+  REVIEWER_MODEL: ${REVIEWER_MODEL:-}
+  PREVIEW_IMAGE: ${PREVIEW_IMAGE:-airuntime-preview}
+  PREVIEW_TIMEOUT_SECONDS: ${PREVIEW_TIMEOUT_SECONDS:-90}
+  PREVIEW_MEMORY_LIMIT: ${PREVIEW_MEMORY_LIMIT:-1g}
+  PREVIEW_CPU_LIMIT: ${PREVIEW_CPU_LIMIT:-1.0}
   APP_DOMAIN: ${APP_DOMAIN}
   PUBLIC_BASE_DOMAIN: ${APP_DOMAIN}
   FRONTEND_URL: https://${APP_DOMAIN}
@@ -270,6 +288,18 @@ services:
         condition: service_started
     networks:
       - internal
+
+  # Build source only - the worker launches a fresh, single-purpose container from this image
+  # per preview_project call (see backend/src/services/preview_runner.py), never a long-lived
+  # instance, so nothing here needs to run by default. Build it once with
+  # `docker compose -f docker-compose.prod.yml build preview` before enabling
+  # ENABLE_BROWSER_PREVIEW - same one-time step deployment/codex/Dockerfile already needs.
+  preview:
+    build:
+      context: .
+      dockerfile: deployment/preview/Dockerfile
+    logging: *default-logging
+    profiles: ["build-only"]
 
   django-admin:
     build:

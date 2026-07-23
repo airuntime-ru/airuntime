@@ -25,6 +25,9 @@ import {
 
 const baseDomain = process.env.NEXT_PUBLIC_BASE_DOMAIN ?? "airuntime.ru";
 
+/** Display labels for backend `project_services._PRESETS` (postgres/redis/mysql/mongo/rabbitmq). */
+const SUPPORTED_SERVICE_PRESETS = ["Postgres", "Redis", "MySQL", "MongoDB", "RabbitMQ"] as const;
+
 function SettingsSection({
   id,
   title,
@@ -366,8 +369,8 @@ export default function ProjectSettingsPage() {
 
       <SettingsSection
         id="services"
-        title="Подключённые сервисы"
-        description="Базы и очереди подключает агент через платформу во время сборки."
+        title="Сервисы"
+        description="Базы и очереди агент запрашивает через платформу во время сборки — здесь ничего подключать вручную не нужно."
       >
         <Card hover={false}>
           <div className="flex items-start gap-3">
@@ -375,22 +378,23 @@ export default function ProjectSettingsPage() {
               <Database size={18} aria-hidden />
             </span>
             <div className="min-w-0 space-y-2">
-              <p className="text-sm font-semibold text-[var(--ar-black)]">Postgres, Redis и другие</p>
+              <p className="text-sm font-semibold text-[var(--ar-black)]">Что умеет платформа</p>
               <p className="text-sm leading-relaxed text-[var(--ar-mist)]">
-                Если проекту нужна база или очередь, агент запросит сервис в чате. Креды создаются
-                автоматически и подставляются в окружение контейнера. Отдельная ручная настройка здесь
-                не требуется.
+                Если проекту нужна база или очередь, агент запросит её в чате. Креды создаются
+                автоматически и подставляются в окружение контейнера. Отдельная ручная настройка
+                здесь не нужна. Список ниже — какие типы платформа умеет поднимать сама; это не
+                статус подключений этого проекта.
               </p>
-              <div className="flex flex-wrap gap-2 pt-1">
-                {["Postgres", "Redis", "MySQL", "MongoDB", "RabbitMQ"].map((name) => (
-                  <span
-                    key={name}
-                    className="rounded-[0.5rem] border border-black/10 bg-[#f7f8fa] px-2.5 py-1 font-mono text-xs text-[var(--ar-graphite)]"
-                  >
+              <p className="pt-1 text-xs font-medium uppercase tracking-[0.12em] text-[var(--ar-stone)]">
+                Поддерживаемые типы
+              </p>
+              <ul className="m-0 flex list-none flex-wrap gap-x-3 gap-y-1 p-0">
+                {SUPPORTED_SERVICE_PRESETS.map((name) => (
+                  <li key={name} className="font-mono text-xs text-[var(--ar-mist)]">
                     {name}
-                  </span>
+                  </li>
                 ))}
-              </div>
+              </ul>
             </div>
           </div>
         </Card>

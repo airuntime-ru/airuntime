@@ -10,6 +10,7 @@ from src.core.config import settings
 from src.db.models.credit_ledger import CreditLedgerEntry
 from src.db.models.credit_topup import CreditTopUp
 from src.db.models.plan import Plan
+from src.db.models.project import Project
 from src.db.models.user import User
 from src.services.email import send_branded_email
 from src.services.email_templates import (
@@ -25,6 +26,8 @@ BILLING_PERIOD_DAYS = 30
 LOW_CREDITS_THRESHOLD_RATIO = 0.1
 PERIOD_ENDING_WARNING_DAYS = 3
 RUB_PER_1000_CREDITS = 10
+
+LedgerDirection = str  # "all" | "credit" | "debit"
 
 
 def _billing_url() -> str:
@@ -54,17 +57,52 @@ def concurrent_project_limit(db: Session, user: User, *, fallback: int) -> int:
 
 
 def record_ledger_entry(
-    db: Session, user: User, *, amount: int, reason: str, project_id: uuid.UUID | None = None
+    db: Session,
+    user: User,
+    *,
+    amount: int,
+    reason: str,
+    project_id: uuid.UUID | None = None,
+    project_name: str | None = None,
 ) -> None:
-    db.add(CreditLedgerEntry(user_id=user.id, project_id=project_id, amount=amount, reason=reason))
+    db.add(
+        CreditLedgerEntry(
+            user_id=user.id,
+            project_id=project_id,
+            project_name=project_name,
+            amount=amount,
+            reason=reason,
+        )
+    )
 
 
-def record_usage(db: Session, user: User, *, project_id: uuid.UUID, amount: int) -> None:
+def record_usage(
+    db: Session,
+    user: User,
+    *,
+    project_id: uuid.UUID,
+    amount: int,
+    project_name: str | None = None,
+) -> None:
     """Deduct credits for a chat turn and log it. `amount` is the positive cost - the balance
-    change and ledger entry are both negative."""
+    change and ledger entry are both negative.
+
+    `project_name` is snapshotted onto the ledger row so history stays readable after the
+    project is deleted. If omitted, the current project name is loaded from the DB.
+    """
+    if project_name is None:
+        project = db.get(Project, project_id)
+        project_name = project.name if project else None
     user.credits_balance = max(0, user.credits_balance - amount)
     db.add(user)
-    record_ledger_entry(db, user, amount=-amount, reason="chat_message", project_id=project_id)
+    record_ledger_entry(
+        db,
+        user,
+        amount=-amount,
+        reason="chat_message",
+        project_id=project_id,
+        project_name=project_name,
+    )
 
 
 def switch_plan(db: Session, user: User, plan: Plan) -> User:
@@ -84,14 +122,40 @@ def switch_plan(db: Session, user: User, plan: Plan) -> User:
     return user
 
 
-def list_recent_ledger(db: Session, user: User, *, limit: int = 50) -> list[CreditLedgerEntry]:
-    return (
-        db.query(CreditLedgerEntry)
-        .filter(CreditLedgerEntry.user_id == user.id)
-        .order_by(CreditLedgerEntry.created_at.desc())
+def list_ledger(
+    db: Session,
+    user: User,
+    *,
+    limit: int = 20,
+    offset: int = 0,
+    direction: LedgerDirection = "all",
+) -> tuple[list[CreditLedgerEntry], int]:
+    """Return a page of ledger entries plus the filtered total count.
+
+    `direction`:
+      - ``all`` — no amount filter
+      - ``credit`` — начисления (amount > 0)
+      - ``debit`` — списания (amount < 0)
+    """
+    query = db.query(CreditLedgerEntry).filter(CreditLedgerEntry.user_id == user.id)
+    if direction == "credit":
+        query = query.filter(CreditLedgerEntry.amount > 0)
+    elif direction == "debit":
+        query = query.filter(CreditLedgerEntry.amount < 0)
+    total = query.count()
+    rows = (
+        query.order_by(CreditLedgerEntry.created_at.desc(), CreditLedgerEntry.id.desc())
+        .offset(offset)
         .limit(limit)
         .all()
     )
+    return rows, total
+
+
+def list_recent_ledger(db: Session, user: User, *, limit: int = 50) -> list[CreditLedgerEntry]:
+    """Backward-compatible helper; prefer :func:`list_ledger` for paginated UIs."""
+    rows, _total = list_ledger(db, user, limit=limit, offset=0, direction="all")
+    return rows
 
 
 def credits_to_rub(credits: int) -> int:

@@ -8,49 +8,20 @@ export type FaqItem = {
   answer: string;
 };
 
-export type ComparisonRow = {
-  generator: string;
-  airuntime: string;
-};
-
 export type UseCase = {
   id: string;
   title: string;
   detail: string;
+  prompt: string;
 };
 
-export type AudienceItem = {
-  id: string;
-  title: string;
-  task: string;
-  outcome: string;
-  artifact: string;
-};
-
-export type SecurityPoint = {
+export type TrustPoint = {
   title: string;
   detail: string;
-};
-
-export type VersionEvent = {
-  version: string;
-  label: string;
-  detail: string;
-  current?: boolean;
 };
 
 export type HowStep = {
   id: string;
   title: string;
   detail: string;
-  status: string;
 };
-
-export type DemoPhase =
-  | "user"
-  | "analyze"
-  | "structure"
-  | "build"
-  | "fix"
-  | "deploy"
-  | "live";
