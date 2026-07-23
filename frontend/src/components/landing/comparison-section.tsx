@@ -1,45 +1,49 @@
-import { ArrowRight, CheckCircle2 } from "lucide-react";
-
-import { Card } from "@/components/ui/card";
+import { LandingSection, SectionHeading } from "@/components/landing/section";
+import { comparisonRows } from "@/lib/landing/content";
 
 export function ComparisonSection() {
   return (
-    <section className="py-10 sm:py-16">
-      <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr] lg:items-stretch">
-        <div className="flex flex-col justify-center">
-          <p className="text-sm font-semibold uppercase tracking-[0.22em] text-[var(--ar-sky)]">Новый процесс</p>
-          <h2 className="mt-3 text-3xl font-semibold tracking-tight text-[var(--ar-black)] sm:text-4xl">
-            Меньше ручной рутины, больше движения к продукту
-          </h2>
-          <p className="mt-4 text-base leading-relaxed text-[var(--ar-mist)]">
-            Вместо цепочки из подрядчиков, серверов и разрозненных инструментов вы работаете в одном понятном кабинете.
+    <LandingSection ariaLabelledBy="comparison-title">
+      <SectionHeading
+        eyebrow="Отличие"
+        title="Почему это не обычный AI-генератор"
+        description="Генератор интерфейсов отдаёт макет или код. AIRuntime доводит проект до работающей версии."
+        id="comparison-title"
+      />
+
+      <div className="mt-10 overflow-hidden rounded-[1rem] border border-black/[0.09] bg-white">
+        <div className="hidden grid-cols-[1fr_1fr] border-b border-black/[0.07] bg-[#f7f8fa] md:grid">
+          <p className="px-5 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--ar-stone)]">
+            Обычный генератор
+          </p>
+          <p className="border-l border-black/[0.07] px-5 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--ar-sky)]">
+            AIRuntime
           </p>
         </div>
-        <Card hover={false} className="grid gap-3 sm:grid-cols-2">
-          <div className="rounded-[var(--ar-radius-sm)] border border-[var(--ar-border)] bg-white/70 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ar-stone)]">Обычно</p>
-            <div className="mt-4 space-y-3 text-sm text-[var(--ar-mist)]">
-              {["идея", "ТЗ", "код", "сервер", "деплой", "исправления"].map((item) => (
-                <div key={item} className="flex items-center gap-2">
-                  <ArrowRight size={14} className="text-[var(--ar-stone)]" />
-                  <span>{item}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="rounded-[var(--ar-radius-sm)] border border-[var(--ar-border-strong)] bg-white p-4 shadow-sm shadow-sky-950/5">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ar-sky)]">AIRuntime</p>
-            <div className="mt-4 space-y-3 text-sm text-[var(--ar-graphite)]">
-              {["идея", "диалог", "готовая ссылка"].map((item) => (
-                <div key={item} className="flex items-center gap-2">
-                  <CheckCircle2 size={15} className="text-emerald-500" />
-                  <span>{item}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </Card>
+
+        <ul className="divide-y divide-black/[0.07]">
+          {comparisonRows.map((row) => (
+            <li key={row.generator} className="grid md:grid-cols-2">
+              <div className="px-5 py-4">
+                <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--ar-stone)] md:hidden">
+                  Обычный генератор
+                </p>
+                <p className="text-sm leading-relaxed text-[var(--ar-mist)] md:text-[0.95rem]">
+                  {row.generator}
+                </p>
+              </div>
+              <div className="border-t border-black/[0.05] bg-[rgba(35,136,255,0.03)] px-5 py-4 md:border-l md:border-t-0 md:border-black/[0.07]">
+                <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--ar-sky)] md:hidden">
+                  AIRuntime
+                </p>
+                <p className="text-sm font-medium leading-relaxed text-[var(--ar-black)] md:text-[0.95rem]">
+                  {row.airuntime}
+                </p>
+              </div>
+            </li>
+          ))}
+        </ul>
       </div>
-    </section>
+    </LandingSection>
   );
 }

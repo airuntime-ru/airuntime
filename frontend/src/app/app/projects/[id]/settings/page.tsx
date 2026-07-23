@@ -2,7 +2,7 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Bot, ExternalLink, Globe2, ImageUp, Trash2 } from "lucide-react";
+import { AlertTriangle, Bot, Database, ExternalLink, Globe2, ImageUp, Trash2 } from "lucide-react";
 
 import { ProjectSecretsSection } from "@/components/app/project-secrets-section";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,28 @@ import {
 } from "@/lib/api";
 
 const baseDomain = process.env.NEXT_PUBLIC_BASE_DOMAIN ?? "airuntime.ru";
+
+function SettingsSection({
+  id,
+  title,
+  description,
+  children,
+}: {
+  id: string;
+  title: string;
+  description?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section id={id} className="scroll-mt-24 space-y-3">
+      <div>
+        <h2 className="text-base font-semibold tracking-[-0.02em] text-[var(--ar-black)]">{title}</h2>
+        {description ? <p className="mt-1 text-sm text-[var(--ar-mist)]">{description}</p> : null}
+      </div>
+      {children}
+    </section>
+  );
+}
 
 function TelegramBotAppearanceCard({ projectId }: { projectId: string }) {
   const [profile, setProfile] = useState<TelegramBotProfileType | null>(null);
@@ -102,60 +124,61 @@ function TelegramBotAppearanceCard({ projectId }: { projectId: string }) {
   };
 
   return (
-    <Card hover={false} className="md:col-span-2">
+    <Card hover={false}>
       <div className="flex items-start gap-3">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--ar-radius-sm)] bg-white/80 text-sky-600 shadow-sm shadow-sky-950/5">
-          <Bot size={18} />
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--ar-radius-sm)] bg-sky-50 text-[var(--ar-sky)]">
+          <Bot size={18} aria-hidden />
         </span>
         <div className="min-w-0 flex-1 space-y-4">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <p className="text-sm font-semibold text-[var(--ar-black)]">Оформление Telegram-бота</p>
-              <p className="mt-1 text-sm leading-7 text-[var(--ar-mist)]">
-                Имя, описание и аватар применяются напрямую в Telegram. Username меняется только через BotFather.
-              </p>
-            </div>
-            {profile?.url ? (
-              <a href={profile.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--ar-sky)]">
-                @{profile.username}
-                <ExternalLink size={15} />
+          <div>
+            <p className="text-sm font-semibold text-[var(--ar-black)]">Оформление Telegram-бота</p>
+            <p className="mt-1 text-sm text-[var(--ar-mist)]">
+              Имя, описание и аватар в Telegram. Токен хранится отдельно в секретах.
+            </p>
+            {profile?.username ? (
+              <a
+                href={`https://t.me/${profile.username.replace(/^@/, "")}`}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-2 inline-flex items-center gap-1 text-sm text-[var(--ar-sky)] hover:underline"
+              >
+                @{profile.username.replace(/^@/, "")}
+                <ExternalLink size={13} aria-hidden />
               </a>
             ) : null}
           </div>
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="space-y-2">
-              <label htmlFor="telegram-name" className="text-xs font-medium text-[var(--ar-stone)]">
-                Имя бота
+          <div className="grid gap-3">
+            <div className="space-y-1.5">
+              <label htmlFor="bot-name" className="text-xs font-medium text-[var(--ar-stone)]">
+                Имя
               </label>
               <Input
-                id="telegram-name"
+                id="bot-name"
                 value={name}
                 onChange={(event) => setName(event.target.value)}
                 maxLength={64}
-                placeholder="AIRuntime Assistant"
                 disabled={loading}
               />
             </div>
-            <div className="space-y-2">
-              <label htmlFor="telegram-short-description" className="text-xs font-medium text-[var(--ar-stone)]">
+            <div className="space-y-1.5">
+              <label htmlFor="bot-short" className="text-xs font-medium text-[var(--ar-stone)]">
                 Короткое описание
               </label>
               <Input
-                id="telegram-short-description"
+                id="bot-short"
                 value={shortDescription}
                 onChange={(event) => setShortDescription(event.target.value)}
                 maxLength={120}
-                placeholder="Помогает клиентам в Telegram"
                 disabled={loading}
               />
             </div>
-            <div className="space-y-2 md:col-span-2">
-              <label htmlFor="telegram-description" className="text-xs font-medium text-[var(--ar-stone)]">
+            <div className="space-y-1.5">
+              <label htmlFor="bot-desc" className="text-xs font-medium text-[var(--ar-stone)]">
                 Описание
               </label>
               <Textarea
-                id="telegram-description"
+                id="bot-desc"
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
                 maxLength={512}
@@ -169,8 +192,8 @@ function TelegramBotAppearanceCard({ projectId }: { projectId: string }) {
             <Button variant="accent" onClick={() => void onSave()} disabled={loading || saving || !name.trim()}>
               {saving ? "Сохраняем..." : "Сохранить оформление"}
             </Button>
-            <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-[var(--ar-radius-sm)] border border-black/10 bg-white px-4 py-2 text-sm font-semibold text-[var(--ar-black)] transition hover:bg-black/5">
-              <ImageUp size={16} />
+            <label className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-[var(--ar-radius-sm)] border border-black/10 bg-white px-4 text-sm font-semibold text-[var(--ar-black)] transition hover:bg-black/5">
+              <ImageUp size={16} aria-hidden />
               {uploading ? "Загружаем..." : "Загрузить аватар"}
               <input
                 type="file"
@@ -236,9 +259,11 @@ export default function ProjectSettingsPage() {
   }, [params.id]);
 
   useEffect(() => {
-    if (typeof window === "undefined" || window.location.hash !== "#secrets") return;
+    if (typeof window === "undefined") return undefined;
+    const hash = window.location.hash.replace("#", "");
+    if (!hash) return undefined;
     const timer = window.setTimeout(() => {
-      document.getElementById("secrets")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      document.getElementById(hash)?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 80);
     return () => window.clearTimeout(timer);
   }, [project?.id]);
@@ -276,99 +301,215 @@ export default function ProjectSettingsPage() {
 
   const hasTelegramTokenSlot =
     secrets?.some((secret) => secret.key === "TELEGRAM_BOT_TOKEN") ?? false;
-  // Subdomain is only meaningful for projects that actually have a website.
-  // Backend sets planned_site_url=null for telegram_bot; also hide a misclassified
-  // "website" that already has a Telegram token slot.
   const showSubdomainCard =
     Boolean(project.planned_site_url) &&
     !(project.type === "website" && hasTelegramTokenSlot);
+  const showBotCard =
+    (project.type === "telegram_bot" || project.type === "mixed") && botTokenConfigured;
+
+  const nav = [
+    { href: "#general", label: "Основное" },
+    { href: "#secrets", label: "Секреты" },
+    { href: "#services", label: "Сервисы" },
+    { href: "#publish", label: "Публикация" },
+    { href: "#danger", label: "Опасная зона" },
+  ];
 
   return (
-    <div className="grid gap-4 md:grid-cols-2">
-      {showSubdomainCard ? (
-        <Card hover={false} className="md:col-span-2">
+    <div className="space-y-8">
+      <nav
+        aria-label="Разделы настроек"
+        className="flex gap-1 overflow-x-auto border-b border-black/8 pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {nav.map((item) => (
+          <a
+            key={item.href}
+            href={item.href}
+            className="shrink-0 rounded-[0.5rem] px-3 py-2 text-sm font-medium text-[var(--ar-mist)] hover:bg-black/[0.04] hover:text-[var(--ar-black)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ar-sky)]/35"
+          >
+            {item.label}
+          </a>
+        ))}
+      </nav>
+
+      <SettingsSection
+        id="general"
+        title="Основное"
+        description="Тип проекта и связанные точки входа."
+      >
+        <Card hover={false} className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--ar-stone)]">Название</p>
+            <p className="mt-1 text-sm font-medium text-[var(--ar-black)]">{project.name}</p>
+          </div>
+          <div>
+            <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--ar-stone)]">Тип</p>
+            <p className="mt-1 text-sm font-medium text-[var(--ar-black)]">{project.type}</p>
+          </div>
+          {project.description ? (
+            <div className="sm:col-span-2">
+              <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--ar-stone)]">Описание</p>
+              <p className="mt-1 text-sm text-[var(--ar-mist)]">{project.description}</p>
+            </div>
+          ) : null}
+        </Card>
+        {showBotCard ? <TelegramBotAppearanceCard projectId={params.id} /> : null}
+      </SettingsSection>
+
+      <SettingsSection
+        id="secrets"
+        title="Переменные и секреты"
+        description="Токены и ключи вводятся здесь. Значения не показываются открытым текстом и не уходят в LLM."
+      >
+        <ProjectSecretsSection projectId={params.id} onChange={setSecrets} />
+      </SettingsSection>
+
+      <SettingsSection
+        id="services"
+        title="Подключённые сервисы"
+        description="Базы и очереди подключает агент через платформу во время сборки."
+      >
+        <Card hover={false}>
           <div className="flex items-start gap-3">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--ar-radius-sm)] bg-white/80 text-emerald-600 shadow-sm shadow-sky-950/5">
-              <Globe2 size={18} />
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--ar-radius-sm)] bg-black/[0.03] text-[var(--ar-graphite)]">
+              <Database size={18} aria-hidden />
             </span>
-            <div className="min-w-0 flex-1 space-y-4">
-              <div>
-                <p className="text-sm font-semibold text-[var(--ar-black)]">Поддомен сайта</p>
-                <p className="mt-1 text-sm leading-7 text-[var(--ar-mist)]">
-                  Адрес, на котором откроется сайт после следующего деплоя.
-                </p>
-              </div>
-
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-                <div className="flex-1 space-y-2">
-                  <label htmlFor="deploy-subdomain" className="text-xs font-medium text-[var(--ar-stone)]">
-                    Поддомен
-                  </label>
-                  <div className="flex overflow-hidden rounded-[var(--ar-radius-sm)] border border-white/70 bg-white/72 shadow-sm shadow-sky-950/5">
-                    <Input
-                      id="deploy-subdomain"
-                      value={subdomain}
-                      onChange={(event) => {
-                        setSubdomain(event.target.value.toLowerCase());
-                        setSaved(false);
-                      }}
-                      placeholder="my-landing"
-                      className="border-0 bg-transparent shadow-none focus:ring-0"
-                      autoComplete="off"
-                      spellCheck={false}
-                    />
-                    <span className="flex items-center border-l border-white/70 bg-white/58 px-3 text-sm text-[var(--ar-mist)]">
-                      .{baseDomain}
-                    </span>
-                  </div>
-                </div>
-                <Button variant="accent" onClick={() => void onSaveSubdomain()} disabled={saving}>
-                  {saving ? "Сохраняем..." : "Сохранить"}
-                </Button>
-              </div>
-
-              <p className="text-sm text-[var(--ar-mist)]">
-                Будет доступен по адресу: <span className="font-medium text-[var(--ar-black)]">{previewUrl}</span>
+            <div className="min-w-0 space-y-2">
+              <p className="text-sm font-semibold text-[var(--ar-black)]">Postgres, Redis и другие</p>
+              <p className="text-sm leading-relaxed text-[var(--ar-mist)]">
+                Если проекту нужна база или очередь, агент запросит сервис в чате. Креды создаются
+                автоматически и подставляются в окружение контейнера. Отдельная ручная настройка здесь
+                не требуется.
               </p>
-              <p className="text-xs text-[var(--ar-stone)]">Поддомен проверяется на уникальность по всей системе.</p>
-              {project.deployment_url ? (
-                <p className="text-xs leading-6 text-[var(--ar-stone)]">
-                  Текущий деплой: {project.deployment_url}. Новый поддомен применится при следующем запуске.
-                </p>
-              ) : null}
-              {error ? <p className="text-sm text-rose-600">{error}</p> : null}
-              {saved ? <p className="text-sm text-emerald-600">Поддомен сохранен</p> : null}
+              <div className="flex flex-wrap gap-2 pt-1">
+                {["Postgres", "Redis", "MySQL", "MongoDB", "RabbitMQ"].map((name) => (
+                  <span
+                    key={name}
+                    className="rounded-[0.5rem] border border-black/10 bg-[#f7f8fa] px-2.5 py-1 font-mono text-xs text-[var(--ar-graphite)]"
+                  >
+                    {name}
+                  </span>
+                ))}
+              </div>
             </div>
           </div>
         </Card>
-      ) : null}
+      </SettingsSection>
 
-      {(project.type === "telegram_bot" || project.type === "mixed") && botTokenConfigured ? (
-        <TelegramBotAppearanceCard projectId={params.id} />
-      ) : null}
+      <SettingsSection
+        id="publish"
+        title="Домен и публикация"
+        description="Публичный адрес сайта на инфраструктуре AIRuntime."
+      >
+        {showSubdomainCard ? (
+          <Card hover={false}>
+            <div className="flex items-start gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--ar-radius-sm)] bg-emerald-50 text-emerald-700">
+                <Globe2 size={18} aria-hidden />
+              </span>
+              <div className="min-w-0 flex-1 space-y-4">
+                <div>
+                  <p className="text-sm font-semibold text-[var(--ar-black)]">Поддомен сайта</p>
+                  <p className="mt-1 text-sm leading-7 text-[var(--ar-mist)]">
+                    Адрес, на котором откроется сайт после следующего деплоя.
+                  </p>
+                </div>
 
-      <ProjectSecretsSection projectId={params.id} onChange={setSecrets} />
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                  <div className="flex-1 space-y-2">
+                    <label htmlFor="deploy-subdomain" className="text-xs font-medium text-[var(--ar-stone)]">
+                      Поддомен
+                    </label>
+                    <div className="flex overflow-hidden rounded-[var(--ar-radius-sm)] border border-black/10 bg-white">
+                      <Input
+                        id="deploy-subdomain"
+                        value={subdomain}
+                        onChange={(event) => {
+                          setSubdomain(event.target.value.toLowerCase());
+                          setSaved(false);
+                        }}
+                        placeholder="my-landing"
+                        className="border-0 bg-transparent shadow-none focus:ring-0"
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                      <span className="flex items-center border-l border-black/10 bg-[#f7f8fa] px-3 text-sm text-[var(--ar-mist)]">
+                        .{baseDomain}
+                      </span>
+                    </div>
+                  </div>
+                  <Button variant="accent" onClick={() => void onSaveSubdomain()} disabled={saving}>
+                    {saving ? "Сохраняем..." : "Сохранить"}
+                  </Button>
+                </div>
 
-      <Card hover={false} className="md:col-span-2 border-rose-200 bg-rose-50/40">
-        <div className="flex items-start gap-3">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--ar-radius-sm)] bg-rose-100 text-rose-600">
-            <AlertTriangle size={18} />
-          </span>
-          <div className="min-w-0 flex-1 space-y-3">
-            <div>
-              <p className="text-sm font-semibold text-[var(--ar-black)]">Опасная зона</p>
-              <p className="mt-1 text-sm leading-7 text-[var(--ar-mist)]">
-                Удаление проекта необратимо: остановится и удалится контейнер, пропадут чаты, файлы,
-                деплои и секреты.
-              </p>
+                <p className="text-sm text-[var(--ar-mist)]">
+                  Будет доступен по адресу:{" "}
+                  <span className="font-medium text-[var(--ar-black)]">{previewUrl}</span>
+                </p>
+                <p className="text-xs text-[var(--ar-stone)]">
+                  Поддомен проверяется на уникальность. Собственный домен в текущей версии не
+                  подключается.
+                </p>
+                {project.deployment_url ? (
+                  <p className="text-xs leading-6 text-[var(--ar-stone)]">
+                    Текущий деплой: {project.deployment_url}. Новый поддомен применится при следующем
+                    запуске.
+                  </p>
+                ) : null}
+                {error ? <p className="text-sm text-rose-600">{error}</p> : null}
+                {saved ? <p className="text-sm text-emerald-600">Поддомен сохранен</p> : null}
+              </div>
             </div>
-            <Button variant="outline" className="border-rose-300 text-rose-700 hover:bg-rose-100" onClick={() => setDeleteStep(1)}>
-              <Trash2 size={16} />
-              Удалить проект
-            </Button>
+          </Card>
+        ) : (
+          <Card hover={false}>
+            <p className="text-sm text-[var(--ar-mist)]">
+              Для этого проекта публикация идёт через Telegram-бота или без отдельного поддомена.
+              {project.deployment_url ? (
+                <>
+                  {" "}
+                  Текущий URL:{" "}
+                  <a
+                    href={project.deployment_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-medium text-[var(--ar-sky)] hover:underline"
+                  >
+                    {project.deployment_url}
+                  </a>
+                </>
+              ) : null}
+            </p>
+          </Card>
+        )}
+      </SettingsSection>
+
+      <SettingsSection id="danger" title="Опасная зона" description="Необратимые действия с проектом.">
+        <Card hover={false} className="border-rose-200 bg-rose-50/40">
+          <div className="flex items-start gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--ar-radius-sm)] bg-rose-100 text-rose-600">
+              <AlertTriangle size={18} aria-hidden />
+            </span>
+            <div className="min-w-0 flex-1 space-y-3">
+              <div>
+                <p className="text-sm font-semibold text-[var(--ar-black)]">Удалить проект</p>
+                <p className="mt-1 text-sm leading-7 text-[var(--ar-mist)]">
+                  Удаление необратимо: остановится контейнер, пропадут чаты, файлы, деплои и секреты.
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                className="border-rose-300 text-rose-700 hover:bg-rose-100"
+                onClick={() => setDeleteStep(1)}
+              >
+                <Trash2 size={16} />
+                Удалить проект
+              </Button>
+            </div>
           </div>
-        </div>
-      </Card>
+        </Card>
+      </SettingsSection>
 
       <Modal
         open={deleteStep === 1}

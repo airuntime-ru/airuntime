@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Download, FileText, Folder, RotateCcw } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +21,8 @@ import {
 } from "@/lib/api";
 
 const COMMITS_PAGE_SIZE = 5;
+/** Soft cap for DOM preview — backend may already truncate; keep renderer light. */
+const PREVIEW_CHAR_CAP = 200_000;
 
 function formatDateTime(value: string) {
   const date = new Date(value);
@@ -54,6 +56,7 @@ export default function ProjectVersionsPage() {
   const [filePath, setFilePath] = useState<string | null>(null);
   const [fileData, setFileData] = useState<ProjectVersionFileType | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
+  const fileRequestId = useRef(0);
 
   const joinPath = useCallback((base: string, name: string) => {
     if (!base) return name;
@@ -161,21 +164,32 @@ export default function ProjectVersionsPage() {
     return () => window.clearTimeout(id);
   }, [activeCommitHash, treePath, loadTree]);
 
+  const clearFilePreview = useCallback(() => {
+    fileRequestId.current += 1;
+    setFilePath(null);
+    setFileData(null);
+    setFileLoading(false);
+  }, []);
+
   const loadFile = useCallback(
     async (commitHash: string, path: string) => {
       if (!projectId) return;
+      const requestId = ++fileRequestId.current;
       setFileLoading(true);
+      setFilePath(path);
+      setFileData(null);
       try {
         const data = await getProjectVersionFile(projectId, commitHash, path);
+        if (requestId !== fileRequestId.current) return;
         setFileData(data);
-        setFilePath(path);
         setError("");
       } catch (e) {
+        if (requestId !== fileRequestId.current) return;
         setError(e instanceof Error ? e.message : "Не удалось загрузить файл");
         setFileData(null);
         setFilePath(null);
       } finally {
-        setFileLoading(false);
+        if (requestId === fileRequestId.current) setFileLoading(false);
       }
     },
     [projectId]
@@ -232,7 +246,10 @@ export default function ProjectVersionsPage() {
                     key={`${b.path}-${idx}`}
                     type="button"
                     className={b.path === treePath ? "font-bold text-[var(--ar-black)]" : "text-[var(--ar-stone)] hover:text-[var(--ar-black)]"}
-                    onClick={() => setTreePath(b.path)}
+                    onClick={() => {
+                      setTreePath(b.path);
+                      clearFilePreview();
+                    }}
                   >
                     {b.label}
                   </button>
@@ -257,8 +274,7 @@ export default function ProjectVersionsPage() {
                       className="w-full justify-start"
                       onClick={() => {
                         setTreePath(nextPath);
-                        setFilePath(null);
-                        setFileData(null);
+                        clearFilePreview();
                       }}
                     >
                       <Folder size={15} />
@@ -325,8 +341,13 @@ export default function ProjectVersionsPage() {
                 {fileLoading ? (
                   <PageLoader />
                 ) : (
-                  <pre className="max-h-[70vh] overflow-auto whitespace-pre-wrap bg-white/50 p-4 font-mono text-xs leading-relaxed text-[var(--ar-graphite)]">
-                    {fileData.content}
+                  <pre
+                    className="max-h-[70vh] overflow-auto whitespace-pre-wrap bg-[#f7f8fa] p-4 font-mono text-xs leading-relaxed text-[var(--ar-graphite)] [content-visibility:auto]"
+                    style={{ containIntrinsicSize: "0 480px" }}
+                  >
+                    {fileData.content.length > PREVIEW_CHAR_CAP
+                      ? `${fileData.content.slice(0, PREVIEW_CHAR_CAP)}\n\n… превью обрезано (${fileData.content.length.toLocaleString("ru-RU")} символов)`
+                      : fileData.content}
                   </pre>
                 )}
               </div>
@@ -376,8 +397,7 @@ export default function ProjectVersionsPage() {
                     onClick={() => {
                       setActiveCommitHash(v.commit_hash);
                       setTreePath("");
-                      setFilePath(null);
-                      setFileData(null);
+                      clearFilePreview();
                       setError("");
                     }}
                   >

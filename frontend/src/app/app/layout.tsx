@@ -46,20 +46,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   if (isChecking) {
     return (
-      <div className="bg-[#f8fcff] flex min-h-screen items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center bg-[var(--ar-canvas)]">
         <PageLoader />
       </div>
     );
   }
 
   return (
-    <div className="runtime-sky app-shell-bg grid-texture isolate min-h-screen text-[var(--ar-black)]">
+    <div className="app-shell isolate min-h-screen text-[var(--ar-black)]">
       <AppSidebar credits={credits} onLogout={onLogout} />
       <AppMobileHeader credits={credits} />
       <AppMobileNav credits={credits} onLogout={onLogout} />
       <main
         data-tour="app-workspace"
-        className="relative z-10 min-h-screen px-4 pb-28 pt-20 sm:px-5 lg:ml-72 lg:px-8 lg:py-6"
+        className="relative z-10 min-h-screen px-3 pb-28 pt-[3.75rem] sm:px-4 lg:ml-60 lg:px-6 lg:pb-6 lg:pt-5"
       >
         <div className="mx-auto w-full max-w-7xl">{children}</div>
       </main>

@@ -1,89 +1,75 @@
-"use client";
+import type { Metadata } from "next";
 
-import Link from "next/link";
-import { motion } from "framer-motion";
-import { ArrowRight } from "lucide-react";
-
+import { AudienceSection } from "@/components/landing/audience-section";
+import { ComparisonSection } from "@/components/landing/comparison-section";
 import { FaqSection } from "@/components/landing/faq-section";
-import { ProductPreview } from "@/components/landing/product-preview";
-import { StepsSection } from "@/components/landing/steps-section";
-import { Logo } from "@/components/brand/logo";
+import { FinalCtaSection } from "@/components/landing/final-cta-section";
+import { HeroSection } from "@/components/landing/hero-section";
+import { HowItWorksSection } from "@/components/landing/how-it-works";
+import { InfraSection } from "@/components/landing/infra-section";
+import { ResultSection } from "@/components/landing/result-section";
+import { SecuritySection } from "@/components/landing/security-section";
+import { SiteFooter } from "@/components/landing/site-footer";
+import { SiteHeader } from "@/components/landing/site-header";
+import { UseCasesSection } from "@/components/landing/use-cases-section";
+import { VersionsSection } from "@/components/landing/versions-section";
+import { seoCopy } from "@/lib/landing/content";
+
+export const metadata: Metadata = {
+  title: {
+    absolute: seoCopy.title,
+  },
+  description: seoCopy.description,
+  openGraph: {
+    title: seoCopy.title,
+    description: seoCopy.description,
+  },
+  twitter: {
+    title: seoCopy.title,
+    description: seoCopy.description,
+  },
+};
+
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: "AIRuntime",
+  applicationCategory: "DeveloperApplication",
+  operatingSystem: "Web",
+  description: seoCopy.description,
+  url: "https://airuntime.ru",
+};
 
 export default function Home() {
   return (
-    <main className="runtime-sky min-h-screen text-[var(--ar-black)]">
-      <div className="runtime-wind" aria-hidden />
-      <div className="relative z-10 mx-auto flex max-w-5xl flex-col px-5 sm:px-8">
-        <header className="flex items-center justify-between py-5 sm:py-6">
-          <Logo href="/" variant="full" theme="dark" size="sm" priority />
-          <Link
-            href="/auth/login"
-            className="text-sm font-medium text-[var(--ar-sky)] transition-opacity hover:opacity-70"
-          >
-            Войти
-          </Link>
-        </header>
-
-        <section className="flex min-h-[calc(88svh-5rem)] flex-col items-center justify-center pb-12 pt-10 text-center sm:pb-16 sm:pt-14">
-          <motion.div
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, ease: [0.25, 0.1, 0.25, 1] }}
-            className="max-w-3xl"
-          >
-            <h1 className="text-[2.5rem] font-semibold leading-[1.05] tracking-[-0.03em] sm:text-6xl sm:leading-[1.02]">
-              Опишите идею.
-              <br />
-              Получите проект.
-            </h1>
-            <p className="mx-auto mt-5 max-w-md text-base leading-relaxed text-[var(--ar-mist)] sm:text-lg">
-              Сайт или Telegram-бот — в одном чате.
-            </p>
-            <Link
-              href="/auth/login"
-              className="mt-8 inline-flex h-12 items-center justify-center gap-2 rounded-full bg-[var(--ar-black)] px-7 text-sm font-medium text-white transition-transform hover:scale-[1.02] active:scale-[0.98]"
-            >
-              Запустить проект
-              <ArrowRight size={16} />
-            </Link>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 24 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.12, duration: 0.7, ease: [0.25, 0.1, 0.25, 1] }}
-            className="mt-14 w-full max-w-2xl sm:mt-16"
-          >
-            <ProductPreview />
-          </motion.div>
-        </section>
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
+      <div className="landing-shell min-h-screen bg-[#f7f8fa] text-[var(--ar-black)]">
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-white focus:px-4 focus:py-2 focus:shadow-lg"
+        >
+          Перейти к содержимому
+        </a>
+        <SiteHeader />
+        <main id="main-content">
+          <HeroSection />
+          <ResultSection />
+          <HowItWorksSection />
+          <UseCasesSection />
+          <ComparisonSection />
+          <InfraSection />
+          <VersionsSection />
+          <SecuritySection />
+          <AudienceSection />
+          <FaqSection />
+          <FinalCtaSection />
+        </main>
+        <SiteFooter />
       </div>
-
-      <StepsSection />
-
-      <div className="relative z-10 mx-auto flex max-w-5xl flex-col px-5 sm:px-8">
-        <FaqSection />
-
-        <section className="flex min-h-[88svh] flex-col items-center justify-center py-16 text-center">
-          <h2 className="max-w-3xl text-4xl font-semibold tracking-[-0.03em] text-[var(--ar-black)] sm:text-6xl sm:leading-[1.04]">
-            Запусти MVP своего стартапа уже сегодня
-          </h2>
-          <p className="mx-auto mt-5 max-w-xl text-base text-[var(--ar-mist)] sm:text-lg">
-            Опиши идею, получи готовый проект и ссылку для первых пользователей.
-          </p>
-          <Link
-            href="/auth/login"
-            className="mt-8 inline-flex h-12 items-center justify-center gap-2 rounded-full bg-[var(--ar-black)] px-7 text-sm font-medium text-white transition-transform hover:scale-[1.02] active:scale-[0.98]"
-          >
-            Запустить
-            <ArrowRight size={16} />
-          </Link>
-        </section>
-
-        <footer className="border-t border-black/[0.06] py-10 text-center text-xs text-[var(--ar-stone)]">
-          AIRuntime
-        </footer>
-      </div>
-    </main>
+    </>
   );
 }

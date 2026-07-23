@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ExternalLink, MessageSquare, Rocket, Settings, Sparkles, Square } from "lucide-react";
+import { ExternalLink, MessageSquare, Rocket, Settings, Square } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +23,12 @@ import {
   isProjectRunning,
   projectStatusLabel,
 } from "@/lib/project-status";
+
+const TYPE_LABELS: Record<string, string> = {
+  website: "Сайт",
+  telegram_bot: "Telegram-бот",
+  mixed: "Сайт и бот",
+};
 
 export default function ProjectOverviewPage() {
   const params = useParams<{ id: string }>();
@@ -89,141 +95,122 @@ export default function ProjectOverviewPage() {
   const atLimit = limits ? limits.running >= limits.max_running : false;
   const startDisabled = actionLoading || (atLimit && !isProjectRunning(project.status));
   const chatHref = `/app/projects/${project.id}/chat`;
-
   const isLive = project.status === "live";
   const isDeploying = project.status === "deploying";
   const needsConfig = project.status === "needs_configuration";
   const canRun = canStartProject(project.status) && !needsConfig;
 
-  let heading = "Доведите идею до запуска через чат";
-  let description =
-    "Опишите сценарий в чате, приложите материалы при необходимости - AIRuntime соберёт и задеплоит проект.";
-  let primaryAction: React.ReactNode = (
-    <Link href={chatHref} className="w-full">
-      <Button variant="accent" className="w-full">
-        <MessageSquare size={16} />
-        Открыть чат
-      </Button>
-    </Link>
-  );
-  let secondaryAction: React.ReactNode = null;
-
-  if (isLive) {
-    heading = "Проект в эфире";
-    description = "Дальнейшие правки вносите через чат - платформа пересоберёт и перезапустит проект сама.";
-    primaryAction = project.deployment_url ? (
-      <a href={project.deployment_url} target="_blank" rel="noreferrer" className="w-full">
-        <Button variant="accent" className="w-full">
-          <ExternalLink size={16} />
-          Открыть ссылку
-        </Button>
-      </a>
-    ) : null;
-  } else if (isDeploying) {
-    heading = "Проект запускается";
-    description =
-      "Сборка и запуск уже идут. Статус обновится сам — итог также во вкладках «Деплои» и «Логи».";
-    primaryAction = (
-      <Link href={`/app/projects/${project.id}/deployments`} className="w-full">
-        <Button variant="accent" className="w-full">
-          Смотреть деплои
-        </Button>
-      </Link>
-    );
-    secondaryAction = (
-      <Link href={chatHref} className="w-full">
-        <Button variant="outline" className="w-full">
-          <MessageSquare size={16} />
-          Открыть чат
-        </Button>
-      </Link>
-    );
-  } else if (needsConfig) {
-    heading = "Нужна настройка";
-    description = "Заполните недостающие данные в настройках проекта, и запуск продолжится автоматически.";
-    primaryAction = (
-      <Link href={`/app/projects/${project.id}/settings`} className="w-full">
-        <Button variant="accent" className="w-full">
-          <Settings size={16} />
-          Перейти в настройки
-        </Button>
-      </Link>
-    );
-    secondaryAction = (
-      <Link href={chatHref} className="w-full">
-        <Button variant="outline" className="w-full">
-          <MessageSquare size={16} />
-          Открыть чат
-        </Button>
-      </Link>
-    );
-  } else if (canRun) {
-    heading = "Можно запускать";
-    description = "Файлы собраны — каждый запуск заново собирает образ и поднимает контейнер.";
-    primaryAction = (
-      <Button variant="accent" className="w-full" disabled={startDisabled} onClick={() => void onStart()}>
-        <Rocket size={16} />
-        {actionLoading ? "Запускаем…" : "Собрать и запустить"}
-      </Button>
-    );
-    secondaryAction = (
-      <Link href={chatHref} className="w-full">
-        <Button variant="outline" className="w-full">
-          <MessageSquare size={16} />
-          Открыть чат
-        </Button>
-      </Link>
-    );
-  }
-
   return (
     <div className="space-y-4">
-      {limits ? (
-        <Card hover={false} className="border-[var(--ar-sky)]/20 bg-[var(--ar-sky)]/5">
-          <p className="text-sm text-[var(--ar-mist)]">
-            Одновременно запущено:{" "}
-            <span className="font-semibold text-[var(--ar-black)]">
-              {limits.running} / {limits.max_running}
-            </span>
-            . Остановите один из активных проектов, чтобы освободить слот.
-          </p>
-        </Card>
-      ) : null}
       {error ? <p className="text-sm text-rose-600">{error}</p> : null}
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Card hover={false}>
-          <p className="text-sm text-[var(--ar-stone)]">Статус</p>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Card hover={false} className="p-4">
+          <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--ar-stone)]">Статус</p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <Badge>{projectStatusLabel(project.status)}</Badge>
             {canStopProject(project.status) ? (
               <Button variant="ghost" size="sm" disabled={actionLoading} onClick={onStop}>
                 <Square size={13} />
-                Остановить
+                Стоп
               </Button>
             ) : null}
           </div>
         </Card>
-        <Card hover={false}>
-          <p className="text-sm text-[var(--ar-stone)]">Публикация</p>
-          <p className="mt-2 break-all text-sm font-medium text-[var(--ar-sky)]">
-            {project.deployment_url ?? "Ссылка появится после первого запуска"}
+        <Card hover={false} className="p-4">
+          <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--ar-stone)]">Тип</p>
+          <p className="mt-2 text-sm font-medium text-[var(--ar-black)]">
+            {TYPE_LABELS[project.type] ?? project.type}
           </p>
+        </Card>
+        <Card hover={false} className="p-4 sm:col-span-2">
+          <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--ar-stone)]">Публичная ссылка</p>
+          {project.deployment_url ? (
+            <a
+              href={project.deployment_url}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-2 inline-flex items-center gap-1.5 break-all text-sm font-medium text-[var(--ar-sky)] hover:underline"
+            >
+              {project.deployment_url}
+              <ExternalLink size={14} aria-hidden />
+            </a>
+          ) : (
+            <p className="mt-2 text-sm text-[var(--ar-mist)]">Появится после первого запуска</p>
+          )}
         </Card>
       </div>
 
-      <Card hover={false} className="grid gap-5 md:grid-cols-[1fr_0.72fr]">
-        <div>
-          <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--ar-cyan)]">
-            <Sparkles size={14} />
-            Следующее действие
+      {limits && atLimit && !isProjectRunning(project.status) ? (
+        <Card hover={false} className="border-amber-200 bg-amber-50 p-4">
+          <p className="text-sm text-amber-900">
+            Лимит одновременных проектов: {limits.running}/{limits.max_running}. Остановите другой проект,
+            чтобы запустить этот.
           </p>
-          <h2 className="mt-3 text-2xl font-semibold text-[var(--ar-black)]">{heading}</h2>
-          <p className="mt-3 text-sm leading-7 text-[var(--ar-mist)]">{description}</p>
+        </Card>
+      ) : null}
+
+      <Card hover={false} className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-[var(--ar-black)]">
+            {isLive
+              ? "Проект запущен"
+              : isDeploying
+                ? "Идёт сборка и запуск"
+                : needsConfig
+                  ? "Нужна настройка"
+                  : canRun
+                    ? "Готов к запуску"
+                    : "Продолжите в чате"}
+          </p>
+          <p className="mt-1 text-sm text-[var(--ar-mist)]">
+            {isLive
+              ? "Правки вносите через чат — платформа пересоберёт проект."
+              : isDeploying
+                ? "Статус обновится сам. Подробности — во вкладках «Деплои» и «Логи»."
+                : needsConfig
+                  ? "Заполните секреты в настройках — запуск продолжится автоматически."
+                  : canRun
+                    ? "Сборка создаст образ и поднимет контейнер."
+                    : "Опишите задачу в чате, чтобы собрать первую версию."}
+          </p>
         </div>
-        <div className="flex flex-col justify-center gap-2">
-          {primaryAction}
-          {secondaryAction}
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-[14rem]">
+          {isLive && project.deployment_url ? (
+            <a href={project.deployment_url} target="_blank" rel="noreferrer">
+              <Button variant="accent" className="w-full">
+                <ExternalLink size={16} />
+                Открыть
+              </Button>
+            </a>
+          ) : null}
+          {isDeploying ? (
+            <Link href={`/app/projects/${project.id}/deployments`}>
+              <Button variant="accent" className="w-full">
+                Смотреть деплои
+              </Button>
+            </Link>
+          ) : null}
+          {needsConfig ? (
+            <Link href={`/app/projects/${project.id}/settings`}>
+              <Button variant="accent" className="w-full">
+                <Settings size={16} />
+                Настройки
+              </Button>
+            </Link>
+          ) : null}
+          {canRun ? (
+            <Button variant="accent" className="w-full" disabled={startDisabled} onClick={() => void onStart()}>
+              <Rocket size={16} />
+              {actionLoading ? "Запускаем…" : "Собрать и запустить"}
+            </Button>
+          ) : null}
+          <Link href={chatHref}>
+            <Button variant="outline" className="w-full">
+              <MessageSquare size={16} />
+              Открыть чат
+            </Button>
+          </Link>
         </div>
       </Card>
     </div>

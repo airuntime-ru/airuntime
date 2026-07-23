@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
+import { seoCopy } from "@/lib/landing/content";
+
 const inter = Inter({
   variable: "--font-inter",
   subsets: ["latin", "cyrillic"],
@@ -19,8 +21,11 @@ export const metadata: Metadata = {
     default: "AIRuntime",
     template: "%s · AIRuntime",
   },
-  description: "Опишите идею. AIRuntime соберет и запустит проект.",
+  description: seoCopy.description,
   metadataBase: new URL(siteUrl),
+  alternates: {
+    canonical: "/",
+  },
   icons: {
     icon: [
       { url: "/favicon.ico", sizes: "48x48", type: "image/x-icon" },
@@ -32,10 +37,11 @@ export const metadata: Metadata = {
   },
   manifest: "/site.webmanifest",
   openGraph: {
-    title: "AIRuntime",
-    description: "Опишите идею. AIRuntime соберет и запустит проект.",
+    title: seoCopy.title,
+    description: seoCopy.description,
     url: siteUrl,
     siteName: "AIRuntime",
+    locale: "ru_RU",
     type: "website",
     images: [
       {
@@ -48,8 +54,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "AIRuntime",
-    description: "Опишите идею. AIRuntime соберет и запустит проект.",
+    title: seoCopy.title,
+    description: seoCopy.description,
     images: ["/brand/logo-full.png"],
   },
 };

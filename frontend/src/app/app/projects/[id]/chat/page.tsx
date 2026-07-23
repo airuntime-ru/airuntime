@@ -1,31 +1,23 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
-  Activity,
   ArrowLeft,
   ArrowUp,
-  CheckCircle2,
   ChevronDown,
-  FileEdit,
-  FilePlus,
-  FileSearch,
-  FileX,
-  FolderSearch,
-  Loader2,
   Paperclip,
   Pin,
   PinOff,
   Plus,
   Search,
   Square,
-  Wrench,
   X,
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import rehypeHighlight from "rehype-highlight";
 
+import { AgentStatusPanel } from "@/components/chat/message-item";
+import { MessageList } from "@/components/chat/message-list";
+import { ToolActivityFeed } from "@/components/chat/tool-activity-feed";
 import { AutoTextarea } from "@/components/ui/auto-textarea";
 import {
   createChat,
@@ -99,313 +91,6 @@ function writeSelectedProvider(value: string) {
   else localStorage.removeItem(PROVIDER_KEY);
 }
 
-function toolIcon(label: string) {
-  if (label.startsWith("Читаю")) return <FileSearch size={13} />;
-  if (label.startsWith("Пишу")) return <FilePlus size={13} />;
-  if (label.startsWith("Правлю")) return <FileEdit size={13} />;
-  if (label.startsWith("Удаляю")) return <FileX size={13} />;
-  if (label.startsWith("Изучаю")) return <FolderSearch size={13} />;
-  return <Wrench size={13} />;
-}
-
-function ExecutionReportShell({
-  children,
-  collapsible = false,
-}: {
-  children: ReactNode;
-  collapsible?: boolean;
-}) {
-  // Shared chrome for live tool activity and the finished "Отчёт о выполнении" block so they
-  // read as one panel (header + body, single border) instead of a floating pill over a card.
-  if (!collapsible) {
-    return (
-      <div className="mb-3 overflow-hidden rounded-xl border border-black/8 bg-[#fafafa] text-[13px]">
-        <div className="flex items-center gap-1.5 px-3 py-2 text-[var(--ar-stone)]">
-          <Activity size={12} className="shrink-0" />
-          <span className="flex-1">Отчёт о выполнении</span>
-        </div>
-        <div className="border-t border-black/8">{children}</div>
-      </div>
-    );
-  }
-
-  return (
-    <details className="group mt-2 overflow-hidden rounded-xl border border-black/8 bg-[#fafafa] text-[13px]">
-      <summary className="report-summary flex cursor-pointer select-none items-center gap-1.5 px-3 py-2 text-[var(--ar-stone)] hover:text-[var(--ar-mist)]">
-        <Activity size={12} className="shrink-0" />
-        <span className="flex-1">Отчёт о выполнении</span>
-        <ChevronDown size={13} className="shrink-0 opacity-60 transition-transform group-open:rotate-180" />
-      </summary>
-      <div className="border-t border-black/8">{children}</div>
-    </details>
-  );
-}
-
-function ToolActivityFeed({ items }: { items: ToolActivityItem[] }) {
-  if (items.length === 0) return null;
-  return (
-    <ExecutionReportShell>
-      <div className="scrollbar-airy max-h-40 space-y-1 overflow-y-auto px-3 py-2">
-        {items.map((item) => (
-          <div
-            key={item.id}
-            className={cn(
-              "flex items-center gap-2 text-xs",
-              item.state === "error"
-                ? "text-rose-600"
-                : item.state === "done"
-                  ? "text-[var(--ar-mist)]"
-                  : "text-[var(--ar-black)]"
-            )}
-          >
-            <span className="shrink-0 opacity-70">{toolIcon(item.label)}</span>
-            <span className="truncate">{item.label}</span>
-          </div>
-        ))}
-      </div>
-    </ExecutionReportShell>
-  );
-}
-
-function AiTypingIndicator() {
-  return (
-    <div className="flex items-center gap-2 py-1 text-sm text-[var(--ar-stone)]">
-      <span className="inline-flex items-center gap-1" aria-hidden>
-        <span className="h-1 w-1 animate-pulse rounded-full bg-[var(--ar-stone)]" />
-        <span className="h-1 w-1 animate-pulse rounded-full bg-[var(--ar-stone)] [animation-delay:120ms]" />
-        <span className="h-1 w-1 animate-pulse rounded-full bg-[var(--ar-stone)] [animation-delay:220ms]" />
-      </span>
-    </div>
-  );
-}
-
-/** Ticks once a second while `active` so callers re-render with a fresh Date.now() - startedAt.
- * turnStartedAt itself is shared cross-tab (see chat-stream-runtime.ts), so every tab watching
- * the same chat shows the same elapsed time, not "time since this tab noticed". */
-function elapsedSecondsSince(startedAt: number): number {
-  return Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-}
-
-function useElapsedSeconds(startedAt: number | null, active: boolean): number | null {
-  const [elapsed, setElapsed] = useState<number | null>(null);
-  useEffect(() => {
-    if (!active || !startedAt) return;
-    // Deliberately no synchronous setState here for the first tick (that would need calling
-    // Date.now() during the effect's initial pass) - the interval's own callback (a genuine
-    // event, not render/effect-body execution) is what's allowed to read the clock. One second
-    // of "0с" before the first real tick is not worth a bigger useSyncExternalStore-based
-    // rewrite of this whole panel for.
-    const id = window.setInterval(() => setElapsed(elapsedSecondsSince(startedAt)), 1000);
-    return () => window.clearInterval(id);
-  }, [active, startedAt]);
-  return active ? elapsed : null;
-}
-
-function formatElapsed(totalSeconds: number): string {
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return minutes > 0 ? `${minutes}м ${seconds}с` : `${seconds}с`;
-}
-
-// Codex delivers whole messages, not token-by-token (see agent/codex_runtime.py), so there's no
-// real live count to show mid-turn - only a rough ballpark from how much text has streamed in so
-// far. ~2.2 chars/token is a reasonable estimate for mixed ru/en text with a modern BPE
-// tokenizer. Always labeled "≈" and replaced by the provider's own real count once the turn
-// finishes (see the "Отчёт о выполнении" footer, which uses actual usage numbers).
-function estimateTokens(chars: number): number {
-  return Math.max(0, Math.round(chars / 2.2));
-}
-
-function AgentStatusPanel({
-  status,
-  projectId,
-  turnStartedAt,
-  liveChars,
-  onContinue,
-}: {
-  status: AgentStatus;
-  projectId: string;
-  turnStartedAt: number | null;
-  liveChars: number;
-  onContinue: () => void;
-}) {
-  const needsSecret = status.phase === "needs_configuration";
-  // needs_configuration is an actionable pause (fill in a secret), not a failure - group it
-  // with "waiting", not "error", even though the backend reuses state="error" to mean
-  // "stop and wait for the user" here too.
-  const waiting = status.state === "waiting" || status.phase === "questions" || needsSecret;
-  const done = status.state === "done" && !waiting;
-  // Deliberately just state/phase - chat-stream-runtime.ts never lets a single tool call's
-  // result (a command that happened to exit non-zero) reach this component's status, only real
-  // turn-level failures do. A free-text regex on the label used to also catch here (e.g. a
-  // running "Выполняю: grep -r error ." tool label contains "error" while nothing has failed).
-  const error = !waiting && (status.state === "error" || status.phase === "error");
-  const steps = ["thinking", "context", "tool", "verify", "module", "version", "deploy", "done"];
-  const currentIndex = Math.max(0, steps.indexOf(status.phase));
-  const needsToken = needsSecret && status.label.includes("TELEGRAM_BOT_TOKEN");
-  const secretsHref = `/app/projects/${projectId}/settings#secrets`;
-  const helpHref = `/help/telegram-token?projectId=${encodeURIComponent(projectId)}`;
-  const isRunning = status.state === "running" && !waiting;
-  const elapsedSeconds = useElapsedSeconds(turnStartedAt, isRunning);
-
-  return (
-    <div
-      className={cn(
-        "sticky bottom-3 z-10 mb-5 overflow-hidden rounded-2xl border px-4 py-3 shadow-[0_14px_36px_rgba(70,130,180,0.10)] backdrop-blur-xl",
-        error
-          ? "border-rose-200 bg-rose-50"
-          : waiting
-            ? "border-amber-200 bg-amber-50"
-            : "border-sky-100 bg-[linear-gradient(135deg,rgba(255,255,255,0.94),rgba(235,249,255,0.86))]"
-      )}
-    >
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <span
-            className={cn(
-              "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl",
-              error
-                ? "bg-rose-100 text-rose-600"
-                : waiting
-                  ? "bg-amber-100 text-amber-700"
-                  : done
-                    ? "bg-emerald-50 text-emerald-600"
-                    : "bg-sky-50 text-[var(--ar-sky)]"
-            )}
-          >
-            {done ? <CheckCircle2 size={18} /> : error || waiting ? <Activity size={18} /> : <Loader2 size={18} className="animate-spin" />}
-          </span>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-[var(--ar-black)]">{status.label}</p>
-            <p className="text-xs text-[var(--ar-stone)]">
-              {error
-                ? "Запрос не выполнен — исправьте причину и отправьте сообщение снова"
-                : needsToken
-                  ? "Добавьте токен в секреты проекта — после этого запуск продолжится"
-                  : waiting
-                    ? "Ответьте в чат, и агент продолжит сборку"
-                    : done
-                      ? "Статус подтверждён по деплою"
-                      : "Статус сборки обновляется в реальном времени"}
-            </p>
-            {isRunning && elapsedSeconds !== null ? (
-              <p className="mt-0.5 text-[11px] tabular-nums text-[var(--ar-stone)]">
-                {formatElapsed(elapsedSeconds)}
-                {liveChars > 0 ? ` · ≈${estimateTokens(liveChars).toLocaleString("ru-RU")} токенов` : ""}
-              </p>
-            ) : null}
-          </div>
-        </div>
-        <span className="hidden rounded-full border border-white/70 bg-white/70 px-2.5 py-1 text-xs font-medium text-[var(--ar-mist)] sm:inline-flex">
-          {error
-            ? "ошибка"
-            : needsToken
-              ? "нужен токен"
-              : waiting
-                ? "ожидание"
-                : done
-                  ? "готово"
-                  : "агент работает"}
-        </span>
-      </div>
-
-      {!error && !waiting ? (
-        <div className="mt-3 grid gap-1.5" style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }}>
-          {steps.map((step, index) => (
-            <span
-              key={step}
-              className={cn(
-                "h-1.5 rounded-full transition-colors",
-                index <= currentIndex ? "bg-[var(--ar-sky)]" : "bg-black/8",
-                status.state === "running" && index === currentIndex && "animate-pulse"
-              )}
-            />
-          ))}
-        </div>
-      ) : null}
-
-      {needsSecret ? (
-        <div className="mt-3 flex flex-wrap gap-2">
-          <a
-            href={secretsHref}
-            className="inline-flex items-center rounded-lg bg-[var(--ar-black)] px-3 py-1.5 text-xs font-medium text-white hover:bg-black/85"
-          >
-            В секреты
-          </a>
-          {needsToken ? (
-            <a
-              href={helpHref}
-              className="inline-flex items-center rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50"
-            >
-              Как получить токен
-            </a>
-          ) : null}
-          <button
-            type="button"
-            onClick={onContinue}
-            className="inline-flex items-center rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
-          >
-            Настроил секрет, продолжай
-          </button>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-// Kept in sync with backend/src/services/agent/prompt.py's REPORT_HEADING - both the model's
-// own end-of-turn self-report and the platform's objective timing/usage line land under this
-// exact heading, so it can be split out and rendered as a separate, muted, collapsible block
-// instead of ordinary chat prose (the "wall of text" complaint this was written to address).
-const REPORT_HEADING = "### Отчёт о выполнении";
-
-function splitReport(content: string): { main: string; report: string } {
-  // lastIndexOf, not indexOf: orchestrator mode's per-part narration ("Часть N/M") can each
-  // include their own "### Отчёт о выполнении" (the model writes one per subtask, following the
-  // same system-prompt instruction every turn gets) - splitting on the *first* one collapsed
-  // everything from Часть 1 onward, including Часть 2/3's still-streaming live text, into one
-  // permanently-collapsed box. Only the very last heading - the final part's own report plus the
-  // platform's appended objective timing (see chat.py's footer logic) - should collapse.
-  const idx = content.lastIndexOf(REPORT_HEADING);
-  if (idx === -1) return { main: content, report: "" };
-  return {
-    main: content.slice(0, idx).trimEnd(),
-    report: content.slice(idx + REPORT_HEADING.length).trim(),
-  };
-}
-
-function MessageBody({
-  message,
-  isStreaming,
-}: {
-  message: ChatMessage;
-  isStreaming: boolean;
-}) {
-  if (message.role === "assistant" && isStreaming && !message.content) {
-    return <AiTypingIndicator />;
-  }
-
-  if (message.role === "assistant") {
-    const { main, report } = splitReport(message.content);
-    return (
-      <div className="cursor-chat-assistant prose-chat prose-chat-cursor text-[15px] text-[var(--ar-black)]">
-        <ReactMarkdown rehypePlugins={[rehypeHighlight]}>{main}</ReactMarkdown>
-        {/* Hide while streaming so a mid-turn report heading doesn't render as a closed pill
-            stacked on the live tool-activity panel (same title, two borders). */}
-        {report && !isStreaming ? (
-          <ExecutionReportShell collapsible>
-            <div className="prose-chat prose-chat-compact scrollbar-airy max-h-64 overflow-y-auto px-3 py-2 text-[var(--ar-mist)]">
-              <ReactMarkdown rehypePlugins={[rehypeHighlight]}>{report}</ReactMarkdown>
-            </div>
-          </ExecutionReportShell>
-        ) : null}
-      </div>
-    );
-  }
-
-  return <p className="whitespace-pre-wrap text-[15px] leading-[1.55] text-[var(--ar-black)]">{message.content}</p>;
-}
-
 export default function ProjectChatPage() {
   const params = useParams<{ id: string }>();
   const searchParams = useSearchParams();
@@ -431,7 +116,7 @@ export default function ProjectChatPage() {
   const [providers, setProviders] = useState<ProvidersType | null>(null);
   const [selectedProvider, setSelectedProvider] = useState<string>(() => readSelectedProvider());
   const [providerMenuOpen, setProviderMenuOpen] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const [stickToBottom, setStickToBottom] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const providerMenuRef = useRef<HTMLDivElement>(null);
   const repairStartedRef = useRef(false);
@@ -466,9 +151,13 @@ export default function ProjectChatPage() {
   }, [messages]);
 
   useEffect(() => {
-    if (!projectId || !chatId) return;
-    syncFromRuntime();
-    return subscribeChatStream(projectId, chatId, syncFromRuntime);
+    if (!projectId || !chatId) return undefined;
+    const unsub = subscribeChatStream(projectId, chatId, syncFromRuntime);
+    const timer = window.setTimeout(() => syncFromRuntime(), 0);
+    return () => {
+      window.clearTimeout(timer);
+      unsub();
+    };
   }, [projectId, chatId, syncFromRuntime]);
 
   useEffect(() => {
@@ -478,7 +167,7 @@ export default function ProjectChatPage() {
   }, []);
 
   useEffect(() => {
-    if (!providerMenuOpen) return;
+    if (!providerMenuOpen) return undefined;
     const onClickOutside = (event: MouseEvent) => {
       if (providerMenuRef.current && !providerMenuRef.current.contains(event.target as Node)) {
         setProviderMenuOpen(false);
@@ -515,7 +204,6 @@ export default function ProjectChatPage() {
     const loadMessages = async () => {
       if (!projectId || !chatId) return;
       const snap = getChatStreamSnapshot(projectId, chatId);
-      // Keep live stream messages when returning from another project tab.
       if (snap.loading && snap.messages) {
         messagesRef.current = snap.messages;
         setMessages(snap.messages);
@@ -543,10 +231,6 @@ export default function ProjectChatPage() {
     void loadMessages();
   }, [projectId, chatId]);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: loading ? "smooth" : "auto" });
-  }, [agentStatus?.label, loading, messages]);
-
   const filteredChats = useMemo(() => {
     const query = search.trim().toLowerCase();
     const sorted = [...chats].sort((a, b) => {
@@ -570,6 +254,7 @@ export default function ProjectChatPage() {
     setPendingFiles([]);
     updateAgentStatus(null);
     setMobilePanel("chat");
+    setStickToBottom(true);
   };
 
   const togglePin = (id: string) => {
@@ -605,16 +290,23 @@ export default function ProjectChatPage() {
 
   const removePendingFile = async (file: ChatFileType) => {
     if (!projectId || !chatId) return;
-    await deleteChatFile(projectId, chatId, file.id);
-    setPendingFiles((prev) => prev.filter((item) => item.id !== file.id));
+    try {
+      await deleteChatFile(projectId, chatId, file.id);
+      setPendingFiles((prev) => prev.filter((item) => item.id !== file.id));
+    } catch (err) {
+      setChatError(err instanceof Error ? err.message : "Не удалось удалить файл");
+    }
   };
 
   const onStop = () => {
-    if (projectId && chatId) abortChatStream(projectId, chatId);
+    if (!projectId || !chatId) return;
+    abortChatStream(projectId, chatId);
   };
 
   const runTurn = async (userMessage: string, attachments: ChatFileType[]) => {
     if ((!userMessage.trim() && attachments.length === 0) || !projectId || !chatId) return;
+    setChatError("");
+    setStickToBottom(true);
     const displayUserContent = (userMessage || "Прикреплены файлы").replace(
       /\b\d{6,}:[A-Za-z0-9_-]{20,}\b/g,
       "[TELEGRAM_BOT_TOKEN]"
@@ -629,19 +321,17 @@ export default function ProjectChatPage() {
       seedMessages: seed,
       createMessage: () => createMessage(projectId, chatId, userMessage, attachments.map((f) => f.id)),
       streamRequest: (signal) =>
-        streamChat(
-          projectId,
-          chatId,
-          userMessage,
-          attachments.map((f) => f.id),
-          { provider: selectedProvider || undefined, signal }
-        ),
+        streamChat(projectId, chatId, userMessage, attachments.map((f) => f.id), {
+          provider: selectedProvider || undefined,
+          signal,
+        }),
     });
   };
 
   const runRepairTurn = async (errorLog?: string | null) => {
     if (!projectId || !chatId || loading) return;
     setMobilePanel("chat");
+    setStickToBottom(true);
     const seed = messagesRef.current;
     const note = errorLog?.trim()
       ? "Проверить и исправить по логам с страницы логов"
@@ -721,10 +411,10 @@ export default function ProjectChatPage() {
     loading && streamingMessage?.role === "assistant" ? streamingMessage.content.length : 0;
 
   return (
-    <div className="accent-ring grid min-h-[calc(100dvh-14rem)] gap-0 overflow-hidden rounded-[var(--ar-radius-lg)] border border-black/[0.06] bg-white lg:grid-cols-[240px_1fr]">
+    <div className="grid min-h-[calc(100dvh-11rem)] gap-0 overflow-hidden rounded-[var(--ar-radius-md)] border border-black/[0.08] bg-white lg:grid-cols-[220px_1fr]">
       <aside
         className={cn(
-          "flex flex-col border-black/[0.06] bg-[#fafbfc] lg:border-r",
+          "flex flex-col border-black/[0.08] bg-[#f7f8fa] lg:border-r",
           mobilePanel === "chat" ? "hidden lg:flex" : "flex"
         )}
       >
@@ -732,21 +422,21 @@ export default function ProjectChatPage() {
           <p className="text-sm font-medium text-[var(--ar-black)]">Чаты</p>
           <button
             type="button"
-            onClick={onNewChat}
-            className="rounded-lg p-1.5 text-[var(--ar-stone)] hover:bg-black/5 hover:text-[var(--ar-black)]"
+            onClick={() => void onNewChat()}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-[0.5rem] text-[var(--ar-stone)] hover:bg-black/5 hover:text-[var(--ar-black)]"
             aria-label="Новый чат"
           >
-            <Plus size={16} />
+            <Plus size={16} aria-hidden />
           </button>
         </div>
 
         <div className="relative border-b border-black/8 px-3 py-2">
-          <Search size={14} className="absolute left-6 top-1/2 -translate-y-1/2 text-[var(--ar-stone)]" />
+          <Search size={14} className="absolute left-6 top-1/2 -translate-y-1/2 text-[var(--ar-stone)]" aria-hidden />
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Поиск"
-            className="w-full rounded-lg border-0 bg-white py-2 pl-8 pr-3 text-sm outline-none ring-1 ring-black/10 placeholder:text-[var(--ar-stone)] focus:ring-black/20"
+            className="w-full rounded-[0.5rem] border-0 bg-white py-2 pl-8 pr-3 text-sm outline-none ring-1 ring-black/10 placeholder:text-[var(--ar-stone)] focus:ring-black/20"
           />
         </div>
 
@@ -756,115 +446,76 @@ export default function ProjectChatPage() {
               key={chat.id}
               className={cn(
                 "mb-0.5 flex items-center gap-0.5 rounded-[var(--ar-radius-sm)] px-2 py-1.5",
-                chatId === chat.id
-                  ? "bg-[var(--ar-accent-gradient-soft)] shadow-[inset_0_0_0_1px_rgba(35,136,255,0.16)]"
-                  : "hover:bg-black/[0.03]"
+                chat.id === chatId ? "bg-white shadow-sm ring-1 ring-black/8" : "hover:bg-white/70"
               )}
             >
               <button
                 type="button"
-                className={cn(
-                  "flex-1 truncate text-left text-sm",
-                  chatId === chat.id ? "font-medium text-[var(--ar-black)]" : "text-[var(--ar-mist)]"
-                )}
+                className="min-w-0 flex-1 truncate text-left text-sm"
                 onClick={() => {
                   setChatId(chat.id);
                   setMobilePanel("chat");
+                  setStickToBottom(true);
                 }}
               >
-                {chat.title}
+                {chat.title || "Без названия"}
               </button>
               <button
                 type="button"
-                className="rounded p-1 text-[var(--ar-stone)] hover:text-[var(--ar-black)]"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-[0.5rem] text-[var(--ar-stone)] hover:bg-black/5"
                 onClick={() => togglePin(chat.id)}
                 aria-label={pinned.includes(chat.id) ? "Открепить" : "Закрепить"}
               >
-                {pinned.includes(chat.id) ? <Pin size={12} /> : <PinOff size={12} />}
+                {pinned.includes(chat.id) ? <PinOff size={14} aria-hidden /> : <Pin size={14} aria-hidden />}
               </button>
             </div>
           ))}
         </div>
       </aside>
 
-      <section className={cn("flex min-h-0 min-w-0 flex-col", mobilePanel === "list" ? "hidden lg:flex" : "flex")}>
-        <div className="flex items-center gap-2 border-b border-black/8 px-4 py-2.5 lg:hidden">
+      <section
+        className={cn(
+          "flex min-h-0 flex-col",
+          mobilePanel === "list" ? "hidden lg:flex" : "flex"
+        )}
+      >
+        <div className="flex items-center gap-2 border-b border-black/8 px-3 py-2.5 lg:px-4">
           <button
             type="button"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-[0.5rem] text-[var(--ar-stone)] hover:bg-black/5 lg:hidden"
             onClick={() => setMobilePanel("list")}
-            className="rounded-lg p-1.5 hover:bg-black/5"
-            aria-label="К списку"
+            aria-label="К списку чатов"
           >
-            <ArrowLeft size={16} />
+            <ArrowLeft size={16} aria-hidden />
           </button>
           <p className="truncate text-sm font-medium">{currentTitle}</p>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
-            {messages.length === 0 ? (
-              <div className="flex min-h-[40vh] flex-col items-center justify-center text-center">
-                <p className="text-lg font-medium text-[var(--ar-black)]">Чем помочь?</p>
-                <p className="mt-2 max-w-sm text-sm text-[var(--ar-stone)]">
-                  Опишите сайт или бота — AIRuntime соберёт и задеплоит проект.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-8">
-                {messages.map((message, index) => {
-                  const isStreaming = loading && index === messages.length - 1 && message.role === "assistant";
+        <MessageList
+          messages={messages}
+          loading={loading}
+          stickToBottom={stickToBottom}
+          onStickChange={setStickToBottom}
+          bottomSlot={
+            <div className="space-y-3 pt-2">
+              {loading && toolActivity.length > 0 ? <ToolActivityFeed items={toolActivity} /> : null}
+              {agentStatus && projectId ? (
+                <AgentStatusPanel
+                  status={agentStatus}
+                  projectId={projectId}
+                  turnStartedAt={turnStartedAt}
+                  liveChars={liveStreamChars}
+                  onContinue={() => void runTurn("Настроил секрет, можешь продолжать.", [])}
+                />
+              ) : null}
+            </div>
+          }
+        />
 
-                  if (message.role === "user") {
-                    return (
-                      <div key={`${message.role}-${index}`} className="flex justify-end">
-                        <div className="max-w-[min(100%,42rem)] rounded-2xl bg-[#f4f4f5] px-4 py-2.5">
-                          {message.attachments?.length ? (
-                            <div className="mb-2 flex flex-wrap gap-1.5">
-                              {message.attachments.map((file) => (
-                                <a
-                                  key={file.id}
-                                  href={file.download_url ?? "#"}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="rounded-md bg-white/80 px-2 py-0.5 text-xs text-[var(--ar-mist)] hover:underline"
-                                >
-                                  {file.original_filename}
-                                </a>
-                              ))}
-                            </div>
-                          ) : null}
-                          <MessageBody message={message} isStreaming={false} />
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  return (
-                    <div key={`${message.role}-${index}`} className="w-full">
-                      <MessageBody message={message} isStreaming={isStreaming} />
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-            {loading && toolActivity.length > 0 ? <ToolActivityFeed items={toolActivity} /> : null}
-            {agentStatus ? (
-              <AgentStatusPanel
-                status={agentStatus}
-                projectId={projectId}
-                turnStartedAt={turnStartedAt}
-                liveChars={liveStreamChars}
-                onContinue={() => void runTurn("Настроил секрет, можешь продолжать.", [])}
-              />
-            ) : null}
-            <div ref={bottomRef} className="h-4" />
-          </div>
-        </div>
-
-        <div className="border-t border-black/8 bg-white/90 px-4 py-3 backdrop-blur-sm sm:px-6">
+        <div className="border-t border-black/8 bg-white px-4 py-3 sm:px-6">
           <div className="mx-auto w-full max-w-3xl">
             {pendingFiles.length > 0 ? (
-              <div className="mb-2 flex items-center justify-between rounded-t-xl border border-b-0 border-black/10 bg-[#f4f4f5] px-3 py-2 text-xs text-[var(--ar-mist)]">
+              <div className="mb-2 flex items-center justify-between rounded-t-[var(--ar-radius-md)] border border-b-0 border-black/10 bg-[#f4f4f5] px-3 py-2 text-xs text-[var(--ar-mist)]">
                 <span>
                   {pendingFiles.length} {pendingFiles.length === 1 ? "файл" : "файла"}
                 </span>
@@ -879,25 +530,25 @@ export default function ProjectChatPage() {
             ) : null}
 
             {bootstrapError ? (
-              <p className="mb-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              <p className="mb-2 rounded-[0.5rem] border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
                 {bootstrapError}
               </p>
             ) : null}
             {chatError ? (
-              <p className="mb-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              <p className="mb-2 rounded-[0.5rem] border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
                 {chatError}
               </p>
             ) : null}
 
             {queue.length > 0 ? (
-              <div className="mb-2 space-y-1.5 rounded-xl border border-black/10 bg-[#fafafa] p-2">
+              <div className="mb-2 space-y-1.5 rounded-[var(--ar-radius-md)] border border-black/10 bg-[#fafafa] p-2">
                 <p className="px-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--ar-stone)]">
-                  В очереди - {queue.length}
+                  В очереди — {queue.length}
                 </p>
                 {queue.map((item, index) => (
                   <div
                     key={item.id}
-                    className="flex items-center gap-2 rounded-lg border border-black/8 bg-white px-2.5 py-1.5"
+                    className="flex items-center gap-2 rounded-[0.5rem] border border-black/8 bg-white px-2.5 py-1.5"
                   >
                     <span className="shrink-0 text-xs font-medium text-[var(--ar-stone)]">{index + 1}.</span>
                     <span className="min-w-0 flex-1 truncate text-sm text-[var(--ar-black)]">
@@ -907,17 +558,16 @@ export default function ProjectChatPage() {
                       type="button"
                       onClick={() => onEditQueued(item.id)}
                       className="shrink-0 rounded-md px-1.5 py-1 text-xs text-[var(--ar-mist)] hover:bg-black/5 hover:text-[var(--ar-black)]"
-                      aria-label="Изменить"
                     >
                       Изменить
                     </button>
                     <button
                       type="button"
                       onClick={() => onRemoveQueued(item.id)}
-                      className="shrink-0 rounded-md p-1 text-[var(--ar-stone)] hover:bg-black/5 hover:text-rose-600"
+                      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[var(--ar-stone)] hover:bg-black/5 hover:text-rose-600"
                       aria-label="Убрать из очереди"
                     >
-                      <X size={14} />
+                      <X size={14} aria-hidden />
                     </button>
                   </div>
                 ))}
@@ -925,13 +575,13 @@ export default function ProjectChatPage() {
             ) : null}
 
             <form
-              onSubmit={onSubmit}
+              onSubmit={(event) => void onSubmit(event)}
               className={cn(
-                "overflow-hidden rounded-2xl border border-black/12 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.06)] transition-colors focus-within:border-[var(--ar-sky)]/35 focus-within:shadow-[0_4px_18px_rgba(35,136,255,0.1)]",
+                "overflow-hidden rounded-[var(--ar-radius-md)] border border-black/12 bg-white transition-colors focus-within:border-[var(--ar-sky)]/40",
                 pendingFiles.length > 0 && "rounded-t-none border-t-0"
               )}
             >
-              <input ref={fileInputRef} type="file" className="hidden" multiple onChange={onFilesSelected} />
+              <input ref={fileInputRef} type="file" className="hidden" multiple onChange={(e) => void onFilesSelected(e)} />
 
               {pendingFiles.length > 0 ? (
                 <div className="flex flex-wrap gap-1.5 border-b border-black/8 px-3 py-2">
@@ -942,7 +592,7 @@ export default function ProjectChatPage() {
                     >
                       {file.original_filename}
                       <button type="button" onClick={() => void removePendingFile(file)} aria-label="Убрать">
-                        <X size={11} />
+                        <X size={11} aria-hidden />
                       </button>
                     </span>
                   ))}
@@ -950,10 +600,10 @@ export default function ProjectChatPage() {
               ) : null}
 
               <AutoTextarea
-                className="min-h-[52px] resize-none border-0 bg-transparent px-4 py-3.5 text-[15px] shadow-none ring-0 placeholder:text-[var(--ar-stone)] focus:border-0 focus:ring-0"
+                className="min-h-[52px] max-h-48 resize-none border-0 bg-transparent px-4 py-3.5 text-[15px] shadow-none ring-0 placeholder:text-[var(--ar-stone)] focus:border-0 focus:ring-0"
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
-                placeholder={bootstrapping ? "Загрузка..." : "Опишите задачу (можно упомянуть файл через @)"}
+                placeholder={bootstrapping ? "Загрузка..." : "Опишите задачу"}
                 disabled={bootstrapping || !chatId}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
@@ -963,22 +613,22 @@ export default function ProjectChatPage() {
                 }}
               />
 
-              <div className="flex items-center justify-between px-3 pb-2.5 pt-0">
-                <div className="relative flex items-center gap-1.5" ref={providerMenuRef}>
+              <div className="flex items-center justify-between gap-2 px-3 pb-2.5 pt-0">
+                <div className="relative flex min-w-0 items-center gap-1.5" ref={providerMenuRef}>
                   <button
                     type="button"
                     onClick={() => setProviderMenuOpen((prev) => !prev)}
-                    className="inline-flex items-center gap-1 rounded-full border border-black/10 bg-[#fafafa] px-2.5 py-1 text-xs font-medium text-[var(--ar-mist)] hover:bg-black/5"
+                    className="inline-flex min-h-10 max-w-[12rem] items-center gap-1 truncate rounded-[0.5rem] border border-black/10 bg-[#fafafa] px-2.5 text-xs font-medium text-[var(--ar-mist)] hover:bg-black/5"
                   >
                     {selectedProvider
                       ? (PROVIDER_LABELS[selectedProvider] ?? selectedProvider)
                       : providers?.auto_model
                         ? `Авто · ${providers.auto_model}`
-                        : "Авто (топ модели)"}
-                    <ChevronDown size={12} className="opacity-50" />
+                        : "Авто"}
+                    <ChevronDown size={12} className="opacity-50" aria-hidden />
                   </button>
                   {providerMenuOpen ? (
-                    <div className="absolute bottom-full left-0 mb-2 w-56 overflow-hidden rounded-xl border border-black/10 bg-white py-1 shadow-lg">
+                    <div className="absolute bottom-full left-0 mb-2 w-56 overflow-hidden rounded-[var(--ar-radius-md)] border border-black/10 bg-white py-1 shadow-lg">
                       <button
                         type="button"
                         onClick={() => {
@@ -991,12 +641,7 @@ export default function ProjectChatPage() {
                           !selectedProvider && "font-medium text-[var(--ar-black)]"
                         )}
                       >
-                        <span>Авто (топ модели)</span>
-                        <span className="text-[10px] font-normal text-[var(--ar-stone)]">
-                          {providers?.auto_model
-                            ? `${PROVIDER_LABELS[providers.auto_provider ?? ""] ?? providers.auto_provider ?? "AI"} · ${providers.auto_model}`
-                            : "gpt-5.4-mini+ по ключу"}
-                        </span>
+                        <span>Авто</span>
                       </button>
                       {(providers?.supported ?? []).map((name) => {
                         const configured = providers?.configured?.[name];
@@ -1016,11 +661,6 @@ export default function ProjectChatPage() {
                             )}
                           >
                             <span>{PROVIDER_LABELS[name] ?? name}</span>
-                            <span className="text-[10px] text-[var(--ar-stone)]">
-                              {!configured
-                                ? "нет ключа"
-                                : (providers?.defaults?.[name] ?? providers?.top_models?.[name]?.[0] ?? "")}
-                            </span>
                           </button>
                         );
                       })}
@@ -1028,37 +668,44 @@ export default function ProjectChatPage() {
                   ) : null}
                 </div>
                 <div className="flex items-center gap-1">
+                  <p className="mr-1 hidden text-[11px] text-[var(--ar-stone)] sm:block">
+                    Enter — отправить · Shift+Enter — строка
+                  </p>
                   <button
                     type="button"
                     onClick={onPickFiles}
                     disabled={uploading || !chatId}
-                    className="rounded-lg p-2 text-[var(--ar-stone)] hover:bg-black/5 hover:text-[var(--ar-black)] disabled:opacity-40"
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-[0.5rem] text-[var(--ar-stone)] hover:bg-black/5 hover:text-[var(--ar-black)] disabled:opacity-40"
                     aria-label="Прикрепить"
                   >
-                    <Paperclip size={18} />
+                    <Paperclip size={18} aria-hidden />
                   </button>
                   {loading ? (
                     <button
                       type="button"
                       onClick={onStop}
-                      className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--ar-black)] text-white shadow-[0_6px_18px_rgba(7,20,38,0.28)] hover:bg-black/85"
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-[0.5rem] bg-[var(--ar-black)] text-white hover:bg-black/85"
                       aria-label="Прервать генерацию"
                     >
-                      <Square size={13} strokeWidth={2.5} fill="currentColor" />
+                      <Square size={13} strokeWidth={2.5} fill="currentColor" aria-hidden />
                     </button>
                   ) : null}
                   <button
                     type="submit"
                     disabled={bootstrapping || uploading || !canSend}
                     className={cn(
-                      "flex h-8 w-8 items-center justify-center rounded-full transition-all",
+                      "inline-flex h-10 w-10 items-center justify-center rounded-[0.5rem] transition-colors",
                       canSend && !bootstrapping
-                        ? "bg-[image:var(--ar-accent-gradient)] text-white shadow-[0_6px_18px_rgba(35,136,255,0.32)] hover:brightness-[1.06]"
+                        ? "bg-[var(--ar-sky)] text-white hover:brightness-105"
                         : "bg-black/10 text-[var(--ar-stone)]"
                     )}
                     aria-label={loading ? "Добавить в очередь" : "Отправить"}
                   >
-                    {loading ? <Plus size={16} strokeWidth={2.5} /> : <ArrowUp size={16} strokeWidth={2.5} />}
+                    {loading ? (
+                      <Plus size={16} strokeWidth={2.5} aria-hidden />
+                    ) : (
+                      <ArrowUp size={16} strokeWidth={2.5} aria-hidden />
+                    )}
                   </button>
                 </div>
               </div>

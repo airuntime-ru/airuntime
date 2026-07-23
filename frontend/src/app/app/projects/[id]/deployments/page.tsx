@@ -166,8 +166,10 @@ export default function ProjectDeploymentsPage() {
   useEffect(() => {
     // Poll faster when an expanded row is actively building so logs feel live.
     if (!hasActiveDeployments && !hasExpandedActive) return;
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
     const intervalMs = hasExpandedActive ? 2000 : 5000;
     const timer = window.setInterval(() => {
+      if (document.visibilityState === "hidden") return;
       void loadPage({ silent: true });
     }, intervalMs);
     return () => window.clearInterval(timer);

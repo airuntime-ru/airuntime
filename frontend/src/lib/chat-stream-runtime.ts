@@ -58,6 +58,7 @@ type InternalSession = ChatStreamSnapshot & {
 };
 
 const sessions = new Map<string, InternalSession>();
+const projectListeners = new Map<string, Set<() => void>>();
 
 function storageKey(projectId: string, chatId: string) {
   // Keep the same key chat/page.tsx used historically.
@@ -124,6 +125,14 @@ function notify(session: InternalSession) {
       listener();
     } catch {
       // subscriber errors must not break the stream loop
+    }
+  });
+  const projectSet = projectListeners.get(session.projectId);
+  projectSet?.forEach((listener) => {
+    try {
+      listener();
+    } catch {
+      // ignore
     }
   });
 }
@@ -234,6 +243,20 @@ export function subscribeChatStream(
   };
 }
 
+/** Subscribe to any in-memory stream activity for a project (all chats). */
+export function subscribeProjectStreams(projectId: string, listener: () => void): () => void {
+  let set = projectListeners.get(projectId);
+  if (!set) {
+    set = new Set();
+    projectListeners.set(projectId, set);
+  }
+  set.add(listener);
+  return () => {
+    set?.delete(listener);
+    if (set && set.size === 0) projectListeners.delete(projectId);
+  };
+}
+
 export function setChatStreamMessages(
   projectId: string,
   chatId: string,
@@ -338,11 +361,34 @@ async function runStreamLoop(projectId: string, chatId: string, handlers: Stream
 
   // This tab owns the fetch below - every state change also goes out to any other tab with the
   // same chat open (see the cross-tab sync section above snapshotOf/broadcastState).
-  const syncSession = () => {
-    notify(session);
+  let chunkFlushRaf = 0;
+  let broadcastThrottleTimer = 0;
+  let pendingBroadcast = false;
+
+  const flushBroadcast = () => {
+    broadcastThrottleTimer = 0;
+    if (!pendingBroadcast) return;
+    pendingBroadcast = false;
     broadcastState(projectId, chatId, session);
   };
-  syncSession();
+
+  const syncSession = (options?: { immediateBroadcast?: boolean }) => {
+    notify(session);
+    if (options?.immediateBroadcast) {
+      if (broadcastThrottleTimer) {
+        window.clearTimeout(broadcastThrottleTimer);
+        broadcastThrottleTimer = 0;
+      }
+      pendingBroadcast = false;
+      broadcastState(projectId, chatId, session);
+      return;
+    }
+    pendingBroadcast = true;
+    if (!broadcastThrottleTimer) {
+      broadcastThrottleTimer = window.setTimeout(flushBroadcast, 120);
+    }
+  };
+  syncSession({ immediateBroadcast: true });
 
   const applyStatus = (status: AgentStatus) => {
     // A "tool" phase frame with state done/error is one finished tool call (e.g. a shell
@@ -366,18 +412,34 @@ async function runStreamLoop(projectId: string, chatId: string, handlers: Stream
         },
       ];
     }
+    syncSession({ immediateBroadcast: true });
+  };
+
+  let pendingChunk = "";
+  const flushAssistantChunks = () => {
+    chunkFlushRaf = 0;
+    if (!pendingChunk || !session.messages?.length) {
+      pendingChunk = "";
+      return;
+    }
+    const lastIndex = session.messages.length - 1;
+    const last = session.messages[lastIndex];
+    if (last?.role !== "assistant") {
+      pendingChunk = "";
+      return;
+    }
+    const next = session.messages.slice();
+    next[lastIndex] = { ...last, content: last.content + pendingChunk };
+    pendingChunk = "";
+    session.messages = next;
     syncSession();
   };
 
   const appendAssistant = (chunk: string) => {
-    if (!session.messages?.length) return;
-    const copy = [...session.messages];
-    const lastIndex = copy.length - 1;
-    const last = copy[lastIndex];
-    if (last?.role !== "assistant") return;
-    copy[lastIndex] = { ...last, content: last.content + chunk };
-    session.messages = copy;
-    syncSession();
+    pendingChunk += chunk;
+    if (!chunkFlushRaf) {
+      chunkFlushRaf = window.requestAnimationFrame(flushAssistantChunks);
+    }
   };
 
   try {
@@ -450,15 +512,25 @@ async function runStreamLoop(projectId: string, chatId: string, handlers: Stream
         }
       }
     }
-    syncSession();
+    syncSession({ immediateBroadcast: true });
   } finally {
+    if (chunkFlushRaf) {
+      window.cancelAnimationFrame(chunkFlushRaf);
+      chunkFlushRaf = 0;
+      if (pendingChunk) flushAssistantChunks();
+    }
+    if (broadcastThrottleTimer) {
+      window.clearTimeout(broadcastThrottleTimer);
+      broadcastThrottleTimer = 0;
+      if (pendingBroadcast) broadcastState(projectId, chatId, session);
+    }
     if (session.controller === controller) {
       session.controller = null;
     }
     session.isLeader = false;
     session.loading = false;
     session.turnStartedAt = null;
-    syncSession();
+    syncSession({ immediateBroadcast: true });
   }
 }
 
