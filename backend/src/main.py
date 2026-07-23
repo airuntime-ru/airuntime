@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
@@ -5,8 +6,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from src.api.dependencies.rate_limit import enforce_rate_limit
-from src.api.routers import (
+from src.core.logging_setup import configure_logging
+
+configure_logging()
+
+from src.api.dependencies.rate_limit import enforce_rate_limit  # noqa: E402
+from src.api.routers import (  # noqa: E402
     auth,
     billing,
     chat,
@@ -18,12 +23,15 @@ from src.api.routers import (
     secrets,
     telegram,
 )
-from src.core.config import settings
-from src.services.storage import storage_service
+from src.core.config import settings  # noqa: E402
+from src.services.storage import storage_service  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    logger.info("AIRuntime API starting (environment=%s)", settings.environment)
     storage_service.ensure_bucket()
     yield
 

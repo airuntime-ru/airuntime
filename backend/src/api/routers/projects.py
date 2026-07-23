@@ -1,3 +1,4 @@
+import logging
 import shutil
 from uuid import UUID
 
@@ -33,6 +34,8 @@ from src.services.project_subdomain import assert_subdomain_available, normalize
 from src.services.secrets import TELEGRAM_BOT_TOKEN_KEY
 from src.services.system_settings import get_system_setting_number
 from src.services.workspace import project_dir
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -223,8 +226,25 @@ def delete_project(
     )
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    submit_control_job(action="cleanup", project_id=str(project.id))
-    shutil.rmtree(project_dir(project.id), ignore_errors=True)
+    # Best-effort, not best-effort-and-silent: deletion must not get stuck on a Docker/worker
+    # hiccup (the user asked their data gone, a transient failure shouldn't trap them with an
+    # undeletable project) - but a failure here means containers/volumes/images for this project
+    # are about to become unrecoverable orphans the moment the row below is gone, so it has to be
+    # logged loudly enough to find and clean up by hand.
+    cleanup_result = submit_control_job(action="cleanup", project_id=str(project.id))
+    if not cleanup_result or not cleanup_result.get("ok"):
+        logger.warning(
+            "Docker cleanup did not confirm success for deleted project %s (result=%r) - "
+            "containers/volumes/images for this project may be orphaned; check `docker ps -a` / "
+            "`docker images` for name/label airuntime.project_id=%s",
+            project.id,
+            cleanup_result,
+            project.id,
+        )
+    workspace_path = project_dir(project.id)
+    shutil.rmtree(workspace_path, ignore_errors=True)
+    if workspace_path.exists():
+        logger.warning("Workspace directory still present after rmtree: %s", workspace_path)
     db.delete(project)
     db.commit()
     return {"status": "deleted"}

@@ -22,13 +22,13 @@ class AgentRunMetric(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     project_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     chat_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("chats.id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("chats.id", ondelete="CASCADE"), nullable=False
     )
     message_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("messages.id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("messages.id", ondelete="CASCADE"), nullable=False
     )
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
     model: Mapped[str] = mapped_column(String(128), nullable=False)

@@ -7,6 +7,7 @@ same single worker to pop its own control job.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from src.db.models.project import Project
@@ -15,6 +16,8 @@ from src.db.session import SessionLocal
 from src.services.artifacts import try_build_project_image
 from src.services.deployment.docker_adapter import DockerDeploymentAdapter
 from src.services.project_services import teardown_service_containers
+
+logger = logging.getLogger(__name__)
 
 
 def run_control_action(
@@ -30,6 +33,7 @@ def run_control_action(
         if action == "cleanup" and project_id:
             adapter = DockerDeploymentAdapter()
             adapter.stop_project(str(project_id))
+            adapter.remove_project_images(str(project_id))
             db = SessionLocal()
             try:
                 has_services = (
@@ -57,4 +61,5 @@ def run_control_action(
                 db.close()
         return {"ok": True}
     except Exception as exc:  # noqa: BLE001 - always report back
+        logger.exception("Control action %r failed for project %s", action, project_id)
         return {"ok": False, "error": str(exc)}

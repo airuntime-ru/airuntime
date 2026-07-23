@@ -1,8 +1,15 @@
 name: airuntime
 
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   postgres:
     image: postgres:16
+    logging: *default-logging
     environment:
       POSTGRES_DB: airuntime
       POSTGRES_USER: postgres
@@ -19,11 +26,13 @@ services:
 
   redis:
     image: redis:7-alpine
+    logging: *default-logging
     ports:
       - "6379:6379"
 
   minio:
     image: minio/minio:latest
+    logging: *default-logging
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: airuntime
@@ -36,6 +45,7 @@ services:
 
   minio-init:
     image: minio/mc:latest
+    logging: *default-logging
     depends_on:
       - minio
     entrypoint: >
@@ -50,7 +60,9 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+    logging: *default-logging
     environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
       DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/airuntime
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET_KEY: change-me
@@ -64,6 +76,9 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      # Splits a big openai-provider turn into sequential subtasks - see orchestrator.py's
+      # module docstring before flipping this on (least-verified piece of the Codex work).
+      ENABLE_AGENT_ORCHESTRATOR: ${ENABLE_AGENT_ORCHESTRATOR:-false}
       DEPLOYMENT_DEFAULT_IMAGE: nginx:alpine
       S3_ENDPOINT_URL: http://minio:9000
       S3_PUBLIC_ENDPOINT_URL: http://localhost:9000
@@ -88,7 +103,9 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+    logging: *default-logging
     environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
       DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/airuntime
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET_KEY: change-me
@@ -129,6 +146,7 @@ services:
     build:
       context: .
       dockerfile: deployment/codex/Dockerfile
+    logging: *default-logging
     profiles: ["build-only"]
 
   # Narrows the per-turn Codex container's Docker access from the raw host socket down to a
@@ -137,6 +155,7 @@ services:
   # socket, same trust level as before this service existed.
   docker-socket-proxy:
     image: tecnativa/docker-socket-proxy:latest
+    logging: *default-logging
     environment:
       CONTAINERS: 1
       IMAGES: 1
@@ -159,6 +178,7 @@ services:
     build:
       context: .
       dockerfile: admin/Dockerfile
+    logging: *default-logging
     environment:
       DJANGO_SECRET_KEY: change-me
       DJANGO_DEBUG: "true"
@@ -185,6 +205,7 @@ services:
         NEXT_PUBLIC_API_BASE_URL: http://localhost:8000/api/v1
         NEXT_PUBLIC_SITE_URL: http://localhost:3000
         NEXT_PUBLIC_BASE_DOMAIN: airuntime.ru
+    logging: *default-logging
     environment:
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8000/api/v1
       NEXT_PUBLIC_SITE_URL: http://localhost:3000

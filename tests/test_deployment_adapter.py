@@ -67,10 +67,29 @@ class _FakeNetworks:
         return network
 
 
+class _FakeImage:
+    def __init__(self, image_id: str, tags: list[str]) -> None:
+        self.id = image_id
+        self.tags = tags
+
+
+class _FakeImages:
+    def __init__(self) -> None:
+        self._images: list[_FakeImage] = []
+        self.removed_ids: list[str] = []
+
+    def list(self) -> list[_FakeImage]:
+        return list(self._images)
+
+    def remove(self, image: str, force: bool = False) -> None:
+        self.removed_ids.append(image)
+
+
 class _FakeDockerClient:
     def __init__(self) -> None:
         self.containers = _FakeContainers()
         self.networks = _FakeNetworks()
+        self.images = _FakeImages()
 
 
 def test_deploy_uses_traefik_labels_without_host_ports(monkeypatch):
@@ -169,3 +188,28 @@ def test_deploy_cleanup_does_not_remove_postgres_sidecar(monkeypatch):
 
     assert app.removed is True
     assert postgres.removed is False
+
+
+def test_remove_project_images_matches_by_id_fragment_across_type_prefixes(monkeypatch):
+    """_image_tag's prefix (site/bot/mixed/app) follows project.type, which can change over a
+    project's life (reconcile_type_with_workspace/update_project_type_from_prompt) - an image
+    built under an earlier type must still be found and removed on deletion, not just whatever
+    the project's current type would tag today."""
+    client = _FakeDockerClient()
+    monkeypatch.setattr(docker_adapter.docker, "from_env", lambda: client)
+
+    project_id = "55555555-5555-4555-8555-555555555555"
+    other_project_id = "66666666-6666-4666-8666-666666666666"
+    id_fragment = project_id[:12]
+
+    site_image = _FakeImage("img-site", [f"airuntime-generated-site-{id_fragment}:latest"])
+    mixed_image = _FakeImage("img-mixed", [f"airuntime-generated-mixed-{id_fragment}:latest"])
+    other_project_image = _FakeImage(
+        "img-other", [f"airuntime-generated-site-{other_project_id[:12]}:latest"]
+    )
+    unrelated_image = _FakeImage("img-unrelated", ["nginx:alpine"])
+    client.images._images = [site_image, mixed_image, other_project_image, unrelated_image]
+
+    DockerDeploymentAdapter().remove_project_images(project_id)
+
+    assert set(client.images.removed_ids) == {"img-site", "img-mixed"}

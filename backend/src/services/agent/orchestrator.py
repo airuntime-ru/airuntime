@@ -35,6 +35,8 @@ Design choices, and why:
 from __future__ import annotations
 
 import json
+import logging
+import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
@@ -44,6 +46,8 @@ from src.services.agent.events import AgentDone, TextDelta, ToolCallRequested, T
 from src.services.agent.loop import CodingAgentSession
 from src.services.agent.tools import WorkspaceTools
 from src.services.file_context import ImageAttachment
+
+logger = logging.getLogger(__name__)
 
 _MAX_SUBTASKS = 4
 # Below this, a request is almost never a multi-domain build worth an extra planning call and
@@ -105,6 +109,7 @@ async def _plan_subtasks(*, model: str, user_message: str) -> list[Subtask]:
             timeout_seconds=settings.codex_simple_timeout_seconds,
         )
         if not raw:
+            logger.info("Orchestrator planning call returned nothing - running as a single turn")
             return []
         data = json.loads(_strip_code_fence(raw))
         items = data.get("subtasks") if isinstance(data, dict) else None
@@ -120,8 +125,16 @@ async def _plan_subtasks(*, model: str, user_message: str) -> list[Subtask]:
                 subtasks.append(Subtask(title=title, instructions=instructions))
         # A single "subtask" is just the original request with extra steps - only worth the
         # multi-pass overhead once there are genuinely multiple independent pieces.
-        return subtasks if len(subtasks) >= 2 else []
+        if len(subtasks) < 2:
+            return []
+        logger.info(
+            "Orchestrator decomposed request into %d subtasks: %s",
+            len(subtasks),
+            [s.title for s in subtasks],
+        )
+        return subtasks
     except (json.JSONDecodeError, AttributeError, TypeError, KeyError):
+        logger.warning("Orchestrator planning call returned an unusable response", exc_info=True)
         return []
 
 
@@ -199,15 +212,28 @@ async def run_agent_turn(
             workspace=workspace,
             system_prompt=sub_prompt,
         )
+        subtask_started = time.monotonic()
+        logger.info("Orchestrator subtask %d/%d start: %s", index, len(subtasks), subtask.title)
         async for event in sub_session.run(
             history=history, user_message=subtask.instructions, images=images
         ):
             if isinstance(event, AgentDone):
+                elapsed = time.monotonic() - subtask_started
                 if event.reason == "error":
                     last_error = event.error
+                    logger.warning(
+                        "Orchestrator subtask %d/%d failed after %.1fs: %s",
+                        index,
+                        len(subtasks),
+                        elapsed,
+                        event.error,
+                    )
                     yield TextDelta(text=f"\n_Эта часть завершилась с ошибкой: {event.error}_\n")
                 else:
                     had_success = True
+                    logger.info(
+                        "Orchestrator subtask %d/%d done after %.1fs", index, len(subtasks), elapsed
+                    )
                 if event.usage:
                     usage_by_subtask.append({"title": subtask.title, **event.usage})
             else:

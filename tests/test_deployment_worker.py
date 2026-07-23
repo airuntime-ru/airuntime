@@ -15,12 +15,16 @@ class _FakeSessionWithGet:
 
 
 class _FakeAdapter:
-    def __init__(self, stop_calls: list[str]) -> None:
+    def __init__(self, stop_calls: list[str], image_calls: list[str] | None = None) -> None:
         self._stop_calls = stop_calls
+        self._image_calls = image_calls if image_calls is not None else []
         self.client = object()
 
     def stop_project(self, project_id: str) -> None:
         self._stop_calls.append(project_id)
+
+    def remove_project_images(self, project_id: str) -> None:
+        self._image_calls.append(project_id)
 
 
 class _FakeQuery:
@@ -74,11 +78,14 @@ def test_process_control_job_stop_leaves_services_alone(monkeypatch):
 
 def test_process_control_job_cleanup_tears_down_services(monkeypatch):
     stop_calls: list[str] = []
+    image_calls: list[str] = []
     teardown_calls: list[tuple] = []
     results: list[dict] = []
 
     monkeypatch.setattr(
-        docker_control_actions, "DockerDeploymentAdapter", lambda: _FakeAdapter(stop_calls)
+        docker_control_actions,
+        "DockerDeploymentAdapter",
+        lambda: _FakeAdapter(stop_calls, image_calls),
     )
     monkeypatch.setattr(
         docker_control_actions, "SessionLocal", lambda: _FakeSession(has_services=True)
@@ -97,17 +104,21 @@ def test_process_control_job_cleanup_tears_down_services(monkeypatch):
     deployment_worker.process_control_job({"job_id": "j2", "action": "cleanup", "project_id": "p1"})
 
     assert stop_calls == ["p1"]
+    assert image_calls == ["p1"]
     assert teardown_calls == [("p1", True)]
     assert results == [{"ok": True}]
 
 
 def test_process_control_job_cleanup_skips_teardown_without_services(monkeypatch):
     stop_calls: list[str] = []
+    image_calls: list[str] = []
     teardown_calls: list[tuple] = []
     results: list[dict] = []
 
     monkeypatch.setattr(
-        docker_control_actions, "DockerDeploymentAdapter", lambda: _FakeAdapter(stop_calls)
+        docker_control_actions,
+        "DockerDeploymentAdapter",
+        lambda: _FakeAdapter(stop_calls, image_calls),
     )
     monkeypatch.setattr(
         docker_control_actions, "SessionLocal", lambda: _FakeSession(has_services=False)
@@ -126,6 +137,7 @@ def test_process_control_job_cleanup_skips_teardown_without_services(monkeypatch
     deployment_worker.process_control_job({"job_id": "j3", "action": "cleanup", "project_id": "p1"})
 
     assert stop_calls == ["p1"]
+    assert image_calls == ["p1"]
     assert teardown_calls == []
     assert results == [{"ok": True}]
 

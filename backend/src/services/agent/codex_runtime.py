@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -53,6 +54,8 @@ from src.services.agent.events import AgentDone, TextDelta, ToolCallRequested, T
 from src.services.agent.tools import ServiceRequest, WorkspaceTools
 from src.services.docker_control_queue import QUEUE_KEY, in_worker_inline_docker
 from src.services.file_context import ImageAttachment
+
+logger = logging.getLogger(__name__)
 
 # Providers driven through Codex instead of a direct HTTP call. Codex CLI only speaks to
 # OpenAI, so this is deliberately narrow - an explicit anthropic/gemini/openrouter selection
@@ -142,11 +145,17 @@ async def _stream_events(run_id: str, *, timeout_seconds: int) -> AsyncIterator[
     while True:
         now = time.monotonic()
         if now > deadline:
+            logger.warning("Codex run %s timed out after %ds", run_id, timeout_seconds)
             yield {"type": "infra_error", "message": "Codex run timed out"}
             return
         popped = await asyncio.to_thread(r.blpop, key, _REDIS_POLL_SECONDS)
         if not popped:
             if time.monotonic() > idle_deadline:
+                logger.warning(
+                    "Codex run %s produced no output for %ds (worker/container may be down)",
+                    run_id,
+                    _MAX_IDLE_SECONDS,
+                )
                 yield {
                     "type": "infra_error",
                     "message": "Codex produced no output for a while (worker/container may be down)",

@@ -105,6 +105,33 @@ class DockerDeploymentAdapter:
             except DockerException:
                 pass
 
+    def remove_project_images(self, project_id: str) -> None:
+        """Remove every locally built image for this project (see artifacts.py's _image_tag -
+        `airuntime-generated-{site,bot,mixed,app}-{project_id[:12]}:latest`).
+
+        Matches by id fragment rather than recomputing one exact tag: a project's `type` (and so
+        its tag prefix) can change over its life via reconcile_type_with_workspace/
+        update_project_type_from_prompt, so an earlier build may sit under a different prefix than
+        the project's current type - only called from cleanup (project deletion), never a plain
+        stop/redeploy, which must keep the current image for a fast restart.
+        """
+        id_fragment = str(project_id)[:12]
+        try:
+            # docker-py's images.list(name=...) filters on an exact repository match, not a
+            # prefix/substring - not usable here since the tag's prefix depends on project.type
+            # (see docstring above), so list everything and match tags in Python instead.
+            images = self._client.images.list()
+        except DockerException:
+            return
+        for image in images:
+            tags = getattr(image, "tags", None) or []
+            if not any(tag.startswith("airuntime-generated-") and id_fragment in tag for tag in tags):
+                continue
+            try:
+                self._client.images.remove(image=image.id, force=True)
+            except DockerException:
+                pass
+
     def deploy(self, request: DeployRequest) -> dict:
         container_name = app_container_name(request.project_id)
         host_port = self._allocate_port(request.project_id)

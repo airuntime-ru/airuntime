@@ -30,6 +30,7 @@ from src.services.agentic_artifacts import (
 from src.services.artifacts import ArtifactError
 from src.services.docker_control_queue import submit_control_job
 from src.services.project_git import commit_snapshot
+from src.services.sse_heartbeat import with_heartbeat
 from src.services.workspace import project_dir as _project_dir
 
 _ERROR_PATTERNS = (
@@ -245,8 +246,10 @@ async def _run_repair_events(
         "status",
         {"phase": "thinking", "label": "Анализирую ошибку деплоя", "state": "running"},
     )
-    async for event in session.run(history=[], user_message=user_message):
-        if isinstance(event, TextDelta):
+    async for event in with_heartbeat(session.run(history=[], user_message=user_message)):
+        if isinstance(event, str):
+            yield ("ping", event)
+        elif isinstance(event, TextDelta):
             final_text += event.text
             yield ("chunk", event.text)
         elif isinstance(event, ToolCallRequested):
@@ -469,7 +472,9 @@ async def iter_repair_sse(
         async for kind, payload in _run_repair_events(
             project, root, error_excerpt, build_failure=build_failure
         ):
-            if kind == "status":
+            if kind == "ping":
+                yield str(payload)
+            elif kind == "status":
                 status = payload if isinstance(payload, dict) else {}
                 yield _sse_status(
                     str(status.get("phase") or "thinking"),

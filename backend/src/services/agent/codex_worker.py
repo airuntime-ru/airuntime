@@ -35,6 +35,7 @@ actions run:
 from __future__ import annotations
 
 import json
+import logging
 import shlex
 import uuid
 from collections.abc import Iterator
@@ -46,6 +47,8 @@ from redis import Redis
 
 from src.core.config import settings
 from src.services.system_settings import resolve_api_key_for_provider
+
+logger = logging.getLogger(__name__)
 
 _EVENTS_KEY_PREFIX = "codex:events:"
 _DONE_MARKER = "__codex_run_done__"
@@ -88,11 +91,12 @@ def _resolve_project_mount(client: docker.DockerClient, project_id: str) -> str 
         # paths (and a broken bind-mount source) when this was exercised on Windows.
         return str(PurePosixPath(mountpoint) / project_id)
     except (NotFound, APIError, DockerException, KeyError) as exc:
-        print(
-            f"[codex_worker] could not resolve per-project mount for volume "
-            f"{settings.generated_projects_volume_name!r} ({exc}) - falling back to full "
+        logger.warning(
+            "Could not resolve per-project mount for volume %r (%s) - falling back to full "
             "shared-volume access for this run. Check GENERATED_PROJECTS_VOLUME_NAME / "
-            "`docker volume ls` on this host."
+            "`docker volume ls` on this host.",
+            settings.generated_projects_volume_name,
+            exc,
         )
         return None
 
@@ -281,8 +285,10 @@ def iter_codex_events(job: dict) -> Iterator[dict]:
         elif exit_code not in (0, None):
             yield {"type": "infra_error", "message": f"codex exec exited with code {exit_code}"}
     except (DockerException, APIError) as exc:
+        logger.warning("Codex run: Docker error: %s", exc)
         yield {"type": "infra_error", "message": f"Docker error: {exc}"}
     except Exception as exc:  # noqa: BLE001 - report rather than crash the caller
+        logger.exception("Codex run failed unexpectedly")
         yield {"type": "infra_error", "message": f"Codex run failed: {exc}"}
     finally:
         if container is not None:

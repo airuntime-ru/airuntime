@@ -7,6 +7,8 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/v1"
     debug: bool = False
     environment: str = "development"
+    # Console log verbosity for both the API and worker processes (see core/logging_setup.py).
+    log_level: str = "INFO"
 
     database_url: str = Field(
         default="postgresql+psycopg://postgres:postgres@postgres:5432/airuntime"

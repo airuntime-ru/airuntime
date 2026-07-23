@@ -5,6 +5,7 @@ name: airuntime
 
 x-common-env: &common-env
   ENVIRONMENT: production
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
   APP_DOMAIN: ${APP_DOMAIN}
   PUBLIC_BASE_DOMAIN: ${APP_DOMAIN}
   FRONTEND_URL: https://${APP_DOMAIN}
@@ -22,8 +23,18 @@ x-traefik-labels: &traefik-labels
   traefik.enable: "true"
   traefik.docker.network: airuntime_public
 
+# Docker's default json-file driver has no size cap on its own - without this, a chatty
+# container (or a bug in one) can slowly fill the host disk with nothing ever pruning it. Applies
+# uniformly instead of just to backend/worker so no service (e.g. mailserver, minio) is missed.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   traefik:
+    logging: *default-logging
     # traefik:v3.5's Docker client hardcodes API 1.24, which Docker Engine 29+ rejects outright
     # ("client version 1.24 is too old") - no env var can work around this since the daemon
     # itself refuses the client's declared version. 3.6.1+ added real API version negotiation.
@@ -43,6 +54,7 @@ services:
   postgres:
     image: postgres:16
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -60,12 +72,14 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    logging: *default-logging
     networks:
       - internal
 
   minio:
     image: minio/minio:latest
     restart: unless-stopped
+    logging: *default-logging
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${S3_ACCESS_KEY}
@@ -90,6 +104,7 @@ services:
 
   minio-init:
     image: minio/mc:latest
+    logging: *default-logging
     depends_on:
       - minio
     entrypoint: >
@@ -107,6 +122,7 @@ services:
     hostname: mail
     domainname: ${APP_DOMAIN}
     restart: unless-stopped
+    logging: *default-logging
     ports:
       - "25:25"
       - "587:587"
@@ -142,6 +158,7 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     restart: unless-stopped
+    logging: *default-logging
     environment:
       <<: *common-env
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
@@ -150,6 +167,9 @@ services:
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
       PROVIDER_NAME: ${PROVIDER_NAME:-openai}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Splits a big openai-provider turn into sequential subtasks - see orchestrator.py's
+      # module docstring before flipping this on (least-verified piece of the Codex work).
+      ENABLE_AGENT_ORCHESTRATOR: ${ENABLE_AGENT_ORCHESTRATOR:-false}
       SMTP_HOST: mailserver
       SMTP_PORT: 587
       SMTP_USERNAME: noreply@${APP_DOMAIN}
@@ -189,6 +209,7 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     restart: unless-stopped
+    logging: *default-logging
     command: ["sh", "/app/entrypoint.sh", "worker"]
     environment:
       <<: *common-env
@@ -227,6 +248,7 @@ services:
       dockerfile: deployment/codex/Dockerfile
     container_name: airuntime-codex
     restart: unless-stopped
+    logging: *default-logging
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - airruntime_projects_data:/data/airruntime-projects
@@ -241,6 +263,7 @@ services:
       context: .
       dockerfile: admin/Dockerfile
     restart: unless-stopped
+    logging: *default-logging
     environment:
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
       DJANGO_DEBUG: "false"
@@ -275,6 +298,7 @@ services:
         NEXT_PUBLIC_SITE_URL: https://${APP_DOMAIN}
         NEXT_PUBLIC_BASE_DOMAIN: ${APP_DOMAIN}
     restart: unless-stopped
+    logging: *default-logging
     environment:
       NEXT_PUBLIC_API_BASE_URL: https://api.${APP_DOMAIN}/api/v1
       NEXT_PUBLIC_SITE_URL: https://${APP_DOMAIN}

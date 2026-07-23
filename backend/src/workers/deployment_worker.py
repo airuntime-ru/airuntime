@@ -1,3 +1,4 @@
+import logging
 import threading
 import time
 from datetime import UTC, datetime, timedelta
@@ -5,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy.orm import Session
 
 from src.core.config import settings
+from src.core.logging_setup import configure_logging
 from src.db.models.deployment import Deployment
 from src.db.models.project import Project
 from src.db.models.project_service import ProjectService
@@ -19,15 +21,25 @@ from src.services.deployment_check import (
     is_repairable_app_error,
 )
 from src.services.deployment_queue import pop_deployment_job
-from src.services.deployments import append_deployment_log, store_deployment_error, truncate_logs_ref
+from src.services.deployments import (
+    append_deployment_log,
+    store_deployment_error,
+    truncate_logs_ref,
+)
 from src.services.docker_control_actions import run_control_action
-from src.services.docker_control_queue import pop_control_job, push_control_result, worker_inline_docker
+from src.services.docker_control_queue import (
+    pop_control_job,
+    push_control_result,
+    worker_inline_docker,
+)
 from src.services.project_services import (
     build_connection_env,
     ensure_service_containers,
 )
 from src.services.project_subdomain import resolve_deploy_subdomain
 from src.services.telegram_profile import TelegramProfileError, fetch_bot_profile
+
+logger = logging.getLogger(__name__)
 
 BILLING_SWEEP_INTERVAL_SECONDS = 300
 STALE_SWEEP_INTERVAL_SECONDS = 60
@@ -47,7 +59,11 @@ def _run_codex_job(job: dict) -> None:
     try:
         execute_codex_run(job)
     except Exception:  # noqa: BLE001 - execute_codex_run already reports failure via Redis
-        pass
+        # Only reachable if relaying to Redis itself failed (execute_codex_run's own finally
+        # already turns a Codex/Docker-side failure into an infra_error event, not an
+        # exception) - the chat stream got no error frame in that case, so this is the one
+        # place a run_id's fate is otherwise unrecoverable after the fact.
+        logger.exception("Codex job %s failed to relay events", job.get("job_id"))
 
 
 def _spawn_codex_run(job: dict) -> None:
@@ -210,7 +226,7 @@ def _process_job_body(db: Session, job: dict) -> None:
             try:
                 check_and_repair_deployment(db, project)
             except Exception:  # noqa: BLE001 - a broken self-check must never fail the deploy
-                pass
+                logger.exception("Post-deploy self-check/repair failed for project %s", project.id)
     except Exception as exc:
         _mark_deployment_failed(db, job, exc)
     finally:
@@ -317,25 +333,28 @@ def reap_stale_deployments() -> int:
 
 
 def run() -> None:
+    configure_logging()
+    logger.info("Deployment worker starting")
     last_billing_sweep = 0.0
     last_stale_sweep = 0.0
     try:
         reap_stale_deployments()
     except Exception:  # noqa: BLE001
-        pass
+        logger.exception("Initial stale-deployment sweep failed")
     while True:
         control_job = pop_control_job(timeout_seconds=2)
         if control_job:
             try:
                 process_control_job(control_job)
             except Exception:  # noqa: BLE001 - never kill the worker loop
-                pass
+                logger.exception("Control job failed: %r", control_job)
             continue
         job = pop_deployment_job(timeout_seconds=2)
         if job:
             try:
                 process_job(job)
             except Exception:  # noqa: BLE001 - process_job should self-contain, but belt+suspenders
+                logger.exception("Deployment job crashed the worker loop: %r", job)
                 try:
                     db = SessionLocal()
                     try:
@@ -343,7 +362,7 @@ def run() -> None:
                     finally:
                         db.close()
                 except Exception:  # noqa: BLE001
-                    pass
+                    logger.exception("Could not mark deployment %s failed after worker crash", job.get("deployment_id"))
 
         now = time.monotonic()
         if now - last_stale_sweep >= STALE_SWEEP_INTERVAL_SECONDS:
@@ -351,13 +370,13 @@ def run() -> None:
             try:
                 reap_stale_deployments()
             except Exception:  # noqa: BLE001
-                pass
+                logger.exception("Stale-deployment sweep failed")
         if now - last_billing_sweep >= BILLING_SWEEP_INTERVAL_SECONDS:
             last_billing_sweep = now
             try:
                 process_billing_sweep()
             except Exception:  # noqa: BLE001 - never let a billing hiccup kill the worker loop
-                pass
+                logger.exception("Billing sweep failed")
 
 
 if __name__ == "__main__":

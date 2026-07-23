@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import re
 import time
 from datetime import UTC, datetime
@@ -43,8 +44,8 @@ from src.services.agentic_artifacts import (
 from src.services.artifacts import ArtifactError, _telegram_token
 from src.services.billing import record_usage
 from src.services.chat_context import build_llm_context
-from src.services.deployments import create_deployment_for_project, store_deployment_error
 from src.services.deployment_check import is_repairable_app_error
+from src.services.deployments import create_deployment_for_project, store_deployment_error
 from src.services.file_context import (
     attach_files_to_message,
     build_attachment_context,
@@ -74,8 +75,11 @@ from src.services.project_subdomain import (
 from src.services.prompt_guard import prepare_agent_user_message, sanitize_user_message
 from src.services.provider.factory import resolve_provider_and_model
 from src.services.secrets import capture_telegram_tokens_from_text, ensure_secret_placeholder
+from src.services.sse_heartbeat import SSE_PING, Ticker, with_heartbeat
 from src.services.system_settings import resolve_api_key_for_provider
 from src.services.workspace import project_dir
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/projects/{project_id}/chats", tags=["chat"])
 
@@ -261,6 +265,7 @@ async def _follow_repair_redeploy(
     watched_failed_id = failed_deployment.id
     failed_started = failed_deployment.started_at
     label = last_label
+    ping = Ticker(15.0)
 
     yield _sse_status("deploy", "Анализирую ошибку запуска и исправляю", "running")
     await asyncio.sleep(_DEPLOY_SETTLE_SECONDS)
@@ -291,6 +296,8 @@ async def _follow_repair_redeploy(
         repair_deadline = min(deadline, time.monotonic() + _REPAIR_FOLLOW_SECONDS)
         while time.monotonic() < repair_deadline:
             await asyncio.sleep(_DEPLOY_POLL_SECONDS)
+            if ping.due():
+                yield SSE_PING
             db.expire_all()
             newer = _find_newer()
             if newer is not None:
@@ -314,6 +321,8 @@ async def _follow_repair_redeploy(
     if newer.status not in _DEPLOYMENT_TERMINAL:
         while time.monotonic() < deadline:
             await asyncio.sleep(_DEPLOY_POLL_SECONDS)
+            if ping.due():
+                yield SSE_PING
             db.expire_all()
             newer = db.get(Deployment, newer.id)
             if newer is None:
@@ -672,18 +681,36 @@ async def _stream_events(
             workspace = WorkspaceTools(artifact_path, project_id=str(project.id))
 
             agent_started = time.monotonic()
+            logger.info(
+                "Agent turn start: project=%s chat=%s provider=%s model=%s orchestrator=%s "
+                "message_chars=%d",
+                project.id,
+                chat_id,
+                provider_name,
+                model,
+                settings.enable_agent_orchestrator,
+                len(safe_message),
+            )
             try:
-                async for event in run_agent_turn(
-                    provider_name=provider_name,
-                    model=model,
-                    api_key=api_key,
-                    workspace=workspace,
-                    system_prompt=system_prompt,
-                    history=history,
-                    user_message=safe_message,
-                    images=image_attachments,
-                ):
-                    if isinstance(event, TextDelta):
+                agent_events = with_heartbeat(
+                    run_agent_turn(
+                        provider_name=provider_name,
+                        model=model,
+                        api_key=api_key,
+                        workspace=workspace,
+                        system_prompt=system_prompt,
+                        history=history,
+                        user_message=safe_message,
+                        images=image_attachments,
+                    )
+                )
+                async for event in agent_events:
+                    if isinstance(event, str):
+                        # Heartbeat ping (with_heartbeat's own synthetic frame, not an agent
+                        # event) - keeps the connection alive during long silent stretches
+                        # (Codex "thinking", a slow build step, orchestrator's planning call).
+                        yield event
+                    elif isinstance(event, TextDelta):
                         yield append_visible(event.text)
                     elif isinstance(event, ToolCallRequested):
                         yield _sse_status("tool", _tool_status_label(event.name, event.arguments))
@@ -710,8 +737,22 @@ async def _stream_events(
                 # user can see (and the turn still needs to persist/close out below) rather than
                 # silently dying mid-turn and leaving a stale status frame on screen.
                 agent_error = str(exc) or "Неизвестная ошибка агента"
+                logger.exception(
+                    "Agent turn crashed: project=%s chat=%s provider=%s model=%s",
+                    project.id,
+                    chat_id,
+                    provider_name,
+                    model,
+                )
                 yield _sse_status("error", f"Внутренний сбой агента: {agent_error}"[:160], "error")
             agent_elapsed = time.monotonic() - agent_started
+            logger.info(
+                "Agent turn end: project=%s chat=%s elapsed=%.1fs error=%s",
+                project.id,
+                chat_id,
+                agent_elapsed,
+                agent_error or "none",
+            )
 
             existing_service_kinds = {
                 row.kind
@@ -875,6 +916,7 @@ async def _stream_events(
                 last_label = ""
                 watched_id = deployment.id
                 deadline = time.monotonic() + _DEPLOY_WAIT_SECONDS
+                deploy_ping = Ticker(15.0)
 
                 # Emit an immediate status from the current row (sync path may already be done).
                 db.refresh(deployment)
@@ -893,6 +935,8 @@ async def _stream_events(
                 if deployment.status not in _DEPLOYMENT_TERMINAL:
                     while time.monotonic() < deadline:
                         await asyncio.sleep(_DEPLOY_POLL_SECONDS)
+                        if deploy_ping.due():
+                            yield SSE_PING
                         db.expire_all()
                         deployment = db.get(Deployment, watched_id)
                         if deployment is None:
@@ -950,6 +994,8 @@ async def _stream_events(
                                 )
                                 while time.monotonic() < deadline:
                                     await asyncio.sleep(_DEPLOY_POLL_SECONDS)
+                                    if deploy_ping.due():
+                                        yield SSE_PING
                                     db.expire_all()
                                     newer = db.get(Deployment, newer.id)
                                     if newer is None:
