@@ -32,6 +32,7 @@ from src.services.docker_control_queue import (
     push_control_result,
     worker_inline_docker,
 )
+from src.services.image_janitor import sweep_unrecognized_images
 from src.services.project_services import (
     build_connection_env,
     ensure_service_containers,
@@ -43,6 +44,7 @@ logger = logging.getLogger(__name__)
 
 BILLING_SWEEP_INTERVAL_SECONDS = 300
 STALE_SWEEP_INTERVAL_SECONDS = 60
+IMAGE_SWEEP_INTERVAL_SECONDS = 3600
 
 
 def process_billing_sweep() -> None:
@@ -51,6 +53,13 @@ def process_billing_sweep() -> None:
         run_billing_maintenance(db)
     finally:
         db.close()
+
+
+def process_image_sweep() -> None:
+    if not settings.image_janitor_enabled:
+        return
+    adapter = DockerDeploymentAdapter()
+    sweep_unrecognized_images(adapter.client)
 
 
 def _run_codex_job(job: dict) -> None:
@@ -337,6 +346,7 @@ def run() -> None:
     logger.info("Deployment worker starting")
     last_billing_sweep = 0.0
     last_stale_sweep = 0.0
+    last_image_sweep = 0.0
     try:
         reap_stale_deployments()
     except Exception:  # noqa: BLE001
@@ -377,6 +387,12 @@ def run() -> None:
                 process_billing_sweep()
             except Exception:  # noqa: BLE001 - never let a billing hiccup kill the worker loop
                 logger.exception("Billing sweep failed")
+        if now - last_image_sweep >= IMAGE_SWEEP_INTERVAL_SECONDS:
+            last_image_sweep = now
+            try:
+                process_image_sweep()
+            except Exception:  # noqa: BLE001 - never let a Docker hiccup kill the worker loop
+                logger.exception("Image janitor sweep failed")
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ name: airuntime
 x-common-env: &common-env
   ENVIRONMENT: production
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  IMAGE_JANITOR_ENABLED: ${IMAGE_JANITOR_ENABLED:-true}
   APP_DOMAIN: ${APP_DOMAIN}
   PUBLIC_BASE_DOMAIN: ${APP_DOMAIN}
   FRONTEND_URL: https://${APP_DOMAIN}

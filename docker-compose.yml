@@ -63,6 +63,7 @@ services:
     logging: *default-logging
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      IMAGE_JANITOR_ENABLED: ${IMAGE_JANITOR_ENABLED:-true}
       DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/airuntime
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET_KEY: change-me
@@ -106,6 +107,7 @@ services:
     logging: *default-logging
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      IMAGE_JANITOR_ENABLED: ${IMAGE_JANITOR_ENABLED:-true}
       DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/airuntime
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET_KEY: change-me

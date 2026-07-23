@@ -75,12 +75,17 @@ class Settings(BaseSettings):
     # container can bind-mount just one project's subtree instead of the whole shared volume.
     # Compose prefixes volume names with the project name ("airuntime" from this file's `name:`
     # key) - verify against `docker volume ls` on the target host if COMPOSE_PROJECT_NAME differs.
-    generated_projects_volume_name: str = "airruntime_airruntime_projects_data"
+    generated_projects_volume_name: str = "airuntime_airruntime_projects_data"
 
     # Off by default - see backend/src/services/agent/orchestrator.py's module docstring for why
     # this is the least-tested piece of the 2026-07-17 architecture work (no live model run to
     # validate the planning call's output against) and docs/architecture.md for the design.
     enable_agent_orchestrator: bool = False
+
+    # Periodic sweep of ad-hoc images Codex builds on its own while self-testing a turn (see
+    # image_janitor.py for the safety checks). On by default - flip off if you'd rather review
+    # `docker images` and clean up manually.
+    image_janitor_enabled: bool = True
 
     docker_binary: str = "docker"
     deployment_port_base: int = 18000

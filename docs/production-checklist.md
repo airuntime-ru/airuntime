@@ -26,11 +26,17 @@
 - [ ] Run `docker compose up --build` and `python scripts/smoke_test.py` on staging
 - [ ] Codex per-project isolation (see `codex_worker.py`): after first `docker compose up`,
       confirm `docker volume ls` actually has a volume named `generated_projects_volume_name`
-      (default `airruntime_airruntime_projects_data` - differs if deployed with a non-default
-      `COMPOSE_PROJECT_NAME`/`-p`). If it doesn't match, every Codex turn silently falls back to
-      full shared-volume access (logged, not fatal) instead of the intended per-project mount -
-      check `docker logs <worker container>` for the `[codex_worker] could not resolve
-      per-project mount` warning to catch this before relying on the isolation.
+      (default `airuntime_airruntime_projects_data` - differs if deployed with a non-default
+      `COMPOSE_PROJECT_NAME`/`-p`). The default previously had an extra "r"
+      (`airr`untime`_airr`untime...) and never matched Compose's real
+      `<project-name>_<volume-key>` name on either dev or prod, so every Codex turn was silently
+      falling back - fixed 2026-07-23, but if this drifts again: the fallback now mounts the
+      volume by name (correct data, just unscoped to one project) rather than the old broken
+      behavior of bind-mounting a container-internal path as if it were a host path, which
+      silently ran turns against an empty throwaway directory - the agent would report files
+      written/tests run with no error anywhere, and none of it would reach the real project.
+      Check `docker logs <worker container>` for the `could not resolve per-project mount`
+      warning to catch a mismatch before relying on per-project isolation.
 - [ ] Optional hardening: set `CODEX_DOCKER_HOST=tcp://docker-socket-proxy:2375` once the
       `docker-socket-proxy` compose service is confirmed reachable, to stop handing the per-turn
       Codex container the raw host socket. Not a full per-project container ACL by itself (the

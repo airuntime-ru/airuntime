@@ -47,6 +47,10 @@ type InternalSession = ChatStreamSnapshot & {
   controller: AbortController | null;
   toolActivityId: number;
   listeners: Set<() => void>;
+  // True only in the tab that actually owns the fetch for this session (set in runStreamLoop).
+  // Every other tab holding a mirrored copy (see the cross-tab sync section below) keeps this
+  // false, so it knows to apply incoming broadcasts instead of treating itself as authoritative.
+  isLeader: boolean;
 };
 
 const sessions = new Map<string, InternalSession>();
@@ -98,8 +102,13 @@ function ensureSession(projectId: string, chatId: string): InternalSession {
       controller: null,
       toolActivityId: 0,
       listeners: new Set(),
+      isLeader: false,
     };
     sessions.set(key, session);
+    // Brand new locally - another tab may already be mid-stream for this exact chat (e.g. this
+    // chat page just mounted while a turn started elsewhere). Ask around; a leader tab answers
+    // with its current snapshot (see handleBroadcastMessage), a no-op if nobody responds.
+    requestRemoteState(projectId, chatId);
   }
   return session;
 }
@@ -124,6 +133,82 @@ function snapshotOf(session: InternalSession): ChatStreamSnapshot {
     toolActivity: session.toolActivity,
     chatError: session.chatError,
   };
+}
+
+// --- Cross-tab sync ---------------------------------------------------------------------------
+// Everything above lives only in this tab's JS module instance - a second tab opened on the same
+// chat gets a brand new, empty `sessions` map with no idea a turn is running elsewhere, so it
+// showed no animation/status at all until the turn finished and a plain page load picked up the
+// persisted messages. BroadcastChannel is same-origin, same-browser messaging to every other open
+// tab: the tab that actually owns the fetch (session.isLeader) rebroadcasts its state on every
+// change; any other tab mirrors that into its own local session so the existing
+// notify()/subscribeChatStream() rendering path in chat/page.tsx needs no changes at all. A tab
+// that mounts fresh asks the others for current state in case a turn is already mid-flight.
+type ChatBroadcastMessage =
+  | { type: "state"; projectId: string; chatId: string; snapshot: ChatStreamSnapshot }
+  | { type: "request-state"; projectId: string; chatId: string }
+  | { type: "abort-request"; projectId: string; chatId: string };
+
+let broadcastChannel: BroadcastChannel | null = null;
+
+function getBroadcastChannel(): BroadcastChannel | null {
+  if (typeof window === "undefined" || typeof BroadcastChannel === "undefined") return null;
+  if (!broadcastChannel) {
+    broadcastChannel = new BroadcastChannel("airuntime_chat_stream");
+    broadcastChannel.onmessage = (event: MessageEvent<ChatBroadcastMessage>) => {
+      handleBroadcastMessage(event.data);
+    };
+  }
+  return broadcastChannel;
+}
+
+function postToOtherTabs(message: ChatBroadcastMessage) {
+  // BroadcastChannel never delivers a message back to the tab that posted it, so leader tabs
+  // never need to filter out their own broadcasts.
+  getBroadcastChannel()?.postMessage(message);
+}
+
+function handleBroadcastMessage(message: ChatBroadcastMessage) {
+  const key = sessionKey(message.projectId, message.chatId);
+
+  if (message.type === "request-state") {
+    const session = sessions.get(key);
+    if (session?.isLeader && session.loading) {
+      postToOtherTabs({
+        type: "state",
+        projectId: message.projectId,
+        chatId: message.chatId,
+        snapshot: snapshotOf(session),
+      });
+    }
+    return;
+  }
+
+  if (message.type === "abort-request") {
+    // Lets "Остановить генерацию" clicked from a follower tab actually reach the leader's fetch.
+    const session = sessions.get(key);
+    if (session?.isLeader) session.controller?.abort();
+    return;
+  }
+
+  // message.type === "state"
+  const session = ensureSession(message.projectId, message.chatId);
+  if (session.isLeader) return; // this tab owns the real fetch - it's authoritative, not a mirror
+  session.loading = message.snapshot.loading;
+  session.messages = message.snapshot.messages;
+  session.agentStatus = message.snapshot.agentStatus;
+  session.toolActivity = message.snapshot.toolActivity;
+  session.chatError = message.snapshot.chatError;
+  writePersistedStatus(message.projectId, message.chatId, session.agentStatus);
+  notify(session);
+}
+
+function broadcastState(projectId: string, chatId: string, session: InternalSession) {
+  postToOtherTabs({ type: "state", projectId, chatId, snapshot: snapshotOf(session) });
+}
+
+function requestRemoteState(projectId: string, chatId: string) {
+  postToOtherTabs({ type: "request-state", projectId, chatId });
 }
 
 export function getChatStreamSnapshot(projectId: string, chatId: string): ChatStreamSnapshot {
@@ -184,6 +269,9 @@ export function clearChatStreamSession(projectId: string, chatId: string) {
 export function abortChatStream(projectId: string, chatId: string) {
   const session = ensureSession(projectId, chatId);
   session.controller?.abort();
+  // No-op if this tab is the leader (already aborted above); reaches the leader if it's a
+  // different tab and this one is only showing a mirrored copy of the stream.
+  postToOtherTabs({ type: "abort-request", projectId, chatId });
 }
 
 export function isChatStreamLoading(projectId: string, chatId: string): boolean {
@@ -232,13 +320,21 @@ async function runStreamLoop(projectId: string, chatId: string, handlers: Stream
   session.controller?.abort();
   const controller = new AbortController();
   session.controller = controller;
+  session.isLeader = true;
   session.loading = true;
   session.chatError = "";
   session.toolActivity = [];
   session.toolActivityId = 0;
   handlers.onStart(session);
   writePersistedStatus(projectId, chatId, session.agentStatus);
-  notify(session);
+
+  // This tab owns the fetch below - every state change also goes out to any other tab with the
+  // same chat open (see the cross-tab sync section above snapshotOf/broadcastState).
+  const syncSession = () => {
+    notify(session);
+    broadcastState(projectId, chatId, session);
+  };
+  syncSession();
 
   const applyStatus = (status: AgentStatus) => {
     // A "tool" phase frame with state done/error is one finished tool call (e.g. a shell
@@ -262,7 +358,7 @@ async function runStreamLoop(projectId: string, chatId: string, handlers: Stream
         },
       ];
     }
-    notify(session);
+    syncSession();
   };
 
   const appendAssistant = (chunk: string) => {
@@ -273,7 +369,7 @@ async function runStreamLoop(projectId: string, chatId: string, handlers: Stream
     if (last?.role !== "assistant") return;
     copy[lastIndex] = { ...last, content: last.content + chunk };
     session.messages = copy;
-    notify(session);
+    syncSession();
   };
 
   try {
@@ -346,13 +442,14 @@ async function runStreamLoop(projectId: string, chatId: string, handlers: Stream
         }
       }
     }
-    notify(session);
+    syncSession();
   } finally {
     if (session.controller === controller) {
       session.controller = null;
     }
+    session.isLeader = false;
     session.loading = false;
-    notify(session);
+    syncSession();
   }
 }
 

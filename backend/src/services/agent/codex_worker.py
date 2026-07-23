@@ -220,9 +220,21 @@ def iter_codex_events(job: dict) -> Iterator[dict]:
             # Could not resolve a scoped mount (see _resolve_project_mount) - fall back to the
             # whole shared tree at its original absolute path, exactly as before isolation
             # existed, so this turn still succeeds instead of hard-failing.
+            #
+            # Mount by the *named volume*, not by settings.generated_projects_dir's path string:
+            # this dict is handed to client.containers.run() on a client that reached the host
+            # daemon over the mounted socket (see module docstring), so any plain path here is
+            # resolved against the HOST filesystem, not this worker process's own mount
+            # namespace - generated_projects_dir ("/data/airruntime-projects") is only where the
+            # named volume happens to be mounted *inside this container*, not a real host path.
+            # Docker silently creates a missing bind-mount host directory rather than erroring,
+            # so this previously ran real Codex turns against an empty, throwaway directory with
+            # no error anywhere - the agent would report files written/tests run truthfully from
+            # its own point of view, none of it ever reaching the actual project. A volume name
+            # is resolved by the daemon itself, so it works no matter which container asks.
             effective_cwd = old_cwd
             effective_images = list(job.get("image_paths") or [])
-            volumes[settings.generated_projects_dir] = {
+            volumes[settings.generated_projects_volume_name] = {
                 "bind": settings.generated_projects_dir,
                 "mode": "rw",
             }
