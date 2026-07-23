@@ -60,3 +60,7 @@ admin/*.sqlite3
 *.log
 /logs/
 /output/
+
+# Local audit artifacts / one-off scripts
+frontend/docs/landing-audit/*.png
+scripts/tmp_*
