@@ -64,3 +64,4 @@ admin/*.sqlite3
 # Local audit artifacts / one-off scripts
 frontend/docs/landing-audit/*.png
 scripts/tmp_*
+backend/.email-preview/

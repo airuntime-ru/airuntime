@@ -6,13 +6,16 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
+from src.core.config import settings
 from src.db.models.credit_ledger import CreditLedgerEntry
 from src.db.models.credit_topup import CreditTopUp
 from src.db.models.plan import Plan
 from src.db.models.user import User
 from src.services.email import send_branded_email
 from src.services.email_templates import (
+    credits_exhausted_email,
     credits_topup_paid_email,
+    invoice_created_email,
     low_credits_email,
     period_ending_email,
     period_renewed_email,
@@ -22,6 +25,10 @@ BILLING_PERIOD_DAYS = 30
 LOW_CREDITS_THRESHOLD_RATIO = 0.1
 PERIOD_ENDING_WARNING_DAYS = 3
 RUB_PER_1000_CREDITS = 10
+
+
+def _billing_url() -> str:
+    return f"{settings.resolved_frontend_url.rstrip('/')}/app/settings"
 
 
 def get_default_plan(db: Session) -> Plan | None:
@@ -101,6 +108,16 @@ def request_topup(db: Session, user: User, credits: int) -> CreditTopUp:
     db.add(invoice)
     db.commit()
     db.refresh(invoice)
+    content = invoice_created_email(
+        invoice_id=str(invoice.id),
+        credits=invoice.credits,
+        amount_rub=invoice.amount_rub,
+        created_at=invoice.created_at,
+        billing_url=_billing_url(),
+    )
+    send_branded_email(
+        to=user.email, subject=content.subject, plain=content.plain, html=content.html
+    )
     return invoice
 
 
@@ -117,7 +134,11 @@ def _renew_period_if_due(db: Session, user: User, *, now: datetime) -> None:
     user.period_ending_notified_at = None
     db.add(user)
     record_ledger_entry(db, user, amount=plan.monthly_credits, reason="period_renewal")
-    content = period_renewed_email(plan_name=plan.name, credits=plan.monthly_credits)
+    content = period_renewed_email(
+        plan_name=plan.name,
+        credits=plan.monthly_credits,
+        period_end=user.billing_period_end,
+    )
     send_branded_email(
         to=user.email, subject=content.subject, plain=content.plain, html=content.html
     )
@@ -136,7 +157,12 @@ def _notify_low_credits_if_due(db: Session, user: User, *, now: datetime) -> Non
         return
     user.low_credits_notified_at = now
     db.add(user)
-    content = low_credits_email(credits_balance=user.credits_balance)
+    if user.credits_balance <= 0:
+        content = credits_exhausted_email(billing_url=_billing_url())
+    else:
+        content = low_credits_email(
+            credits_balance=user.credits_balance, billing_url=_billing_url()
+        )
     send_branded_email(
         to=user.email, subject=content.subject, plain=content.plain, html=content.html
     )
@@ -152,7 +178,13 @@ def _notify_period_ending_if_due(db: Session, user: User, *, now: datetime) -> N
         return
     user.period_ending_notified_at = now
     db.add(user)
-    content = period_ending_email(period_end=user.billing_period_end)
+    plan = db.get(Plan, user.plan_id) if user.plan_id else None
+    content = period_ending_email(
+        period_end=user.billing_period_end,
+        plan_name=plan.name if plan else None,
+        credits_balance=user.credits_balance,
+        billing_url=_billing_url(),
+    )
     send_branded_email(
         to=user.email, subject=content.subject, plain=content.plain, html=content.html
     )
@@ -173,7 +205,11 @@ def _credit_paid_topups(db: Session, *, now: datetime) -> None:
         db.add(user)
         db.add(invoice)
         record_ledger_entry(db, user, amount=invoice.credits, reason="topup")
-        content = credits_topup_paid_email(credits=invoice.credits, amount_rub=invoice.amount_rub)
+        content = credits_topup_paid_email(
+            credits=invoice.credits,
+            amount_rub=invoice.amount_rub,
+            new_balance=user.credits_balance,
+        )
         send_branded_email(
             to=user.email, subject=content.subject, plain=content.plain, html=content.html
         )

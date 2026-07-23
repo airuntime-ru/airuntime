@@ -10,6 +10,7 @@ from src.core.logging_setup import configure_logging
 from src.db.models.deployment import Deployment
 from src.db.models.project import Project
 from src.db.models.project_service import ProjectService
+from src.db.models.user import User
 from src.db.session import SessionLocal
 from src.services.artifacts import build_project_image
 from src.services.billing import run_billing_maintenance
@@ -30,6 +31,8 @@ from src.services.deployments import (
     store_deployment_error,
     truncate_logs_ref,
 )
+from src.services.email import send_branded_email
+from src.services.email_templates import deploy_failed_email, project_deployed_email
 from src.services.docker_control_actions import run_control_action
 from src.services.docker_control_queue import (
     pop_control_job,
@@ -239,6 +242,8 @@ def _process_job_body(db: Session, job: dict) -> None:
         db.add(project)
         db.commit()
 
+        _notify_project_deployed(db, project)
+
         if not job.get("skip_auto_check"):
             # Extra pass after we already verified the container stayed up: catches errors that
             # only appear slightly later. Manual "Проверить и исправить" covers user-triggered bugs.
@@ -250,6 +255,48 @@ def _process_job_body(db: Session, job: dict) -> None:
         _mark_deployment_failed(db, job, exc)
     finally:
         db.close()
+
+
+def _project_app_url(project_id) -> str:
+    return f"{settings.resolved_frontend_url.rstrip('/')}/app/projects/{project_id}"
+
+
+def _notify_project_deployed(db: Session, project: Project) -> None:
+    user = db.get(User, project.user_id)
+    if not user or not user.email:
+        return
+    open_url = _project_app_url(project.id)
+    content = project_deployed_email(
+        project_name=project.name,
+        project_url=project.deployment_url,
+        open_url=open_url,
+    )
+    try:
+        send_branded_email(
+            to=user.email, subject=content.subject, plain=content.plain, html=content.html
+        )
+    except Exception:  # noqa: BLE001 - email must never fail the deploy
+        logger.exception("Failed to send deploy success email for project %s", project.id)
+
+
+def _notify_deploy_failed(db: Session, project: Project | None, *, failed_at: datetime) -> None:
+    if not project:
+        return
+    user = db.get(User, project.user_id)
+    if not user or not user.email:
+        return
+    content = deploy_failed_email(
+        project_name=project.name,
+        failed_at=failed_at,
+        check_url=f"{_project_app_url(project.id)}/deployments",
+        summary="Контейнер не прошёл проверку после старта или сборка завершилась с ошибкой.",
+    )
+    try:
+        send_branded_email(
+            to=user.email, subject=content.subject, plain=content.plain, html=content.html
+        )
+    except Exception:  # noqa: BLE001 - email must never fail the worker
+        logger.exception("Failed to send deploy failure email for project %s", project.id)
 
 
 def _mark_deployment_failed(db: Session, job: dict, exc: BaseException) -> None:
@@ -271,6 +318,7 @@ def _mark_deployment_failed(db: Session, job: dict, exc: BaseException) -> None:
             db.add(project)
         db.add(deployment)
         db.commit()
+        _notify_deploy_failed(db, project, failed_at=deployment.finished_at or datetime.now(UTC))
     except Exception:  # noqa: BLE001 - last-resort hard fail without long logs_ref
         db.rollback()
         deployment = db.get(Deployment, job.get("deployment_id"))
@@ -286,6 +334,7 @@ def _mark_deployment_failed(db: Session, job: dict, exc: BaseException) -> None:
             db.add(project)
         db.add(deployment)
         db.commit()
+        _notify_deploy_failed(db, project, failed_at=deployment.finished_at or datetime.now(UTC))
         return
 
     project = db.get(Project, job.get("project_id"))

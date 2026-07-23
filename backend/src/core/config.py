@@ -47,7 +47,10 @@ class Settings(BaseSettings):
     smtp_username: str | None = None
     smtp_password: str | None = None
     smtp_from: str = "noreply@airuntime.ru"
+    smtp_from_name: str = "AIRuntime"
+    smtp_reply_to: str | None = None
     smtp_use_tls: bool = True
+    support_email: str | None = "support@airuntime.ru"
 
     # Codex CLI runner (replaces direct provider HTTP calls for the "openai" path - see
     # backend/src/services/agent/codex_runtime.py). Other providers keep the old HTTP path.

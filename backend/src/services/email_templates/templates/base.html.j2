@@ -1,0 +1,72 @@
+{% from "macros.html.j2" import button, otp_code, info_box, status_badge, divider, security_notice, billing_summary, project_link %}
+<!DOCTYPE html>
+<html lang="ru" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="x-apple-disable-message-reformatting" />
+  <meta name="format-detection" content="telephone=no,address=no,email=no,date=no,url=no" />
+  <meta name="color-scheme" content="light" />
+  <meta name="supported-color-schemes" content="light" />
+  <title>{{ subject }}</title>
+  <!--[if mso]>
+  <noscript>
+    <xml>
+      <o:OfficeDocumentSettings>
+        <o:PixelsPerInch>96</o:PixelsPerInch>
+      </o:OfficeDocumentSettings>
+    </xml>
+  </noscript>
+  <![endif]-->
+  <style type="text/css">
+    @media only screen and (max-width: 620px) {
+      .email-shell { padding: 16px 12px !important; }
+      .email-card { width: 100% !important; }
+      .email-body { padding: 24px 20px !important; }
+      .email-header { padding: 18px 20px !important; }
+      .email-footer { padding: 16px 20px !important; }
+      .email-title { font-size: 26px !important; }
+    }
+  </style>
+</head>
+<body style="margin:0;padding:0;background-color:{{ colors.page }};-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
+  <div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">
+    {{ preheader }}
+    &nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;
+  </div>
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:{{ colors.page }};">
+    <tr>
+      <td align="center" class="email-shell" style="padding:28px 16px;">
+        <table role="presentation" class="email-card" width="600" cellspacing="0" cellpadding="0" border="0" style="width:600px;max-width:600px;background-color:{{ colors.surface }};border:1px solid {{ colors.border }};border-radius:12px;">
+          <tr>
+            <td class="email-header" style="padding:20px 36px;border-bottom:1px solid {{ colors.border }};height:72px;">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td align="left" valign="middle" style="font-family:Arial,Helvetica,sans-serif;">
+                    <a href="{{ frontend_url }}" style="text-decoration:none;color:{{ colors.ink }};">
+                      <img src="{{ logo_src }}" width="162" height="32" alt="AIRuntime" style="display:block;border:0;outline:none;text-decoration:none;height:32px;width:auto;max-width:162px;" />
+                    </a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td class="email-body" style="padding:36px 36px 28px;font-family:Arial,Helvetica,sans-serif;color:{{ colors.ink }};">
+              <h1 class="email-title" style="margin:0 0 12px;font-size:30px;line-height:1.2;font-weight:700;color:{{ colors.ink }};">{{ title }}</h1>
+              {% block body %}{% endblock %}
+            </td>
+          </tr>
+          <tr>
+            <td class="email-footer" style="padding:18px 36px 22px;border-top:1px solid {{ colors.border }};background-color:{{ colors.page }};">
+              <p style="margin:0 0 8px;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.5;color:{{ colors.muted }};">{{ brand_name }} · <a href="{{ frontend_url }}" style="color:{{ colors.accent }};text-decoration:none;">{{ frontend_url.replace('https://', '').replace('http://', '') }}</a></p>
+              {% if reason %}<p style="margin:0 0 8px;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.5;color:{{ colors.muted }};">{{ reason }}</p>{% endif %}
+              {% if support_email %}<p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.5;color:{{ colors.muted }};">Поддержка: <a href="mailto:{{ support_email }}" style="color:{{ colors.accent }};text-decoration:none;">{{ support_email }}</a></p>{% endif %}
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
