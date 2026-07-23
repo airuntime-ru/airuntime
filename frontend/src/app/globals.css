@@ -484,6 +484,43 @@ textarea {
   text-decoration-color: rgba(35, 136, 255, 0.28);
   text-underline-offset: 3px;
 }
+
+/* Themed thin scrollbar for small inline-scrolling panels (tool activity feed, collapsed
+   report body) - the default OS scrollbar looks out of place against this design's soft
+   glass/gradient surfaces. */
+.scrollbar-airy {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(93, 107, 132, 0.4) transparent;
+}
+
+.scrollbar-airy::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.scrollbar-airy::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-airy::-webkit-scrollbar-thumb {
+  background: rgba(93, 107, 132, 0.35);
+  border-radius: 999px;
+}
+
+.scrollbar-airy::-webkit-scrollbar-thumb:hover {
+  background: rgba(93, 107, 132, 0.55);
+}
+
+/* <summary> gets a native disclosure triangle in every browser by default - jarring next to
+   this app's lucide-react icon system. Swapped for a ChevronDown that rotates on [open] instead
+   (see the report <details> in chat/page.tsx). */
+.report-summary {
+  list-style: none;
+}
+
+.report-summary::-webkit-details-marker {
+  display: none;
+}
 }
 
 @keyframes sky-drift {

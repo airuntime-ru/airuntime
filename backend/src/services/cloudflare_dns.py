@@ -101,19 +101,31 @@ def ensure_platform_dns() -> list[str]:
     return messages
 
 
-def sync_dns_for_website_deploy(subdomain: str) -> list[str]:
-    """Sync Cloudflare DNS when a website is deployed."""
-    if not dns_configured():
-        logger.info("Cloudflare DNS sync skipped: credentials not configured")
-        return ["dns sync skipped (not configured)"]
+def project_public_host(subdomain: str) -> str:
+    return f"{subdomain}.{settings.resolved_app_domain}"
 
-    messages = ensure_platform_dns()
-    messages.append(
-        upsert_dns_record(
-            "A",
-            f"{subdomain}.{settings.resolved_app_domain}",
-            settings.server_ip or "",
-        )
-    )
-    logger.info("Cloudflare DNS synced for %s.%s", subdomain, settings.resolved_app_domain)
-    return messages
+
+def sync_dns_for_website_deploy(subdomain: str) -> str | None:
+    """Ensure platform + project DNS exist. Returns the public host on success, else None.
+
+    Platform-wide record churn stays in server logs only — callers should not dump the
+    raw upsert list into user-facing project.logs.
+    """
+    host = project_public_host(subdomain)
+    if not dns_configured():
+        logger.info("Cloudflare DNS sync skipped for %s: credentials not configured", host)
+        return None
+
+    platform_messages = ensure_platform_dns()
+    logger.info("Cloudflare platform DNS: %s", "; ".join(platform_messages))
+    project_message = upsert_dns_record("A", host, settings.server_ip or "")
+    logger.info("Cloudflare DNS synced for %s (%s)", host, project_message)
+    return host
+
+
+def user_facing_dns_note(subdomain: str, *, host: str | None = None, error: str | None = None) -> str:
+    """Short Russian line for project.logs / UI — never the full platform DNS dump."""
+    resolved = host or project_public_host(subdomain)
+    if error:
+        return f"Не удалось настроить поддомен `{resolved}` в Cloudflare: {error}"
+    return f"Поддомен `{resolved}` настроен в Cloudflare"

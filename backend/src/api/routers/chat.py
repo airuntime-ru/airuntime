@@ -70,6 +70,7 @@ from src.services.project_services import (
 )
 from src.services.project_subdomain import (
     assert_subdomain_available,
+    ensure_deploy_subdomain,
     normalize_deploy_subdomain,
 )
 from src.services.prompt_guard import prepare_agent_user_message, sanitize_user_message
@@ -151,6 +152,42 @@ def _compose_user_message(*, content: str, attachment_ids: list[UUID], db: Sessi
     )
 
 
+# Codex runs plain shell instead of the platform's own list_files/read_file/... tools (see
+# agent/codex_runtime.py's bridge instructions - there's no structured tool name to read intent
+# from, only a raw command string), so the friendly label has to be reconstructed from the
+# command text itself. Checked in order, first match wins - more specific patterns (docker,
+# package installs) before generic ones (any "python3" invocation), so e.g. `python3 -m pip
+# install requests` reports as "Устанавливаю зависимости", not "Проверяю код".
+_COMMAND_LABEL_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"\bdocker\s+build\b"), "Собираю Docker-образ"),
+    (re.compile(r"\bdocker\s+run\b"), "Запускаю тестовый контейнер"),
+    (re.compile(r"\bdocker\s+(ps|logs|exec|inspect)\b"), "Проверяю контейнер"),
+    (re.compile(r"\bdocker\s+images\b"), "Проверяю образы"),
+    (re.compile(r"\bpip3?\s+install\b"), "Устанавливаю зависимости"),
+    (re.compile(r"\bnpm\s+(install|ci)\b"), "Устанавливаю зависимости"),
+    (re.compile(r"\bcurl\b|\bwget\b"), "Проверяю ответ сервера"),
+    (re.compile(r"\bpytest\b"), "Запускаю тесты"),
+    (re.compile(r"\bpython3?\b"), "Проверяю код"),
+    (re.compile(r"\b(rg|grep)\s+--files\b|\bfind\b[^|]*-type\s+f\b|^ls\b"), "Изучаю структуру проекта"),
+    (re.compile(r"\b(sed\s+-n|cat|head|tail)\b"), "Читаю файлы проекта"),
+]
+
+
+def _friendly_command_label(command: str) -> str:
+    # Codex's own shell wrapper - pure noise to the non-technical users this product targets,
+    # never useful signal even for a technical one.
+    cleaned = re.sub(r"^/bin/(ba)?sh\s+-lc\s+", "", command.strip())
+    if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in "\"'":
+        cleaned = cleaned[1:-1]
+    cleaned = " ".join(cleaned.split())
+    for pattern, label in _COMMAND_LABEL_PATTERNS:
+        if pattern.search(cleaned):
+            return label
+    if len(cleaned) > 80:
+        cleaned = cleaned[:80] + "…"
+    return f"Выполняю: {cleaned}" if cleaned else "Выполняю команду"
+
+
 def _tool_status_label(name: str, arguments: dict) -> str:
     path = arguments.get("path", "") if isinstance(arguments, dict) else ""
     if name == "list_files":
@@ -171,10 +208,7 @@ def _tool_status_label(name: str, arguments: dict) -> str:
         return f"Запрашиваю сервис {kind}" if kind else "Запрашиваю сервис"
     if name == "command_execution":
         command = arguments.get("command", "") if isinstance(arguments, dict) else ""
-        command = " ".join(command.split())  # collapse newlines/indentation for a one-line label
-        if len(command) > 100:
-            command = command[:100] + "…"
-        return f"Выполняю: {command}" if command else "Выполняю команду"
+        return _friendly_command_label(command) if command else "Выполняю команду"
     if name == "file_change":
         files = arguments.get("files", "") if isinstance(arguments, dict) else ""
         return f"Правлю: {files}" if files else "Правлю файлы"
@@ -601,6 +635,14 @@ async def _stream_events(
             db.commit()
             db.refresh(project)
 
+    # If the user did not name a domain, allocate a readable subdomain from the project
+    # name / prompt essence (still uniqueness-checked) instead of name-<uuid>.
+    if not project.deploy_subdomain and ensure_deploy_subdomain(
+        db, project, prompt=content or None
+    ):
+        db.commit()
+        db.refresh(project)
+
     user_agent_message = _compose_user_message(
         content=content, attachment_ids=attachment_ids, db=db
     )
@@ -821,8 +863,13 @@ async def _stream_events(
             yield _sse_status("verify", "Проверяю готовые файлы проекта")
             try:
                 # Demote false mixed/website → telegram_bot before requiring website files,
-                # so a bot-only workspace is not forced to invent public/index.html.
-                if reconcile_type_with_workspace(project, artifact_path):
+                # so a bot-only workspace is not forced to invent public/index.html. A real
+                # token counts the same as bot files on disk (see reconcile_type_with_workspace) -
+                # without this a `mixed` project could get flipped to `website` mid-turn, before
+                # this turn's bot code had even landed yet.
+                if reconcile_type_with_workspace(
+                    project, artifact_path, has_bot_secret=bool(_telegram_token(db, project))
+                ):
                     db.add(project)
                     db.commit()
                     db.refresh(project)
@@ -849,26 +896,26 @@ async def _stream_events(
             if thin_arch:
                 yield _sse_status("verify", "Архитектура выглядит слишком тонкой", "error")
                 yield append_visible(f"\n\n{thin_arch}")
-            git_commit_hash: str | None = None
             try:
                 yield _sse_status("version", "Сохраняю версию проекта")
-                git_commit_hash = commit_snapshot(
+                commit_snapshot(
                     artifact_path,
                     message=f"{project.name}: {safe_message}",
                 )
             except ProjectGitError as git_exc:
-                # Git errors shouldn't break the build/deploy pipeline.
-                project.logs = f"Generated artifact: {artifact_path}\nGit error: {git_exc}"
+                # Git errors shouldn't break the build/deploy pipeline, and paths/hashes
+                # must not pollute the user-facing project log feed.
+                logger.warning(
+                    "Snapshot commit failed for project %s: %s", project.id, git_exc
+                )
 
             project.status = "ready"
-            if git_commit_hash:
-                project.logs = f"Generated artifact: {artifact_path}\nGit commit: {git_commit_hash}"
-            elif not project.logs:
-                project.logs = f"Generated artifact: {artifact_path}"
             db.add(project)
             has_website = project.type in ("website", "mixed")
             has_bot = project.type in ("telegram_bot", "mixed")
-            if reconcile_type_with_workspace(project, artifact_path):
+            if reconcile_type_with_workspace(
+                project, artifact_path, has_bot_secret=bool(_telegram_token(db, project))
+            ):
                 has_website = project.type in ("website", "mixed")
                 has_bot = project.type in ("telegram_bot", "mixed")
                 db.add(project)

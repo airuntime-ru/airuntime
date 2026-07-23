@@ -41,6 +41,10 @@ export type ChatStreamSnapshot = {
   agentStatus: AgentStatus | null;
   toolActivity: ToolActivityItem[];
   chatError: string;
+  // Wall-clock start of the current turn (Date.now()), so the UI can tick a live elapsed timer -
+  // shared across tabs the same way the rest of this snapshot is (see cross-tab sync below), so
+  // every tab watching the same chat shows the same elapsed time, not "time since I noticed".
+  turnStartedAt: number | null;
 };
 
 type InternalSession = ChatStreamSnapshot & {
@@ -103,6 +107,7 @@ function ensureSession(projectId: string, chatId: string): InternalSession {
       toolActivityId: 0,
       listeners: new Set(),
       isLeader: false,
+      turnStartedAt: null,
     };
     sessions.set(key, session);
     // Brand new locally - another tab may already be mid-stream for this exact chat (e.g. this
@@ -132,6 +137,7 @@ function snapshotOf(session: InternalSession): ChatStreamSnapshot {
     agentStatus: session.agentStatus,
     toolActivity: session.toolActivity,
     chatError: session.chatError,
+    turnStartedAt: session.turnStartedAt,
   };
 }
 
@@ -199,6 +205,7 @@ function handleBroadcastMessage(message: ChatBroadcastMessage) {
   session.agentStatus = message.snapshot.agentStatus;
   session.toolActivity = message.snapshot.toolActivity;
   session.chatError = message.snapshot.chatError;
+  session.turnStartedAt = message.snapshot.turnStartedAt;
   writePersistedStatus(message.projectId, message.chatId, session.agentStatus);
   notify(session);
 }
@@ -325,6 +332,7 @@ async function runStreamLoop(projectId: string, chatId: string, handlers: Stream
   session.chatError = "";
   session.toolActivity = [];
   session.toolActivityId = 0;
+  session.turnStartedAt = Date.now();
   handlers.onStart(session);
   writePersistedStatus(projectId, chatId, session.agentStatus);
 
@@ -449,6 +457,7 @@ async function runStreamLoop(projectId: string, chatId: string, handlers: Stream
     }
     session.isLeader = false;
     session.loading = false;
+    session.turnStartedAt = null;
     syncSession();
   }
 }

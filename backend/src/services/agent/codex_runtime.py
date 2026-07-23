@@ -44,7 +44,7 @@ import logging
 import time
 import uuid
 from collections.abc import AsyncIterator
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from redis import Redis
@@ -75,8 +75,11 @@ _CODEX_BRIDGE_INSTRUCTIONS = """\
 Технически ты работаешь не через отдельные инструменты платформы, а напрямую в Linux-контейнере \
 с shell и полным доступом к файлам этого проекта (текущая рабочая директория) и к Docker (сокет \
 примонтирован, команда `docker` доступна). Используй обычные средства (чтение/запись файлов, \
-`docker build`, `docker run`) вместо вызовов list_files/read_file/write_file/edit_file/\
-build_project - таких инструментов здесь нет, их заменяет прямой shell-доступ.
+`docker build`) вместо вызовов list_files/read_file/write_file/edit_file/build_project - таких \
+инструментов здесь нет, их заменяет прямой shell-доступ. `docker run` допустим только для \
+локальной проверки внутри своей работы; НЕ публикуй прод через `docker run -p`, НЕ пиши \
+docker-compose.yml для маршрутизации и НЕ настраивай Traefik/прокси/домены - публичный URL и \
+Traefik-labels вешает платформа после хода. Для сайтов HTTP в контейнере должен слушать порт 80.
 
 Чтобы запросить секрет от пользователя (Telegram-токен, чужой API-ключ) - создай файл \
 .airuntime/requests/secret__<KEY>.json с содержимым {"key": "<KEY>", "reason": "..."}.
@@ -91,10 +94,11 @@ build_project - таких инструментов здесь нет, их за
 проект), но не пытайся обойти это через Docker (например через `docker exec` в чужой контейнер \
 по угаданному имени).
 
-Если задача явно распадается на независимые крупные куски (например: инфраструктура/окружение, \
-бэкенд, фронтенд/дизайн - части, которые не зависят от результата друг друга) и это ускорит \
-работу без потери качества - можешь делегировать часть работы своим subagent'ами параллельно \
-вместо последовательной работы в одиночку. Не дели ради самого деления: для большинства задач \
+Если задача явно распадается на независимые крупные ПРОДУКТОВЫЕ куски (например: лендинг, \
+личный кабинет/API, telegram-бот - части, которые не зависят от результата друг друга) и это \
+ускорит работу без потери качества - можешь делегировать часть работы своим subagent'ами \
+параллельно вместо последовательной работы в одиночку. Не выделяй отдельную часть про \
+инфраструктуру/Traefik/деплой/сеть. Не дели ради самого деления: для большинства задач \
 (один сайт, один бот) быстрее и надёжнее сделать самому последовательно.\
 """
 
@@ -172,14 +176,30 @@ async def _stream_events(run_id: str, *, timeout_seconds: int) -> AsyncIterator[
             continue
 
 
+_ISOLATED_MOUNT_ROOT = PurePosixPath("/workspace")
+
+
 def _relativize(path_str: str, root: Path | None) -> str:
     """Show paths relative to the project root in the UI - the raw item.path is an absolute
-    in-container path (/data/airruntime-projects/<project_id>/...), which leaks server layout
-    for no benefit to the user."""
-    if not root or not path_str:
+    in-container path, which leaks server layout for no benefit to the user.
+
+    Two possible absolute forms reach here, and this process can't tell which one a given run
+    used: codex_worker.py's per-project mount resolution succeeding remaps the path under
+    /workspace (see _WORKSPACE_MOUNT there); resolution failing falls back to the original
+    `{generated_projects_dir}/{project_id}` path, which matches `root` (this process's own view
+    of the same directory). Try both rather than assuming - the /workspace case previously fell
+    through silently (Path(...).relative_to(root) raises ValueError, not caught by anything else)
+    and leaked raw container paths like "/workspace/public/app.js" straight into the chat UI.
+    """
+    if not path_str:
         return path_str
+    if root:
+        try:
+            return str(Path(path_str).relative_to(root))
+        except ValueError:
+            pass
     try:
-        return str(Path(path_str).relative_to(root))
+        return str(PurePosixPath(path_str).relative_to(_ISOLATED_MOUNT_ROOT))
     except ValueError:
         return path_str
 
@@ -229,14 +249,16 @@ def _map_event(
         exit_code = item.get("exit_code")
         output = str(item.get("aggregated_output") or "")[-4000:]
         ok = exit_code == 0
-        summary = f"exit {exit_code}"
-        if not ok:
-            # The exit code alone doesn't say why - the last non-empty output line usually is
-            # the actual error (e.g. "bash: eslint: command not found"), so surface it inline
-            # instead of making the user open a separate log to find out.
+        # A bare exit code means nothing to the non-technical users this product targets - the
+        # full log is still in `content` below for anyone who wants it, but the headline text
+        # shouldn't be raw shell status. On failure, the last non-empty output line usually *is*
+        # the actual error (e.g. "bash: eslint: command not found"), so surface it inline instead
+        # of making the user open a separate log to find out.
+        if ok:
+            summary = "Готово"
+        else:
             last_line = next((ln for ln in reversed(output.strip().splitlines()) if ln.strip()), "")
-            if last_line:
-                summary = f"{summary}: {last_line.strip()[:200]}"
+            summary = f"Ошибка: {last_line.strip()[:200]}" if last_line else "Команда завершилась с ошибкой"
         return [
             ToolCallResult(
                 call_id=call_id,
@@ -264,7 +286,7 @@ def _map_event(
                 call_id=call_id,
                 name="file_change",
                 ok=True,
-                summary=f"changed {names}" if names else "file change",
+                summary=f"Изменено: {names}" if names else "Файлы изменены",
             )
         ]
 

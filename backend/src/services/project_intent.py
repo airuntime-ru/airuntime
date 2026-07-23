@@ -191,7 +191,16 @@ def reconcile_type_with_workspace(
     has_bot_files = _workspace_has_bot(root)
 
     if has_site:
-        if not has_bot_files and project.type == ProjectType.mixed:
+        # A configured TELEGRAM_BOT_TOKEN is as strong a signal the project should stay `mixed`
+        # as app.py/bot.py existing on disk (it's only ever requested for a bot/mixed project).
+        # Without this, a `mixed` project whose bot code just hadn't landed on disk *yet* this
+        # turn got silently demoted to `website` the moment its site files appeared, even with a
+        # real token already sitting in its secrets - the settings page then had no way to know
+        # the project was ever supposed to have a bot (reported 2026-07-23: "нет окна с
+        # настройкой бота, хотя есть токен"). Scoped to *this* branch only - the "no site on
+        # disk yet" branches below intentionally still require has_bot_files or wait for it (see
+        # test_reconcile_keeps_mixed_with_only_bot_secret_before_files).
+        if not has_bot_files and not has_bot_secret and project.type == ProjectType.mixed:
             project.type = ProjectType.website
             return True
         return False

@@ -111,7 +111,7 @@ function toolIcon(label: string) {
 function ToolActivityFeed({ items }: { items: ToolActivityItem[] }) {
   if (items.length === 0) return null;
   return (
-    <div className="mb-3 max-h-40 space-y-1 overflow-y-auto rounded-xl border border-black/8 bg-[#fafafa] px-3 py-2">
+    <div className="scrollbar-airy mb-3 max-h-40 space-y-1 overflow-y-auto rounded-xl border border-black/8 bg-[#fafafa] px-3 py-2">
       {items.map((item) => (
         <div
           key={item.id}
@@ -144,13 +144,54 @@ function AiTypingIndicator() {
   );
 }
 
+/** Ticks once a second while `active` so callers re-render with a fresh Date.now() - startedAt.
+ * turnStartedAt itself is shared cross-tab (see chat-stream-runtime.ts), so every tab watching
+ * the same chat shows the same elapsed time, not "time since this tab noticed". */
+function elapsedSecondsSince(startedAt: number): number {
+  return Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+}
+
+function useElapsedSeconds(startedAt: number | null, active: boolean): number | null {
+  const [elapsed, setElapsed] = useState<number | null>(null);
+  useEffect(() => {
+    if (!active || !startedAt) return;
+    // Deliberately no synchronous setState here for the first tick (that would need calling
+    // Date.now() during the effect's initial pass) - the interval's own callback (a genuine
+    // event, not render/effect-body execution) is what's allowed to read the clock. One second
+    // of "0с" before the first real tick is not worth a bigger useSyncExternalStore-based
+    // rewrite of this whole panel for.
+    const id = window.setInterval(() => setElapsed(elapsedSecondsSince(startedAt)), 1000);
+    return () => window.clearInterval(id);
+  }, [active, startedAt]);
+  return active ? elapsed : null;
+}
+
+function formatElapsed(totalSeconds: number): string {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}м ${seconds}с` : `${seconds}с`;
+}
+
+// Codex delivers whole messages, not token-by-token (see agent/codex_runtime.py), so there's no
+// real live count to show mid-turn - only a rough ballpark from how much text has streamed in so
+// far. ~2.2 chars/token is a reasonable estimate for mixed ru/en text with a modern BPE
+// tokenizer. Always labeled "≈" and replaced by the provider's own real count once the turn
+// finishes (see the "Отчёт о выполнении" footer, which uses actual usage numbers).
+function estimateTokens(chars: number): number {
+  return Math.max(0, Math.round(chars / 2.2));
+}
+
 function AgentStatusPanel({
   status,
   projectId,
+  turnStartedAt,
+  liveChars,
   onContinue,
 }: {
   status: AgentStatus;
   projectId: string;
+  turnStartedAt: number | null;
+  liveChars: number;
   onContinue: () => void;
 }) {
   const needsSecret = status.phase === "needs_configuration";
@@ -169,6 +210,8 @@ function AgentStatusPanel({
   const needsToken = needsSecret && status.label.includes("TELEGRAM_BOT_TOKEN");
   const secretsHref = `/app/projects/${projectId}/settings#secrets`;
   const helpHref = `/help/telegram-token?projectId=${encodeURIComponent(projectId)}`;
+  const isRunning = status.state === "running" && !waiting;
+  const elapsedSeconds = useElapsedSeconds(turnStartedAt, isRunning);
 
   return (
     <div
@@ -210,6 +253,12 @@ function AgentStatusPanel({
                       ? "Статус подтверждён по деплою"
                       : "Статус сборки обновляется в реальном времени"}
             </p>
+            {isRunning && elapsedSeconds !== null ? (
+              <p className="mt-0.5 text-[11px] tabular-nums text-[var(--ar-stone)]">
+                {formatElapsed(elapsedSeconds)}
+                {liveChars > 0 ? ` · ≈${estimateTokens(liveChars).toLocaleString("ru-RU")} токенов` : ""}
+              </p>
+            ) : null}
           </div>
         </div>
         <span className="hidden rounded-full border border-white/70 bg-white/70 px-2.5 py-1 text-xs font-medium text-[var(--ar-mist)] sm:inline-flex">
@@ -276,7 +325,13 @@ function AgentStatusPanel({
 const REPORT_HEADING = "### Отчёт о выполнении";
 
 function splitReport(content: string): { main: string; report: string } {
-  const idx = content.indexOf(REPORT_HEADING);
+  // lastIndexOf, not indexOf: orchestrator mode's per-part narration ("Часть N/M") can each
+  // include their own "### Отчёт о выполнении" (the model writes one per subtask, following the
+  // same system-prompt instruction every turn gets) - splitting on the *first* one collapsed
+  // everything from Часть 1 onward, including Часть 2/3's still-streaming live text, into one
+  // permanently-collapsed box. Only the very last heading - the final part's own report plus the
+  // platform's appended objective timing (see chat.py's footer logic) - should collapse.
+  const idx = content.lastIndexOf(REPORT_HEADING);
   if (idx === -1) return { main: content, report: "" };
   return {
     main: content.slice(0, idx).trimEnd(),
@@ -301,12 +356,13 @@ function MessageBody({
       <div className="cursor-chat-assistant prose-chat prose-chat-cursor text-[15px] text-[var(--ar-black)]">
         <ReactMarkdown rehypePlugins={[rehypeHighlight]}>{main}</ReactMarkdown>
         {report ? (
-          <details className="mt-2 rounded-xl border border-black/8 bg-[#fafafa] text-[13px]">
-            <summary className="flex cursor-pointer select-none items-center gap-1.5 px-3 py-2 text-[var(--ar-stone)] hover:text-[var(--ar-mist)]">
-              <Activity size={12} />
-              Отчёт о выполнении
+          <details className="group mt-2 rounded-xl border border-black/8 bg-[#fafafa] text-[13px]">
+            <summary className="report-summary flex cursor-pointer select-none items-center gap-1.5 px-3 py-2 text-[var(--ar-stone)] hover:text-[var(--ar-mist)]">
+              <Activity size={12} className="shrink-0" />
+              <span className="flex-1">Отчёт о выполнении</span>
+              <ChevronDown size={13} className="shrink-0 opacity-60 transition-transform group-open:rotate-180" />
             </summary>
-            <div className="prose-chat prose-chat-compact border-t border-black/8 px-3 py-2 text-[var(--ar-mist)]">
+            <div className="prose-chat prose-chat-compact scrollbar-airy max-h-64 overflow-y-auto border-t border-black/8 px-3 py-2 text-[var(--ar-mist)]">
               <ReactMarkdown rehypePlugins={[rehypeHighlight]}>{report}</ReactMarkdown>
             </div>
           </details>
@@ -334,6 +390,7 @@ export default function ProjectChatPage() {
   const [loading, setLoading] = useState(false);
   const [queue, setQueue] = useState<QueuedMessage[]>([]);
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
+  const [turnStartedAt, setTurnStartedAt] = useState<number | null>(null);
   const [bootstrapping, setBootstrapping] = useState(true);
   const [bootstrapError, setBootstrapError] = useState("");
   const [chatError, setChatError] = useState("");
@@ -353,6 +410,7 @@ export default function ProjectChatPage() {
     const snap = getChatStreamSnapshot(projectId, chatId);
     setLoading(snap.loading);
     setAgentStatus(snap.agentStatus);
+    setTurnStartedAt(snap.turnStartedAt);
     setToolActivity(snap.toolActivity);
     setChatError(snap.chatError);
     if (snap.messages) {
@@ -430,6 +488,7 @@ export default function ProjectChatPage() {
         messagesRef.current = snap.messages;
         setMessages(snap.messages);
         setAgentStatus(snap.agentStatus);
+        setTurnStartedAt(snap.turnStartedAt);
         setToolActivity(snap.toolActivity);
         setLoading(true);
         return;
@@ -625,6 +684,9 @@ export default function ProjectChatPage() {
 
   const canSend = Boolean(chatId) && (input.trim().length > 0 || pendingFiles.length > 0);
   const currentTitle = filteredChats.find((chat) => chat.id === chatId)?.title ?? "Диалог";
+  const streamingMessage = messages[messages.length - 1];
+  const liveStreamChars =
+    loading && streamingMessage?.role === "assistant" ? streamingMessage.content.length : 0;
 
   return (
     <div className="accent-ring grid min-h-[calc(100dvh-14rem)] gap-0 overflow-hidden rounded-[var(--ar-radius-lg)] border border-black/[0.06] bg-white lg:grid-cols-[240px_1fr]">
@@ -758,6 +820,8 @@ export default function ProjectChatPage() {
               <AgentStatusPanel
                 status={agentStatus}
                 projectId={projectId}
+                turnStartedAt={turnStartedAt}
+                liveChars={liveStreamChars}
                 onContinue={() => void runTurn("Настроил секрет, можешь продолжать.", [])}
               />
             ) : null}

@@ -13,7 +13,11 @@ from src.db.models.project_service import ProjectService
 from src.db.session import SessionLocal
 from src.services.artifacts import build_project_image
 from src.services.billing import run_billing_maintenance
-from src.services.cloudflare_dns import CloudflareDnsError, sync_dns_for_website_deploy
+from src.services.cloudflare_dns import (
+    CloudflareDnsError,
+    sync_dns_for_website_deploy,
+    user_facing_dns_note,
+)
 from src.services.deployment.docker_adapter import DeployRequest, DockerDeploymentAdapter
 from src.services.deployment_check import (
     check_and_repair_deployment,
@@ -37,7 +41,7 @@ from src.services.project_services import (
     build_connection_env,
     ensure_service_containers,
 )
-from src.services.project_subdomain import resolve_deploy_subdomain
+from src.services.project_subdomain import ensure_deploy_subdomain, resolve_deploy_subdomain
 from src.services.telegram_profile import TelegramProfileError, fetch_bot_profile
 
 logger = logging.getLogger(__name__)
@@ -145,6 +149,9 @@ def _process_job_body(db: Session, job: dict) -> None:
         append_deployment_log(deployment, "\nОбраз собран. Запускаю контейнер…\n")
         db.add(deployment)
         db.commit()
+        if not project.deploy_subdomain:
+            ensure_deploy_subdomain(db, project, prompt=project.description or None)
+            db.commit()
         subdomain = resolve_deploy_subdomain(project)
         has_website = project.type in ("website", "mixed")
         has_bot = project.type in ("telegram_bot", "mixed")
@@ -215,11 +222,14 @@ def _process_job_body(db: Session, job: dict) -> None:
         project.status = "live"
         if expose_http:
             try:
-                dns_messages = sync_dns_for_website_deploy(subdomain)
-                dns_note = "Cloudflare DNS: " + "; ".join(dns_messages)
-                project.logs = f"{project.logs}\n{dns_note}".strip() if project.logs else dns_note
+                dns_host = sync_dns_for_website_deploy(subdomain)
+                if dns_host:
+                    dns_note = user_facing_dns_note(subdomain, host=dns_host)
+                    project.logs = (
+                        f"{project.logs}\n{dns_note}".strip() if project.logs else dns_note
+                    )
             except CloudflareDnsError as dns_exc:
-                dns_note = f"Cloudflare DNS warning: {dns_exc}"
+                dns_note = user_facing_dns_note(subdomain, error=str(dns_exc))
                 project.logs = f"{project.logs}\n{dns_note}".strip() if project.logs else dns_note
         if has_website and has_bot and telegram_url:
             # deployment_url holds the site's public link (the primary "open project" link) -
