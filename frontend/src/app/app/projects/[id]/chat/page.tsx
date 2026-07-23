@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   Activity,
@@ -108,27 +108,62 @@ function toolIcon(label: string) {
   return <Wrench size={13} />;
 }
 
+function ExecutionReportShell({
+  children,
+  collapsible = false,
+}: {
+  children: ReactNode;
+  collapsible?: boolean;
+}) {
+  // Shared chrome for live tool activity and the finished "Отчёт о выполнении" block so they
+  // read as one panel (header + body, single border) instead of a floating pill over a card.
+  if (!collapsible) {
+    return (
+      <div className="mb-3 overflow-hidden rounded-xl border border-black/8 bg-[#fafafa] text-[13px]">
+        <div className="flex items-center gap-1.5 px-3 py-2 text-[var(--ar-stone)]">
+          <Activity size={12} className="shrink-0" />
+          <span className="flex-1">Отчёт о выполнении</span>
+        </div>
+        <div className="border-t border-black/8">{children}</div>
+      </div>
+    );
+  }
+
+  return (
+    <details className="group mt-2 overflow-hidden rounded-xl border border-black/8 bg-[#fafafa] text-[13px]">
+      <summary className="report-summary flex cursor-pointer select-none items-center gap-1.5 px-3 py-2 text-[var(--ar-stone)] hover:text-[var(--ar-mist)]">
+        <Activity size={12} className="shrink-0" />
+        <span className="flex-1">Отчёт о выполнении</span>
+        <ChevronDown size={13} className="shrink-0 opacity-60 transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="border-t border-black/8">{children}</div>
+    </details>
+  );
+}
+
 function ToolActivityFeed({ items }: { items: ToolActivityItem[] }) {
   if (items.length === 0) return null;
   return (
-    <div className="scrollbar-airy mb-3 max-h-40 space-y-1 overflow-y-auto rounded-xl border border-black/8 bg-[#fafafa] px-3 py-2">
-      {items.map((item) => (
-        <div
-          key={item.id}
-          className={cn(
-            "flex items-center gap-2 text-xs",
-            item.state === "error"
-              ? "text-rose-600"
-              : item.state === "done"
-                ? "text-[var(--ar-mist)]"
-                : "text-[var(--ar-black)]"
-          )}
-        >
-          <span className="shrink-0 opacity-70">{toolIcon(item.label)}</span>
-          <span className="truncate">{item.label}</span>
-        </div>
-      ))}
-    </div>
+    <ExecutionReportShell>
+      <div className="scrollbar-airy max-h-40 space-y-1 overflow-y-auto px-3 py-2">
+        {items.map((item) => (
+          <div
+            key={item.id}
+            className={cn(
+              "flex items-center gap-2 text-xs",
+              item.state === "error"
+                ? "text-rose-600"
+                : item.state === "done"
+                  ? "text-[var(--ar-mist)]"
+                  : "text-[var(--ar-black)]"
+            )}
+          >
+            <span className="shrink-0 opacity-70">{toolIcon(item.label)}</span>
+            <span className="truncate">{item.label}</span>
+          </div>
+        ))}
+      </div>
+    </ExecutionReportShell>
   );
 }
 
@@ -355,17 +390,14 @@ function MessageBody({
     return (
       <div className="cursor-chat-assistant prose-chat prose-chat-cursor text-[15px] text-[var(--ar-black)]">
         <ReactMarkdown rehypePlugins={[rehypeHighlight]}>{main}</ReactMarkdown>
-        {report ? (
-          <details className="group mt-2 rounded-xl border border-black/8 bg-[#fafafa] text-[13px]">
-            <summary className="report-summary flex cursor-pointer select-none items-center gap-1.5 px-3 py-2 text-[var(--ar-stone)] hover:text-[var(--ar-mist)]">
-              <Activity size={12} className="shrink-0" />
-              <span className="flex-1">Отчёт о выполнении</span>
-              <ChevronDown size={13} className="shrink-0 opacity-60 transition-transform group-open:rotate-180" />
-            </summary>
-            <div className="prose-chat prose-chat-compact scrollbar-airy max-h-64 overflow-y-auto border-t border-black/8 px-3 py-2 text-[var(--ar-mist)]">
+        {/* Hide while streaming so a mid-turn report heading doesn't render as a closed pill
+            stacked on the live tool-activity panel (same title, two borders). */}
+        {report && !isStreaming ? (
+          <ExecutionReportShell collapsible>
+            <div className="prose-chat prose-chat-compact scrollbar-airy max-h-64 overflow-y-auto px-3 py-2 text-[var(--ar-mist)]">
               <ReactMarkdown rehypePlugins={[rehypeHighlight]}>{report}</ReactMarkdown>
             </div>
-          </details>
+          </ExecutionReportShell>
         ) : null}
       </div>
     );

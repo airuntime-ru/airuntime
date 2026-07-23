@@ -19,6 +19,7 @@ from src.db.models.project import Project
 from src.db.models.secret import Secret
 from src.db.models.user import User
 from src.db.session import get_db
+from src.services.cloudflare_dns import delete_dns_for_website_deploy
 from src.services.deployment_check import check_and_repair_deployment
 from src.services.docker_control_queue import submit_control_job
 from src.services.project_intent import infer_project_type, reconcile_type_with_workspace
@@ -30,7 +31,11 @@ from src.services.project_runtime import (
     start_project_runtime,
     stop_project_runtime,
 )
-from src.services.project_subdomain import assert_subdomain_available, normalize_deploy_subdomain
+from src.services.project_subdomain import (
+    assert_subdomain_available,
+    normalize_deploy_subdomain,
+    resolve_deploy_subdomain,
+)
 from src.services.secrets import TELEGRAM_BOT_TOKEN_KEY
 from src.services.system_settings import get_system_setting_number
 from src.services.workspace import project_dir
@@ -245,6 +250,19 @@ def delete_project(
     shutil.rmtree(workspace_path, ignore_errors=True)
     if workspace_path.exists():
         logger.warning("Workspace directory still present after rmtree: %s", workspace_path)
+    # DNS cleanup must run while deploy_subdomain / resolved host are still available.
+    # Best-effort: a Cloudflare outage must not leave the project undeletable.
+    if project.type in ("website", "mixed"):
+        subdomain = resolve_deploy_subdomain(project)
+        try:
+            delete_dns_for_website_deploy(subdomain)
+        except Exception as dns_exc:  # noqa: BLE001 - never block project deletion on DNS
+            logger.warning(
+                "Cloudflare DNS cleanup failed for deleted project %s (subdomain=%s): %s",
+                project.id,
+                subdomain,
+                dns_exc,
+            )
     db.delete(project)
     db.commit()
     return {"status": "deleted"}

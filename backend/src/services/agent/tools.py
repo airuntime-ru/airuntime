@@ -154,10 +154,12 @@ TOOL_DEFS: list[dict[str, Any]] = [
         "name": "request_service",
         "description": (
             "Ask the platform to provision a real backing service (database, cache, queue, "
-            "search index - anything that runs as its own container) for this project, when "
-            "SQLite genuinely isn't enough. Call this instead of writing a docker-compose.yml "
-            "or assuming an external service already exists - the platform starts the "
-            "container for you on a private network reachable from your app. For "
+            "search index - anything that runs as its own container) for this project. For "
+            "feature-rich sites (auth, cabinet, multi-user, booking, history, admin) prefer "
+            "postgres via this tool as the default path - do not default to SQLite-in-container. "
+            "SQLite is fine only for tiny/local prototypes. Call this instead of writing a "
+            "docker-compose.yml or assuming an external service already exists - the platform "
+            "starts the container for you on a private network reachable from your app. For "
             "'postgres'/'redis'/'mysql'/'mongo'/'rabbitmq', just pass kind - the platform picks "
             "a sensible image, GENERATES THE PASSWORD/USERNAME ITSELF, and injects a ready "
             "connection-string env var (DATABASE_URL/REDIS_URL/MONGO_URL/RABBITMQ_URL) your code "

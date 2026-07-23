@@ -133,6 +133,103 @@ def test_projects_crud(client):
     assert body["planned_site_url"] == "https://my-landing.airuntime.ru"
 
 
+def test_delete_project_cleans_cloudflare_dns(client, monkeypatch):
+    from src.api.routers import projects as projects_router
+
+    headers = auth_tokens(client, "dns-delete@airuntime.dev")
+    project = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={"type": "website", "name": "DNS Site", "description": ""},
+    ).json()
+    client.patch(
+        f"/api/v1/projects/{project['id']}",
+        headers=headers,
+        json={"deploy_subdomain": "dns-site"},
+    )
+
+    deleted_subdomains: list[str] = []
+
+    def fake_delete_dns(subdomain: str):
+        deleted_subdomains.append(subdomain)
+        return f"{subdomain}.airuntime.ru"
+
+    monkeypatch.setattr(projects_router, "delete_dns_for_website_deploy", fake_delete_dns)
+    monkeypatch.setattr(
+        projects_router,
+        "submit_control_job",
+        lambda **kwargs: {"ok": True},
+    )
+
+    response = client.delete(f"/api/v1/projects/{project['id']}", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "deleted"}
+    assert deleted_subdomains == ["dns-site"]
+    assert client.get(f"/api/v1/projects/{project['id']}", headers=headers).status_code == 404
+
+
+def test_delete_project_continues_when_dns_cleanup_fails(client, monkeypatch):
+    from src.api.routers import projects as projects_router
+    from src.services.cloudflare_dns import CloudflareDnsError
+
+    headers = auth_tokens(client, "dns-fail@airuntime.dev")
+    project = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={"type": "mixed", "name": "DNS Fail", "description": ""},
+    ).json()
+    client.patch(
+        f"/api/v1/projects/{project['id']}",
+        headers=headers,
+        json={"deploy_subdomain": "dns-fail"},
+    )
+
+    def boom(_subdomain: str):
+        raise CloudflareDnsError("token expired")
+
+    monkeypatch.setattr(projects_router, "delete_dns_for_website_deploy", boom)
+    monkeypatch.setattr(
+        projects_router,
+        "submit_control_job",
+        lambda **kwargs: {"ok": True},
+    )
+
+    response = client.delete(f"/api/v1/projects/{project['id']}", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "deleted"}
+
+
+def test_delete_bot_project_skips_dns_cleanup(client, monkeypatch):
+    from src.api.routers import projects as projects_router
+
+    headers = auth_tokens(client, "bot-delete@airuntime.dev")
+    project = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={"type": "telegram_bot", "name": "Bot Only", "description": ""},
+    ).json()
+
+    called = []
+
+    monkeypatch.setattr(
+        projects_router,
+        "delete_dns_for_website_deploy",
+        lambda subdomain: called.append(subdomain),
+    )
+    monkeypatch.setattr(
+        projects_router,
+        "submit_control_job",
+        lambda **kwargs: {"ok": True},
+    )
+
+    response = client.delete(f"/api/v1/projects/{project['id']}", headers=headers)
+
+    assert response.status_code == 200
+    assert called == []
+
+
 def test_project_type_is_inferred_when_create_payload_has_no_type(client):
     headers = auth_tokens(client, "intent@airuntime.dev")
 

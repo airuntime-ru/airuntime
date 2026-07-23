@@ -38,6 +38,20 @@ def _request(method: str, path: str, body: dict[str, Any] | None = None) -> dict
     return payload
 
 
+def _platform_a_hosts(domain: str) -> tuple[str, ...]:
+    """Hosts managed by ensure_platform_dns — never delete these via project cleanup."""
+    return (
+        domain,
+        f"www.{domain}",
+        f"api.{domain}",
+        f"admin.{domain}",
+        f"s3.{domain}",
+        f"s3-console.{domain}",
+        f"mail.{domain}",
+        f"*.{domain}",
+    )
+
+
 def upsert_dns_record(
     record_type: str,
     name: str,
@@ -66,6 +80,17 @@ def upsert_dns_record(
     return f"created {record_type} {name}"
 
 
+def delete_dns_record(record_type: str, name: str) -> str:
+    """Delete a single DNS record by type+name. No-op (missing) if it does not exist."""
+    existing = _request("GET", f"/dns_records?type={record_type}&name={name}")
+    records = existing.get("result") or []
+    if not records:
+        return f"missing {record_type} {name}"
+    record_id = records[0]["id"]
+    _request("DELETE", f"/dns_records/{record_id}")
+    return f"deleted {record_type} {name}"
+
+
 def ensure_platform_dns() -> list[str]:
     """Apply the same records as scripts/setup_cloudflare_dns.sh."""
     if not dns_configured():
@@ -77,16 +102,7 @@ def ensure_platform_dns() -> list[str]:
         raise CloudflareDnsError("SERVER_IP is required")
 
     messages: list[str] = []
-    for host in [
-        domain,
-        f"www.{domain}",
-        f"api.{domain}",
-        f"admin.{domain}",
-        f"s3.{domain}",
-        f"s3-console.{domain}",
-        f"mail.{domain}",
-        f"*.{domain}",
-    ]:
+    for host in _platform_a_hosts(domain):
         messages.append(upsert_dns_record("A", host, ip))
 
     messages.append(upsert_dns_record("MX", domain, f"mail.{domain}", priority=10))
@@ -120,6 +136,26 @@ def sync_dns_for_website_deploy(subdomain: str) -> str | None:
     logger.info("Cloudflare platform DNS: %s", "; ".join(platform_messages))
     project_message = upsert_dns_record("A", host, settings.server_ip or "")
     logger.info("Cloudflare DNS synced for %s (%s)", host, project_message)
+    return host
+
+
+def delete_dns_for_website_deploy(subdomain: str) -> str | None:
+    """Remove the project-specific A record created by sync_dns_for_website_deploy.
+
+    Does not touch platform-wide records (apex, www, api, wildcard, MX, TXT, …).
+    Returns the public host when a delete was attempted, else None when skipped.
+    """
+    host = project_public_host(subdomain)
+    if not dns_configured():
+        logger.info("Cloudflare DNS delete skipped for %s: credentials not configured", host)
+        return None
+
+    domain = settings.resolved_app_domain
+    if host in _platform_a_hosts(domain):
+        raise CloudflareDnsError(f"Refusing to delete platform DNS record {host}")
+
+    message = delete_dns_record("A", host)
+    logger.info("Cloudflare DNS deleted for %s (%s)", host, message)
     return host
 
 

@@ -44,7 +44,19 @@ def test_website_and_mixed_prompt_ban_bot_settings_ui_on_public_site():
 def test_simple_landing_may_stay_one_page():
     prompt = build_system_prompt(_project("website"))
     assert "Простой лендинг" in prompt
-    assert "можно один public/index.html" in prompt
+    assert "один public/index.html" in prompt
+    assert "статический HTML" in prompt or "HTML/CSS/JS" in prompt
+
+
+def test_website_prompt_defaults_rich_sites_to_postgres_not_sqlite():
+    prompt = build_system_prompt(_project("website"))
+    assert "request_service(kind='postgres')" in prompt or "request_service" in prompt
+    assert "postgres" in prompt.lower()
+    assert "не SQLite-в-контейнере" in prompt or "SQLite-в-контейнере" in prompt
+    assert "по умолчанию достаточно SQLite" not in prompt
+    assert "FastAPI" in prompt or "бэкенд" in prompt.lower()
+    assert "React/Vue" in prompt or "Vue, React" in prompt
+    assert "не фиксирует Python/HTML/SQLite" in prompt or "не требует React/Vue/FastAPI" in prompt
 
 
 def test_quality_rules_forbid_endless_index_for_rich_sites():
