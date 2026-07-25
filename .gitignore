@@ -61,7 +61,9 @@ admin/*.sqlite3
 /logs/
 /output/
 
-# Local audit artifacts / one-off scripts
-frontend/docs/landing-audit/*.png
-scripts/tmp_*
+# Ops / one-off server scripts (keep local only; not frontend/scripts/)
+/scripts/
+
+# Local audit artifacts
+frontend/docs/landing-audit/
 backend/.email-preview/
