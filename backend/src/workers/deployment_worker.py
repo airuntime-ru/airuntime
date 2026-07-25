@@ -31,14 +31,14 @@ from src.services.deployments import (
     store_deployment_error,
     truncate_logs_ref,
 )
-from src.services.email import send_branded_email
-from src.services.email_templates import deploy_failed_email, project_deployed_email
 from src.services.docker_control_actions import run_control_action
 from src.services.docker_control_queue import (
     pop_control_job,
     push_control_result,
     worker_inline_docker,
 )
+from src.services.email import send_branded_email
+from src.services.email_templates import deploy_failed_email, project_deployed_email
 from src.services.image_janitor import sweep_unrecognized_images
 from src.services.project_services import (
     build_connection_env,
@@ -63,8 +63,6 @@ def process_billing_sweep() -> None:
 
 
 def process_image_sweep() -> None:
-    if not settings.image_janitor_enabled:
-        return
     adapter = DockerDeploymentAdapter()
     sweep_unrecognized_images(adapter.client)
 
@@ -99,9 +97,7 @@ def process_control_job(job: dict) -> None:
         return
     # Drop Redis envelope keys so run_control_action only sees action-specific extras.
     extra = {
-        key: value
-        for key, value in job.items()
-        if key not in {"job_id", "action", "project_id"}
+        key: value for key, value in job.items() if key not in {"job_id", "action", "project_id"}
     }
     with worker_inline_docker():
         result = run_control_action(action=action, project_id=project_id, extra=extra)
@@ -338,11 +334,7 @@ def _mark_deployment_failed(db: Session, job: dict, exc: BaseException) -> None:
         return
 
     project = db.get(Project, job.get("project_id"))
-    if (
-        project
-        and not job.get("skip_auto_check")
-        and is_repairable_app_error(full_error)
-    ):
+    if project and not job.get("skip_auto_check") and is_repairable_app_error(full_error):
         try:
             # Pass the FULL error so repair is not limited to the 500-char logs_ref hint.
             # Runs under worker_inline_docker so build_project/logs do not self-deadlock.
@@ -358,11 +350,7 @@ def reap_stale_deployments() -> int:
     db: Session = SessionLocal()
     reaped = 0
     try:
-        candidates = (
-            db.query(Deployment)
-            .filter(Deployment.status.in_(("queued", "running")))
-            .all()
-        )
+        candidates = db.query(Deployment).filter(Deployment.status.in_(("queued", "running"))).all()
         for deployment in candidates:
             # Null started_at = orphan from older code paths; treat as immediately stale.
             if deployment.started_at is not None and deployment.started_at >= cutoff:
@@ -427,11 +415,16 @@ def run() -> None:
                 try:
                     db = SessionLocal()
                     try:
-                        _mark_deployment_failed(db, job, RuntimeError("Worker crashed during deploy"))
+                        _mark_deployment_failed(
+                            db, job, RuntimeError("Worker crashed during deploy")
+                        )
                     finally:
                         db.close()
                 except Exception:  # noqa: BLE001
-                    logger.exception("Could not mark deployment %s failed after worker crash", job.get("deployment_id"))
+                    logger.exception(
+                        "Could not mark deployment %s failed after worker crash",
+                        job.get("deployment_id"),
+                    )
 
         now = time.monotonic()
         if now - last_stale_sweep >= STALE_SWEEP_INTERVAL_SECONDS:

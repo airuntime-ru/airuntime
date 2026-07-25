@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 
 import pytest
 
@@ -20,7 +21,6 @@ from src.services.email_templates import (
     project_deployed_email,
     verify_email,
 )
-from datetime import datetime
 
 
 def test_login_code_email_contains_branding():

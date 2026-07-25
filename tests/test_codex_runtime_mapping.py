@@ -26,7 +26,10 @@ def test_relativize_handles_missing_root():
 
 
 def test_relativize_leaves_unrecognized_paths_alone():
-    assert _relativize("/some/other/path.py", Path("/data/airruntime-projects/proj-1")) == "/some/other/path.py"
+    assert (
+        _relativize("/some/other/path.py", Path("/data/airruntime-projects/proj-1"))
+        == "/some/other/path.py"
+    )
 
 
 def _command_started(command: str) -> dict:
@@ -88,7 +91,10 @@ def test_file_change_summary_is_russian_and_relativized():
         "item": {
             "id": "item_2",
             "type": "file_change",
-            "changes": [{"path": "/workspace/public/app.js"}, {"path": "/workspace/public/index.html"}],
+            "changes": [
+                {"path": "/workspace/public/app.js"},
+                {"path": "/workspace/public/index.html"},
+            ],
         },
     }
     events = _map_event(payload, workspace_root=root)

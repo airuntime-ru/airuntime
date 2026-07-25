@@ -1,9 +1,33 @@
 import json
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from tests.conftest import auth_tokens
+
+
+@pytest.fixture(autouse=True)
+def _stub_moderation_for_chat_router_tests(monkeypatch):
+    """chat.py's stream handler calls `check_project_safety(...)` synchronously, before
+    `event_source()` even starts, on every turn with non-empty content - a second, independent
+    real-Codex call site that patching `chat_router.run_product_pipeline` does not cover
+    (moderation.py calls `codex_simple_complete` directly for the "openai" provider, see
+    moderation.py:107-109).
+    Whenever a real OPENAI_API_KEY happens to be present in the environment/.env (as it is for
+    local dev), `resolve_provider_and_model` picks "openai" as configured and this fires for
+    real, blocking each such test for `codex_simple_timeout_seconds` (45s) against a Redis queue
+    with no worker listening before failing open (moderation.py's own fail-open contract - see
+    its docstring). Stubbing it out here is behavior-neutral (tests never exercise moderation
+    blocking) and keeps this file fast and deterministic regardless of what is in .env."""
+    from src.api.routers import chat as chat_router
+    from src.services.moderation import ModerationVerdict
+
+    async def _fake_check_project_safety(**kwargs):
+        return ModerationVerdict(blocked=False)
+
+    monkeypatch.setattr(chat_router, "check_project_safety", _fake_check_project_safety)
 
 
 def _fake_live_deployment(db, project):
@@ -29,22 +53,46 @@ def _fake_live_deployment(db, project):
     return deployment
 
 
-def _fake_run_agent_turn(
+def _write_minimal_project_files(root: Path) -> None:
+    """Write the platform's minimal deploy-contract files (see WEBSITE_REQUIRED/TELEGRAM_REQUIRED
+    in agentic_artifacts.py) so ensure_required_files() passes regardless of which type the
+    project ends up classified as. There is no template-fallback in the real pipeline any more
+    (chat.py's own "Шаблон не подставляется" message is the current, intentional behavior) - a
+    fake agent that writes nothing can never reach the verify/deploy phases these tests exercise,
+    it just short-circuits into the "agent did not produce required files" error path instead."""
+    public_dir = root / "public"
+    public_dir.mkdir(parents=True, exist_ok=True)
+    index = public_dir / "index.html"
+    if not index.exists():
+        index.write_text("<!doctype html><html><body>Test site</body></html>", encoding="utf-8")
+
+    app_py = root / "app.py"
+    if not app_py.exists():
+        app_py.write_text(
+            "import os\n\nTELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')\n",
+            encoding="utf-8",
+        )
+    requirements = root / "requirements.txt"
+    if not requirements.exists():
+        requirements.write_text("aiogram\n", encoding="utf-8")
+
+
+def _fake_run_product_pipeline(
     calls: list, *, extra_text: str = "", requested_service=None, requested_secret=None
 ):
-    """Builds a fake run_agent_turn() (backend/src/services/agent/orchestrator.py) that skips
-    real LLM/tool calls - chat.py calls this directly (it replaced constructing
-    CodingAgentSession itself when the orchestrator layer was added, see orchestrator.py), so
-    that's the seam tests patch now.
+    """Builds a fake run_product_pipeline() (backend/src/services/agent/product_pipeline.py,
+    chat.py's only turn-producer now) that skips real LLM/tool calls entirely - a single
+    TextDelta+AgentDone, none of the pipeline's own brief/UX/visual/preview/review stages.
 
-    It doesn't write any workspace files, so the router's ensure_required_files
-    check fails and falls back to the deterministic template generator - which is
-    real code, so these tests still exercise the actual fallback/deploy pipeline.
+    It writes the minimal required workspace files (see _write_minimal_project_files) so the
+    router's ensure_required_files check passes and these tests exercise the real verify/deploy
+    pipeline rather than dead-ending at "agent did not produce required files".
     """
     from src.services.agent.events import AgentDone, TextDelta
 
     async def _fake(
         *,
+        project=None,
         provider_name,
         model,
         api_key,
@@ -59,6 +107,7 @@ def _fake_run_agent_turn(
             workspace.requested_services.append(requested_service)
         if requested_secret:
             workspace.requested_secrets.append(requested_secret)
+        _write_minimal_project_files(workspace.root)
         yield TextDelta(text="Готово: ")
         yield TextDelta(text=user_message[:20])
         if extra_text:
@@ -676,7 +725,7 @@ def test_stream_prompt_generates_artifact_and_queues_deployment(client, monkeypa
         deployments.append(project.id)
         return _fake_live_deployment(db, project)
 
-    monkeypatch.setattr(chat_router, "run_agent_turn", _fake_run_agent_turn(calls))
+    monkeypatch.setattr(chat_router, "run_product_pipeline", _fake_run_product_pipeline(calls))
     monkeypatch.setattr(chat_router, "create_deployment_for_project", fake_create_deployment)
 
     headers = auth_tokens(client, "stream@airuntime.dev")
@@ -734,8 +783,8 @@ def test_request_service_tool_creates_project_service_row(client, monkeypatch, t
 
     monkeypatch.setattr(
         chat_router,
-        "run_agent_turn",
-        _fake_run_agent_turn(
+        "run_product_pipeline",
+        _fake_run_product_pipeline(
             calls, requested_service=ServiceRequest(kind="postgres", reason="нужна БД")
         ),
     )
@@ -785,8 +834,8 @@ def test_requesting_service_credential_as_secret_is_suppressed(client, monkeypat
 
     monkeypatch.setattr(
         chat_router,
-        "run_agent_turn",
-        _fake_run_agent_turn(
+        "run_product_pipeline",
+        _fake_run_product_pipeline(
             calls,
             requested_service=ServiceRequest(kind="postgres", reason="нужна БД"),
             requested_secret=("POSTGRES_PASSWORD", "Пароль к базе данных PostgreSQL"),
@@ -830,7 +879,7 @@ def test_stream_accepts_files_already_linked_to_user_message(client, monkeypatch
     def fake_create_deployment(db, project):
         return _fake_live_deployment(db, project)
 
-    monkeypatch.setattr(chat_router, "run_agent_turn", _fake_run_agent_turn(calls))
+    monkeypatch.setattr(chat_router, "run_product_pipeline", _fake_run_product_pipeline(calls))
     monkeypatch.setattr(chat_router, "create_deployment_for_project", fake_create_deployment)
 
     headers = auth_tokens(client, "stream-file@airuntime.dev")
@@ -884,7 +933,7 @@ def test_stream_subdomain_from_prompt_sets_deploy_subdomain(client, monkeypatch,
             project.deployment_url = f"https://{project.deploy_subdomain}.airuntime.ru"
         return _fake_live_deployment(db, project)
 
-    monkeypatch.setattr(chat_router, "run_agent_turn", _fake_run_agent_turn(calls))
+    monkeypatch.setattr(chat_router, "run_product_pipeline", _fake_run_product_pipeline(calls))
     monkeypatch.setattr(chat_router, "create_deployment_for_project", fake_create_deployment)
 
     headers = auth_tokens(client, "subdomain@airuntime.dev")
@@ -903,7 +952,17 @@ def test_stream_subdomain_from_prompt_sets_deploy_subdomain(client, monkeypatch,
 
     assert response.status_code == 200
     assert "https://test.airuntime.ru" in response.text
-    assert "Сайт запущен" in response.text
+    # response.text is the raw SSE body - json.dumps(..., ensure_ascii=True) (the default, see
+    # chat.py's _sse_chunk/_sse_status) escapes Cyrillic to literal \uXXXX, so a Cyrillic
+    # substring check must go through json.loads like the other stream tests in this file rather
+    # than matching against response.text directly.
+    payloads = [
+        json.loads(line.removeprefix("data: "))
+        for line in response.text.splitlines()
+        if line.startswith("data: {")
+    ]
+    chunks = [payload["chunk"] for payload in payloads if "chunk" in payload]
+    assert any("Сайт запущен" in chunk for chunk in chunks)
     assert deployments == ["test"]
 
 
@@ -915,7 +974,7 @@ def test_stream_prompt_reclassifies_project_before_generation(client, monkeypatc
     calls: list = []
     deployments = []
 
-    monkeypatch.setattr(chat_router, "run_agent_turn", _fake_run_agent_turn(calls))
+    monkeypatch.setattr(chat_router, "run_product_pipeline", _fake_run_product_pipeline(calls))
     monkeypatch.setattr(chat_router, "commit_snapshot", lambda artifact_path, message: "abc123")
 
     def fake_create_deployment(db, project):
@@ -958,7 +1017,7 @@ def test_project_combining_site_and_bot_signals_is_classified_mixed(client, monk
     monkeypatch.setattr(settings, "openai_api_key", "test-key")
     calls: list = []
 
-    monkeypatch.setattr(chat_router, "run_agent_turn", _fake_run_agent_turn(calls))
+    monkeypatch.setattr(chat_router, "run_product_pipeline", _fake_run_product_pipeline(calls))
     monkeypatch.setattr(chat_router, "commit_snapshot", lambda artifact_path, message: "abc123")
 
     headers = auth_tokens(client, "mixed-project@airuntime.dev")

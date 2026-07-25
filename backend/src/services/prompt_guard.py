@@ -32,9 +32,7 @@ def sanitize_user_message(content: str) -> str:
     return trimmed
 
 
-def prepare_agent_user_message(
-    content: str, *, max_chars: int = MAX_AGENT_INPUT_CHARS
-) -> str:
+def prepare_agent_user_message(content: str, *, max_chars: int = MAX_AGENT_INPUT_CHARS) -> str:
     """Trim oversized paste for the LLM, keeping the tail (where deploy errors usually are).
 
     The full sanitized text remains stored in the messages table for the UI.
@@ -58,8 +56,23 @@ def clip_history_message(content: str, *, max_chars: int = MAX_HISTORY_MESSAGE_C
 
 
 def redact_secrets(text: str) -> str:
-    return re.sub(
+    """Best-effort scrub for secret-looking values in text that may end up in an LLM prompt
+    (e.g. runtime/build error excerpts - see deployment_check.py's `_collect_error_excerpt` and
+    orchestration/context_engine.py's `redact()`, its main callers). Two independent patterns:
+
+    1. `KEY: value` / `KEY=value` where KEY names a credential (api_key/token/secret/password).
+    2. `scheme://user:password@host` - the shape project_services.py's generated
+       DATABASE_URL/REDIS_URL/MONGO_URL/RABBITMQ_URL env vars take, which (1) alone misses
+       entirely since "DATABASE_URL" doesn't contain any of those four keywords.
+
+    Not a substitute for keeping secret values out of prompts in the first place (they already
+    are - request_secret/request_service never pass a value through the LLM) - this guards
+    against a *different* value entering log/error text some other way, e.g. a crash or a
+    debug print in agent-generated code that echoes `os.environ`.
+    """
+    scrubbed = re.sub(
         r"(?i)(api[_-]?key|token|secret|password)\s*[:=]\s*\S+",
         r"\1=[REDACTED]",
         text,
     )
+    return re.sub(r"://([^:/\s@]+):([^@/\s]+)@", r"://\1:[REDACTED]@", scrubbed)

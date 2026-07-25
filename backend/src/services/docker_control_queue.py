@@ -12,8 +12,8 @@ from __future__ import annotations
 import contextvars
 import json
 import uuid
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Iterator
 
 from redis import Redis
 from redis.exceptions import RedisError

@@ -345,17 +345,13 @@ def check_and_repair_deployment(
         db,
         chat,
         role="assistant",
-        content=(
-            "Нашёл ошибку запуска в логах — передаю её агенту для анализа и исправления…"
-        ),
+        content=("Нашёл ошибку запуска в логах — передаю её агенту для анализа и исправления…"),
     )
     db.commit()
 
     root = _project_dir(project.id)
     try:
-        summary = run_async(
-            _run_repair(project, root, error_excerpt, build_failure=build_failure)
-        )
+        summary = run_async(_run_repair(project, root, error_excerpt, build_failure=build_failure))
         ensure_required_files(project, root)
     except ArtifactError as exc:
         fail_summary = f"Найдена ошибка, но автоисправление не удалось: {exc}"
@@ -427,12 +423,12 @@ async def iter_repair_sse(
         return f"data: {json.dumps({'chunk': chunk})}\n\n"
 
     def _sse_status(phase: str, label: str, state: str = "running") -> str:
-        return f"data: {json.dumps({'status': {'phase': phase, 'label': label, 'state': state}})}\n\n"
+        return (
+            f"data: {json.dumps({'status': {'phase': phase, 'label': label, 'state': state}})}\n\n"
+        )
 
     deployment = _latest_checkable_deployment(db, project)
-    error_excerpt, build_failure = _collect_error_excerpt(
-        deployment, force_error=force_error
-    )
+    error_excerpt, build_failure = _collect_error_excerpt(deployment, force_error=force_error)
 
     if not error_excerpt:
         if deployment and deployment.status == "failed":

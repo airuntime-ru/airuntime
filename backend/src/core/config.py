@@ -86,30 +86,70 @@ class Settings(BaseSettings):
     enable_agent_orchestrator: bool = False
 
     # Product-quality pipeline (brief -> UX -> visual -> implement -> build -> preview ->
-    # review -> fix) - see backend/src/services/agent/product_pipeline.py. The single call
-    # site (chat.py's _stream_events) falls straight back to plain run_agent_turn when this is
-    # False, so leaving it off is byte-identical to the pre-pipeline behavior. The four
-    # sub-switches below are only consulted when this master flag is on - each can be turned
-    # off independently (e.g. brief-only, or preview-without-review).
-    #
-    # On by explicit request, to see the full current flow without extra setup. Known
-    # consequence, accepted by the user: tests/test_api.py's chat-streaming tests monkeypatch
-    # chat_router.run_agent_turn directly - with this on they no longer exercise the code path
-    # they think they do (chat.py now calls run_product_pipeline instead) and will fail/need
-    # updating to also patch run_product_pipeline or set this False. Not fixed here on purpose.
-    enable_product_pipeline: bool = True
-    enable_ux_planning: bool = True
-    enable_visual_planning: bool = True
-    enable_browser_preview: bool = True
-    enable_design_review: bool = True
-    # Hard ceiling on fix->re-preview->re-review loops per turn (product_pipeline.py). Keep small -
-    # each extra iteration is a full extra agent turn plus a preview+review call.
-    max_review_iterations: int = 2
+    # review -> fix) - see backend/src/services/agent/product_pipeline.py. Always runs (every
+    # stage, review iterations capped at product_pipeline._MAX_REVIEW_ITERATIONS) - this used
+    # to be a bundle of independently-toggleable flags; once every stage had been running by
+    # default for a while with no reason to turn any of them off individually, they were
+    # removed rather than kept as permanently-True dead toggles.
     # None (default) means "use this turn's own provider/model" for the review call. Set to pin
     # review to a specific stronger/cheaper model regardless of what the project is generating
     # with - e.g. always review with a strong model even if generation runs on a cheaper one.
     reviewer_provider: str | None = None
     reviewer_model: str | None = None
+
+    # Persistent orchestration engine (backend/src/services/orchestration/) - a DB-backed
+    # planner/task-graph/validation layer that sits ABOVE run_agent_turn/run_product_pipeline,
+    # not a replacement for the coding loop itself. Off by default: chat.py's dispatch is
+    # byte-identical to today when this is False (same "off means untouched" contract as
+    # enable_product_pipeline). See docs in services/orchestration/__init__.py.
+    enable_orchestration_engine: bool = False
+    # Sub-switches below only matter when enable_orchestration_engine is True.
+    # False routes every task straight to the generalist Implementer instead of the full
+    # role registry (product_planner/solution_architect/ui_ux_specialist/build_fixer/
+    # deploy_fixer/qa_reviewer/security_reviewer/integration_agent) - useful for isolating
+    # "is the graph/validation machinery the problem" from "is role-specific prompting the
+    # problem" during rollout.
+    enable_specialist_agents: bool = True
+    # False routes every task to a specialist agent even when a deterministic skill
+    # (services/orchestration/skills/) would match - skills stay registered either way, this
+    # only affects capability_router.py's routing preference.
+    enable_skills: bool = True
+    # MCP servers are admin-allowlisted individually (db/models/mcp_server.py) regardless of
+    # this flag - this is the master switch that keeps McpCapabilityProvider out of the
+    # capability router entirely until MCP has been exercised in staging.
+    enable_mcp: bool = False
+    # False forces every write task onto shared_sequential workspace mode even if the planner
+    # marked it independently-scoped - isolated_worktree is the newest/highest-blast-radius
+    # isolation mode (real git worktrees + branches, see workspace_isolation.py), kept opt-in
+    # even after the base engine ships.
+    enable_worktree_isolation: bool = False
+    # False makes FailurePolicyEngine's "replan" decision degrade to "fail" instead - keeps the
+    # rest of repair/retry working while replanning (the least-tested decision, since it
+    # depends on planner call quality) stays isolated during rollout.
+    enable_replanning: bool = True
+    # Persisting OrchestrationRun/Plan/AgentTask rows to Postgres is not optional once the
+    # engine is on (that's what makes it survive a restart - see DEFINITION OF DONE). This flag
+    # exists as the documented single point that must be True for enable_orchestration_engine
+    # to actually take effect; setting it False is equivalent to disabling the whole engine
+    # (engine.py checks both and logs a warning if they disagree) rather than a second,
+    # non-persistent execution mode - deliberately not built, since it would just be a worse
+    # duplicate of the old in-memory orchestrator.py this system replaces.
+    enable_persistent_runs: bool = True
+
+    orchestration_run_lease_ttl_seconds: int = 180
+    orchestration_task_default_timeout_seconds: int = 900
+    # Safety ceiling on how many nodes one plan graph may contain - mirrors the old
+    # orchestrator.py's _MAX_SUBTASKS=4 in spirit but larger, since this plans a real DAG
+    # (independent read-only + isolated-write parallelism) rather than N sequential text
+    # chunks against one shared workspace.
+    orchestration_max_plan_tasks: int = 16
+    # Loop-detection ceiling (failure_policy.py) - a run that would need more replans than this
+    # to converge stops and asks the user instead of grinding forever.
+    orchestration_max_replans: int = 3
+    orchestration_max_task_attempts: int = 3
+    # None = no per-run cap beyond the user's own credit balance (billing.py still gates that).
+    orchestration_default_credit_budget: int | None = None
+    orchestration_event_backlog_limit: int = 2000
     # Dedicated per-turn Playwright container image (deployment/preview/Dockerfile), built the
     # same way as codex_image (`docker compose build preview`, profiles: [build-only]). Kept out
     # of backend/worker's own Dockerfile so neither image carries browser weight.
@@ -117,11 +157,6 @@ class Settings(BaseSettings):
     preview_timeout_seconds: int = 90
     preview_memory_limit: str = "1g"
     preview_cpu_limit: str = "1.0"
-
-    # Periodic sweep of ad-hoc images Codex builds on its own while self-testing a turn (see
-    # image_janitor.py for the safety checks). On by default - flip off if you'd rather review
-    # `docker images` and clean up manually.
-    image_janitor_enabled: bool = True
 
     docker_binary: str = "docker"
     deployment_port_base: int = 18000

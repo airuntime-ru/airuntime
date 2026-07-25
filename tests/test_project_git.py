@@ -9,6 +9,7 @@ from src.core.config import settings
 from src.services.project_git import (
     archive_version_stream,
     commit_snapshot,
+    init_repo_if_needed,
     list_version_tree,
     list_versions,
     project_repo_dir,
@@ -46,6 +47,14 @@ def test_git_commit_list_versions(project_dir):
     assert versions
     assert versions[0].commit_hash == commit2
     assert any(v.commit_hash == commit1 for v in versions)
+
+
+def test_list_versions_on_repo_with_no_commits_returns_empty_not_raises(project_dir):
+    # A freshly `init_repo_if_needed()`-ed repo has zero commits until the first task actually
+    # commits something - engine.py's context summary is built before that point, so `git log`
+    # exiting 128 ("does not have any commits yet") must read as "no history", not an error.
+    init_repo_if_needed(project_dir)
+    assert list_versions(project_dir, limit=10) == []
 
 
 def test_git_archive_contains_files(project_dir):

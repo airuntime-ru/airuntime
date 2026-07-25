@@ -1,9 +1,12 @@
-"""product_pipeline.run_product_pipeline is the opt-in alternative to
-orchestrator.run_agent_turn (see chat.py's call-site dispatch, gated on
-settings.enable_product_pipeline). These tests fake run_agent_turn/complete_structured/
+"""product_pipeline.run_product_pipeline is what chat.py's _stream_events always runs a turn
+through now (see chat.py's call site). These tests fake run_agent_turn/complete_structured/
 submit_control_job (module-level names, same monkeypatch convention as test_orchestrator.py)
 so the whole brief -> UX -> visual -> implement -> preview -> review -> fix loop can be driven
 deterministically without a live provider, Docker daemon, or Postgres.
+
+Every stage always runs (there is no per-stage on/off flag any more) - preview+review only
+actually skip when the project type doesn't support preview at all (see _supports_preview),
+which most tests below sidestep with a passing fake_submit_control_job rather than a flag.
 """
 
 from __future__ import annotations
@@ -134,11 +137,12 @@ def _fake_implement(
     return fake
 
 
-def _disable_planning(monkeypatch):
-    """Most control-flow tests only care about the implement/preview/review/fix loop - turn
-    off UX/visual generation so fakes don't need to handle those extra calls too."""
-    monkeypatch.setattr(product_pipeline.settings, "enable_ux_planning", False)
-    monkeypatch.setattr(product_pipeline.settings, "enable_visual_planning", False)
+def _fake_submit_control_job_passing(*, action, project_id, timeout_seconds, extra=None):
+    """Default preview/build_check double for control-flow tests that don't care about preview
+    content, just that it passes cleanly so the loop reaches (or skips past) review predictably."""
+    if action == "preview":
+        return _passing_preview()
+    return {"ok": True}
 
 
 @pytest.mark.asyncio
@@ -185,8 +189,7 @@ async def test_ux_and_visual_are_generated_and_persisted_by_default(tmp_path, mo
 
     monkeypatch.setattr(product_pipeline, "run_agent_turn", _fake_implement())
     monkeypatch.setattr(product_pipeline, "complete_structured", fake_cs)
-    monkeypatch.setattr(product_pipeline.settings, "enable_browser_preview", False)
-    monkeypatch.setattr(product_pipeline.settings, "enable_design_review", False)
+    monkeypatch.setattr(product_pipeline, "submit_control_job", _fake_submit_control_job_passing)
 
     events = await _drain(
         product_pipeline.run_product_pipeline(
@@ -201,7 +204,8 @@ async def test_ux_and_visual_are_generated_and_persisted_by_default(tmp_path, mo
         )
     )
 
-    assert calls == {"brief": 1, "ux": 1, "visual": 1, "review": 0}
+    # Preview+review always run too now (a passing preview + a passing review, one pass each).
+    assert calls == {"brief": 1, "ux": 1, "visual": 1, "review": 1}
     assert any(isinstance(e, ToolCallRequested) and e.name == "ux_planning" for e in events)
     assert any(isinstance(e, ToolCallRequested) and e.name == "visual_direction" for e in events)
     from src.services.agent import planning_store
@@ -213,59 +217,31 @@ async def test_ux_and_visual_are_generated_and_persisted_by_default(tmp_path, mo
 
 
 @pytest.mark.asyncio
-async def test_ux_and_visual_can_be_disabled_independently(tmp_path, monkeypatch):
+async def test_bot_projects_skip_preview_and_review_entirely(tmp_path, monkeypatch):
+    """Every stage always runs except preview/review, which only ever skip when the project
+    type itself doesn't support a browser preview (_supports_preview) - a telegram_bot project
+    has no page to screenshot, so there is nothing left to gate with a flag here."""
     workspace = WorkspaceTools(tmp_path, project_id="proj-1")
     fake_cs, calls, _ = _make_complete_structured()
 
     monkeypatch.setattr(product_pipeline, "run_agent_turn", _fake_implement())
     monkeypatch.setattr(product_pipeline, "complete_structured", fake_cs)
-    monkeypatch.setattr(product_pipeline.settings, "enable_browser_preview", False)
-    monkeypatch.setattr(product_pipeline.settings, "enable_design_review", False)
-    monkeypatch.setattr(product_pipeline.settings, "enable_ux_planning", False)
-    monkeypatch.setattr(product_pipeline.settings, "enable_visual_planning", True)
-
-    await _drain(
-        product_pipeline.run_product_pipeline(
-            project=_project(),
-            provider_name="anthropic",
-            model="m",
-            api_key="key",
-            workspace=workspace,
-            system_prompt="base",
-            history=[],
-            user_message="сделай сайт",
-        )
-    )
-
-    assert calls["ux"] == 0
-    assert calls["visual"] == 1
-
-
-@pytest.mark.asyncio
-async def test_happy_path_without_preview_or_review(tmp_path, monkeypatch):
-    workspace = WorkspaceTools(tmp_path, project_id="proj-1")
-    fake_cs, calls, _ = _make_complete_structured()
-
-    monkeypatch.setattr(product_pipeline, "run_agent_turn", _fake_implement())
-    monkeypatch.setattr(product_pipeline, "complete_structured", fake_cs)
-    monkeypatch.setattr(product_pipeline.settings, "enable_browser_preview", False)
-    monkeypatch.setattr(product_pipeline.settings, "enable_design_review", False)
-    _disable_planning(monkeypatch)
 
     events = await _drain(
         product_pipeline.run_product_pipeline(
-            project=_project(),
+            project=_project(project_type="telegram_bot"),
             provider_name="anthropic",
             model="m",
             api_key="key",
             workspace=workspace,
             system_prompt="base",
             history=[],
-            user_message="сделай сайт кофейни",
+            user_message="сделай бота для записи",
         )
     )
 
     assert not any(isinstance(e, ToolCallRequested) and e.name == "preview_project" for e in events)
+    assert calls["review"] == 0
     final = events[-1]
     assert isinstance(final, AgentDone) and final.reason == "stop"
     from src.services.agent import planning_store
@@ -288,9 +264,6 @@ async def test_failed_build_skips_preview_and_review(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(product_pipeline, "complete_structured", fake_cs)
     monkeypatch.setattr(product_pipeline, "submit_control_job", fake_submit_control_job)
-    monkeypatch.setattr(product_pipeline.settings, "enable_browser_preview", True)
-    monkeypatch.setattr(product_pipeline.settings, "enable_design_review", True)
-    _disable_planning(monkeypatch)
 
     events = await _drain(
         product_pipeline.run_product_pipeline(
@@ -329,9 +302,6 @@ async def test_preview_requests_multiple_pages_and_a_mobile_viewport(tmp_path, m
     monkeypatch.setattr(product_pipeline, "run_agent_turn", _fake_implement())
     monkeypatch.setattr(product_pipeline, "complete_structured", fake_cs)
     monkeypatch.setattr(product_pipeline, "submit_control_job", fake_submit_control_job)
-    monkeypatch.setattr(product_pipeline.settings, "enable_browser_preview", True)
-    monkeypatch.setattr(product_pipeline.settings, "enable_design_review", False)
-    _disable_planning(monkeypatch)
 
     await _drain(
         product_pipeline.run_product_pipeline(
@@ -392,10 +362,6 @@ async def test_critical_review_triggers_exactly_one_fix_pass_then_passes(tmp_pat
     monkeypatch.setattr(product_pipeline, "run_agent_turn", fake_implement)
     monkeypatch.setattr(product_pipeline, "complete_structured", fake_cs)
     monkeypatch.setattr(product_pipeline, "submit_control_job", fake_submit_control_job)
-    monkeypatch.setattr(product_pipeline.settings, "enable_browser_preview", True)
-    monkeypatch.setattr(product_pipeline.settings, "enable_design_review", True)
-    monkeypatch.setattr(product_pipeline.settings, "max_review_iterations", 2)
-    _disable_planning(monkeypatch)
 
     events = await _drain(
         product_pipeline.run_product_pipeline(
@@ -441,10 +407,6 @@ async def test_iteration_cap_stops_the_loop_without_erroring(tmp_path, monkeypat
     monkeypatch.setattr(product_pipeline, "run_agent_turn", fake_implement)
     monkeypatch.setattr(product_pipeline, "complete_structured", fake_cs)
     monkeypatch.setattr(product_pipeline, "submit_control_job", fake_submit_control_job)
-    monkeypatch.setattr(product_pipeline.settings, "enable_browser_preview", True)
-    monkeypatch.setattr(product_pipeline.settings, "enable_design_review", True)
-    monkeypatch.setattr(product_pipeline.settings, "max_review_iterations", 2)
-    _disable_planning(monkeypatch)
 
     events = await _drain(
         product_pipeline.run_product_pipeline(
@@ -459,7 +421,7 @@ async def test_iteration_cap_stops_the_loop_without_erroring(tmp_path, monkeypat
         )
     )
 
-    # 1 initial implementation + at most max_review_iterations fix passes.
+    # 1 initial implementation + at most _MAX_REVIEW_ITERATIONS fix passes.
     assert implement_calls["n"] == 3
     final = events[-1]
     assert isinstance(final, AgentDone) and final.reason == "stop"  # gives up, does not error
@@ -469,7 +431,7 @@ async def test_iteration_cap_stops_the_loop_without_erroring(tmp_path, monkeypat
 @pytest.mark.asyncio
 async def test_infra_failure_gets_one_retry_then_gives_up_without_a_fix_pass(tmp_path, monkeypatch):
     """Worker-unreachable/timeout/etc. must not be handed to the coding agent as a "fix this"
-    instruction, and must not consume max_review_iterations - see product_pipeline.py's
+    instruction, and must not consume the review-iteration budget - see product_pipeline.py's
     _preview_infra_failure and the user's explicit ask to separate this from content issues."""
     workspace = WorkspaceTools(tmp_path, project_id="proj-1")
     implement_calls = {"n": 0}
@@ -496,10 +458,6 @@ async def test_infra_failure_gets_one_retry_then_gives_up_without_a_fix_pass(tmp
     monkeypatch.setattr(product_pipeline, "run_agent_turn", fake_implement)
     monkeypatch.setattr(product_pipeline, "complete_structured", fake_cs)
     monkeypatch.setattr(product_pipeline, "submit_control_job", fake_submit_control_job)
-    monkeypatch.setattr(product_pipeline.settings, "enable_browser_preview", True)
-    monkeypatch.setattr(product_pipeline.settings, "enable_design_review", True)
-    monkeypatch.setattr(product_pipeline.settings, "max_review_iterations", 2)
-    _disable_planning(monkeypatch)
 
     events = await _drain(
         product_pipeline.run_product_pipeline(
@@ -552,9 +510,6 @@ async def test_infra_failure_that_recovers_on_retry_proceeds_to_review(tmp_path,
     monkeypatch.setattr(product_pipeline, "run_agent_turn", fake_implement)
     monkeypatch.setattr(product_pipeline, "complete_structured", fake_cs)
     monkeypatch.setattr(product_pipeline, "submit_control_job", fake_submit_control_job)
-    monkeypatch.setattr(product_pipeline.settings, "enable_browser_preview", True)
-    monkeypatch.setattr(product_pipeline.settings, "enable_design_review", True)
-    _disable_planning(monkeypatch)
 
     events = await _drain(
         product_pipeline.run_product_pipeline(
@@ -610,9 +565,6 @@ async def test_review_receives_screenshots_for_non_codex_providers(tmp_path, mon
     monkeypatch.setattr(product_pipeline, "run_agent_turn", fake_implement)
     monkeypatch.setattr(product_pipeline, "complete_structured", fake_cs)
     monkeypatch.setattr(product_pipeline, "submit_control_job", fake_submit_control_job)
-    monkeypatch.setattr(product_pipeline.settings, "enable_browser_preview", True)
-    monkeypatch.setattr(product_pipeline.settings, "enable_design_review", True)
-    _disable_planning(monkeypatch)
 
     await _drain(
         product_pipeline.run_product_pipeline(
@@ -685,9 +637,6 @@ async def test_no_secret_value_leaks_into_review_or_metrics(tmp_path, monkeypatc
     monkeypatch.setattr(product_pipeline, "run_agent_turn", fake_implement)
     monkeypatch.setattr(product_pipeline, "complete_structured", fake_complete_structured)
     monkeypatch.setattr(product_pipeline, "submit_control_job", fake_submit_control_job)
-    monkeypatch.setattr(product_pipeline.settings, "enable_browser_preview", True)
-    monkeypatch.setattr(product_pipeline.settings, "enable_design_review", True)
-    _disable_planning(monkeypatch)
 
     events = await _drain(
         product_pipeline.run_product_pipeline(

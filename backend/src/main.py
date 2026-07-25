@@ -17,6 +17,7 @@ from src.api.routers import (  # noqa: E402
     chat,
     deployments,
     files,
+    orchestration,
     project_versions,
     projects,
     providers,
@@ -24,6 +25,7 @@ from src.api.routers import (  # noqa: E402
     telegram,
 )
 from src.core.config import settings  # noqa: E402
+from src.services.orchestration.mcp import registry as mcp_registry  # noqa: E402
 from src.services.storage import storage_service  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -34,6 +36,10 @@ async def lifespan(_: FastAPI):
     logger.info("AIRuntime API starting (environment=%s)", settings.environment)
     storage_service.ensure_bucket()
     yield
+    # Terminates any cached MCP stdio/http clients (registry.py's get_client cache) - a no-op
+    # if MCP was never exercised this process's lifetime (enable_mcp off, or no task ever
+    # reached a capability call), otherwise avoids leaking subprocess/connection handles.
+    await mcp_registry.close_all_clients()
 
 
 app = FastAPI(
@@ -74,6 +80,7 @@ app.include_router(providers.router, prefix=settings.api_prefix)
 app.include_router(secrets.router, prefix=settings.api_prefix)
 app.include_router(telegram.router, prefix=settings.api_prefix)
 app.include_router(billing.router, prefix=settings.api_prefix)
+app.include_router(orchestration.router, prefix=settings.api_prefix)
 
 
 @app.get("/health")

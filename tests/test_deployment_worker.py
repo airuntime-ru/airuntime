@@ -167,9 +167,7 @@ def test_process_control_job_build_check_returns_build_result(monkeypatch):
 
 
 def test_process_control_job_build_check_missing_project(monkeypatch):
-    monkeypatch.setattr(
-        docker_control_actions, "SessionLocal", lambda: _FakeSessionWithGet(None)
-    )
+    monkeypatch.setattr(docker_control_actions, "SessionLocal", lambda: _FakeSessionWithGet(None))
     results: list[dict] = []
     monkeypatch.setattr(
         deployment_worker, "push_control_result", lambda job_id, result: results.append(result)

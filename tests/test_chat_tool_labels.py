@@ -21,27 +21,36 @@ def test_docker_build_gets_a_friendly_label():
 
 
 def test_docker_run_gets_a_friendly_label():
-    assert _friendly_command_label(
-        "/bin/bash -lc 'docker run --rm -d --name test -p 18080:8080 alfa-romeo-service'"
-    ) == "Запускаю тестовый контейнер"
+    assert (
+        _friendly_command_label(
+            "/bin/bash -lc 'docker run --rm -d --name test -p 18080:8080 alfa-romeo-service'"
+        )
+        == "Запускаю тестовый контейнер"
+    )
 
 
 def test_structure_exploration_gets_a_friendly_label():
-    assert _friendly_command_label("/bin/bash -lc 'rg --files /workspace'") == "Изучаю структуру проекта"
-    compound = "/bin/bash -lc \"pwd && ls -la && find . -maxdepth 3 -type f | sort | head -200\""
+    assert (
+        _friendly_command_label("/bin/bash -lc 'rg --files /workspace'")
+        == "Изучаю структуру проекта"
+    )
+    compound = '/bin/bash -lc "pwd && ls -la && find . -maxdepth 3 -type f | sort | head -200"'
     assert _friendly_command_label(compound) == "Изучаю структуру проекта"
 
 
 def test_file_reading_gets_a_friendly_label():
-    assert _friendly_command_label("/bin/bash -lc \"sed -n '1,220p' app.py\"") == "Читаю файлы проекта"
+    assert (
+        _friendly_command_label("/bin/bash -lc \"sed -n '1,220p' app.py\"") == "Читаю файлы проекта"
+    )
 
 
 def test_pip_install_is_not_misclassified_as_generic_python():
     # python3 -m pip install ... contains both "python3" and "pip install" - the more specific
     # dependency-install label must win over the generic "checking code" one.
-    assert _friendly_command_label(
-        "/bin/bash -lc 'python3 -m pip install requests'"
-    ) == "Устанавливаю зависимости"
+    assert (
+        _friendly_command_label("/bin/bash -lc 'python3 -m pip install requests'")
+        == "Устанавливаю зависимости"
+    )
 
 
 def test_unrecognized_command_falls_back_to_cleaned_text_not_raw_wrapper():

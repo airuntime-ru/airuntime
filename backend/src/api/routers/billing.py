@@ -129,9 +129,7 @@ def get_usage_history(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    rows, total = list_ledger(
-        db, current_user, limit=limit, offset=offset, direction=direction
-    )
+    rows, total = list_ledger(db, current_user, limit=limit, offset=offset, direction=direction)
     return {
         "items": [_ledger_response(row) for row in rows],
         "total": total,

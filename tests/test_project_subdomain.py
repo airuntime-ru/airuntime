@@ -53,7 +53,7 @@ def test_suggest_deploy_base_prefers_project_name():
 def test_suggest_deploy_base_from_prompt_when_name_generic():
     base = suggest_deploy_base(
         project_name="Новый проект",
-        prompt='Сделай сайт для кофейни «Утренний эспрессо» с меню',
+        prompt="Сделай сайт для кофейни «Утренний эспрессо» с меню",
     )
     assert base == "utrenniy-espresso"
 
@@ -72,9 +72,7 @@ def test_allocate_unique_subdomain_tries_suffixes(monkeypatch):
     def fake_available(db, subdomain, *, exclude_project_id=None):
         return subdomain not in taken
 
-    monkeypatch.setattr(
-        "src.services.project_subdomain.is_subdomain_available", fake_available
-    )
+    monkeypatch.setattr("src.services.project_subdomain.is_subdomain_available", fake_available)
     result = allocate_unique_subdomain(object(), "coffee")
     assert result == "coffee-3"
 

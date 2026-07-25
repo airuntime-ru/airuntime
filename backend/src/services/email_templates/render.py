@@ -56,7 +56,9 @@ def logo_src(*, use_cid: bool = True) -> str:
     return logo_url()
 
 
-def render_email(name: str, *, subject: str, use_cid: bool = True, **context: object) -> tuple[str, str]:
+def render_email(
+    name: str, *, subject: str, use_cid: bool = True, **context: object
+) -> tuple[str, str]:
     env = get_env()
     payload = {
         "subject": subject,

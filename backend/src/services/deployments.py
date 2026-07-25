@@ -6,6 +6,7 @@ from src.db.models.deployment import Deployment
 from src.db.models.project import Project
 from src.services.deployment_queue import enqueue_deployment
 from src.services.project_runtime import assert_can_start_project, cancel_active_deployments
+from src.services.prompt_guard import redact_secrets
 
 # Must fit Deployment.logs_ref String(512). Full errors live on Deployment.error_text.
 _LOGS_REF_MAX = 500
@@ -72,7 +73,7 @@ def truncate_logs_ref(text: str) -> str:
 
 def store_deployment_error(deployment: Deployment, text: str) -> None:
     """Persist the full failure for repair/UI; keep a short hint on logs_ref for older clients."""
-    cleaned = (text or "").strip()
+    cleaned = redact_secrets((text or "").strip())
     if len(cleaned) > _ERROR_TEXT_MAX:
         cleaned = cleaned[-_ERROR_TEXT_MAX:]
     deployment.error_text = cleaned or None
@@ -85,11 +86,17 @@ def store_deployment_error(deployment: Deployment, text: str) -> None:
 
 
 def append_deployment_log(deployment: Deployment, chunk: str, *, commit: bool = False) -> None:
-    """Append to the live build/deploy log shown in the expandable deployments UI."""
+    """Append to the live build/deploy log shown in the expandable deployments UI.
+
+    Redacted before storage, not just at read time: a crashed container's stdout or a verbose
+    Docker build step can echo real secret values now that build_project_image() actually wires
+    every requested secret (not just TELEGRAM_BOT_TOKEN) into the container's environment - this
+    is the one place all such log text converges before reaching the deployments UI/DB.
+    """
     if not chunk:
         return
     existing = deployment.log_text or ""
-    combined = existing + chunk
+    combined = existing + redact_secrets(chunk)
     if len(combined) > _LOG_TEXT_MAX:
         combined = combined[-_LOG_TEXT_MAX:]
     deployment.log_text = combined

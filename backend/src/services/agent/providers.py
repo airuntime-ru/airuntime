@@ -31,11 +31,6 @@ from src.services.file_context import ImageAttachment
 REQUEST_TIMEOUT = httpx.Timeout(120.0, connect=15.0)
 
 
-class PlainMessage(Protocol):
-    role: str
-    content: str
-
-
 class AgentProvider(Protocol):
     def supports_tools(self) -> bool: ...
 

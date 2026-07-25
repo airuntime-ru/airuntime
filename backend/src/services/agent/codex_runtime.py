@@ -54,6 +54,7 @@ from src.services.agent.events import AgentDone, TextDelta, ToolCallRequested, T
 from src.services.agent.tools import ServiceRequest, WorkspaceTools
 from src.services.docker_control_queue import QUEUE_KEY, in_worker_inline_docker
 from src.services.file_context import ImageAttachment
+from src.services.orchestration.cancellation import CancellationToken, cancel_codex_run
 
 logger = logging.getLogger(__name__)
 
@@ -119,8 +120,14 @@ def _submit_run(
     prompt: str,
     image_paths: list[str],
     timeout_seconds: int,
+    job_id: str | None = None,
 ) -> str:
-    run_id = uuid.uuid4().hex
+    # A caller-supplied job_id (CodexAgentSession.correlation_id, set by executors.py to the
+    # orchestration AgentTask's own id) makes the eventual Docker container name (codex_worker.py
+    # names it after this same job_id) deterministically derivable from a task id alone - no
+    # separate run-id registry needed for cancellation.py's cancel_codex_run to find and stop the
+    # right container. Falls back to a fresh id for every non-orchestrated caller (unchanged).
+    run_id = job_id or uuid.uuid4().hex
     job = {
         "job_id": run_id,
         "action": "codex_run",
@@ -135,10 +142,23 @@ def _submit_run(
     return run_id
 
 
-async def _stream_events(run_id: str, *, timeout_seconds: int) -> AsyncIterator[dict[str, Any]]:
+async def _stream_events(
+    run_id: str,
+    *,
+    timeout_seconds: int,
+    cancellation: CancellationToken | None = None,
+    project_id: str | None = None,
+) -> AsyncIterator[dict[str, Any]]:
     """Yield decoded event dicts as the worker relays them, until a terminal marker, an
-    explicit error, or a timeout. Runs the blocking Redis call off the event loop so this can
-    be awaited from the async chat-streaming path without stalling other requests."""
+    explicit error, a timeout, or cancellation. Runs the blocking Redis call off the event loop
+    so this can be awaited from the async chat-streaming path without stalling other requests.
+
+    Cancellation is checked once per poll cycle (bounded by _REDIS_POLL_SECONDS, so response
+    latency is a couple of seconds, not instant) - when it fires, this proactively issues the
+    `cancel_codex_run` control action (real `docker stop`, via the worker - the backend process
+    itself never touches Docker) BEFORE returning, so the container is actually torn down
+    instead of merely being abandoned by this consumer (the pre-existing behavior every other
+    caller of this module still has when there's no cancellation token to pass)."""
     import asyncio
 
     key = _events_key(run_id)
@@ -147,6 +167,12 @@ async def _stream_events(run_id: str, *, timeout_seconds: int) -> AsyncIterator[
     idle_deadline = time.monotonic() + _MAX_IDLE_SECONDS
 
     while True:
+        if cancellation is not None and cancellation.is_cancelled:
+            logger.info("Codex run %s cancelled - requesting container stop", run_id)
+            if project_id is not None:
+                await cancel_codex_run(project_id=project_id, correlation_id=run_id)
+            yield {"type": "cancelled", "message": cancellation.reason or "Run cancelled by user"}
+            return
         now = time.monotonic()
         if now > deadline:
             logger.warning("Codex run %s timed out after %ds", run_id, timeout_seconds)
@@ -258,7 +284,11 @@ def _map_event(
             summary = "Готово"
         else:
             last_line = next((ln for ln in reversed(output.strip().splitlines()) if ln.strip()), "")
-            summary = f"Ошибка: {last_line.strip()[:200]}" if last_line else "Команда завершилась с ошибкой"
+            summary = (
+                f"Ошибка: {last_line.strip()[:200]}"
+                if last_line
+                else "Команда завершилась с ошибкой"
+            )
         return [
             ToolCallResult(
                 call_id=call_id,
@@ -386,10 +416,23 @@ class CodexAgentSession:
     TextDelta/ToolCallRequested/ToolCallResult/AgentDone), backed by Codex CLI instead of a
     direct provider HTTP stream."""
 
-    def __init__(self, *, model: str, workspace: WorkspaceTools | None, system_prompt: str) -> None:
+    def __init__(
+        self,
+        *,
+        model: str,
+        workspace: WorkspaceTools | None,
+        system_prompt: str,
+        correlation_id: str | None = None,
+    ) -> None:
         self.model = model
         self.workspace = workspace
         self.system_prompt = system_prompt
+        # Orchestration engine sets this to the AgentTask's own id (executors.py) - used as the
+        # Redis run-id AND (codex_worker.py) the Docker container name, so cancellation.py's
+        # cancel_codex_run can find and stop the right container from a task id alone, with no
+        # separate registry. None (every pre-existing, non-orchestrated caller) keeps the old
+        # behavior of a fresh random id per call - those callers have no cancellation support.
+        self.correlation_id = correlation_id
 
     def _handle_terminal(self, payload: dict[str, Any]) -> AgentDone | None:
         # Bare {"type": "error", "message": ...} events (straight from codex's own JSONL
@@ -410,6 +453,8 @@ class CodexAgentSession:
             return AgentDone(reason="error", error=message or "Codex turn failed")
         if kind == "infra_error":
             return AgentDone(reason="error", error=str(payload.get("message") or "Codex error"))
+        if kind == "cancelled":
+            return AgentDone(reason="cancelled", error=str(payload.get("message") or "Cancelled"))
         return None
 
     async def run(
@@ -418,6 +463,7 @@ class CodexAgentSession:
         history: list[dict[str, str]],
         user_message: str,
         images: list[ImageAttachment] | None = None,
+        cancellation: CancellationToken | None = None,
     ) -> AsyncIterator[TextDelta | ToolCallRequested | ToolCallResult | AgentDone]:
         prompt = _compose_prompt(
             system_prompt=self.system_prompt, history=history, user_message=user_message
@@ -431,20 +477,38 @@ class CodexAgentSession:
 
         try:
             if in_worker_inline_docker():
+                # Cooperative-only here: this path runs inside the worker process itself (an
+                # automatic build/deploy repair flow), holding a direct, synchronous Docker
+                # client handle inside codex_worker.iter_codex_events - reaching in to actually
+                # kill that container mid-generator would need a deeper change to that
+                # synchronous iterator than this change makes. Cancellation still stops this
+                # method from yielding further events to its caller; the container itself runs
+                # to its own natural completion. Documented as a residual limitation (the final
+                # report calls this out explicitly) since this path is only ever a short-lived,
+                # bounded auto-repair pass, never the primary user-facing generation path.
                 async for event in self._run_inline(
-                    cwd=cwd, prompt=prompt, image_paths=image_paths
+                    cwd=cwd, prompt=prompt, image_paths=image_paths, cancellation=cancellation
                 ):
                     yield event
             else:
                 async for event in self._run_via_queue(
-                    project_id=project_id, cwd=cwd, prompt=prompt, image_paths=image_paths
+                    project_id=project_id,
+                    cwd=cwd,
+                    prompt=prompt,
+                    image_paths=image_paths,
+                    cancellation=cancellation,
                 ):
                     yield event
         finally:
             _cleanup_paths(image_paths)
 
     async def _run_inline(
-        self, *, cwd: str | None, prompt: str, image_paths: list[str]
+        self,
+        *,
+        cwd: str | None,
+        prompt: str,
+        image_paths: list[str],
+        cancellation: CancellationToken | None = None,
     ) -> AsyncIterator[TextDelta | ToolCallRequested | ToolCallResult | AgentDone]:
         """Already running inside the worker process (a repair flow under
         worker_inline_docker()) - call agent/codex_worker.py directly instead of queueing, since
@@ -460,6 +524,9 @@ class CodexAgentSession:
         saw_event = False
         seen_text = [False]
         for payload in iter_codex_events(job):
+            if cancellation is not None and cancellation.is_cancelled:
+                yield AgentDone(reason="cancelled", error=cancellation.reason or "Cancelled")
+                return
             saw_event = True
             terminal = self._handle_terminal(payload)
             if terminal is not None:
@@ -479,9 +546,16 @@ class CodexAgentSession:
         )
 
     async def _run_via_queue(
-        self, *, project_id: str | None, cwd: str | None, prompt: str, image_paths: list[str]
+        self,
+        *,
+        project_id: str | None,
+        cwd: str | None,
+        prompt: str,
+        image_paths: list[str],
+        cancellation: CancellationToken | None = None,
     ) -> AsyncIterator[TextDelta | ToolCallRequested | ToolCallResult | AgentDone]:
         run_id = _submit_run(
+            job_id=self.correlation_id,
             project_id=project_id,
             cwd=cwd,
             model=self.model,
@@ -493,7 +567,10 @@ class CodexAgentSession:
         saw_event = False
         seen_text = [False]
         async for payload in _stream_events(
-            run_id, timeout_seconds=settings.codex_turn_timeout_seconds
+            run_id,
+            timeout_seconds=settings.codex_turn_timeout_seconds,
+            cancellation=cancellation,
+            project_id=project_id,
         ):
             saw_event = True
             terminal = self._handle_terminal(payload)

@@ -125,7 +125,9 @@ class DockerDeploymentAdapter:
             return
         for image in images:
             tags = getattr(image, "tags", None) or []
-            if not any(tag.startswith("airuntime-generated-") and id_fragment in tag for tag in tags):
+            if not any(
+                tag.startswith("airuntime-generated-") and id_fragment in tag for tag in tags
+            ):
                 continue
             try:
                 self._client.images.remove(image=image.id, force=True)
@@ -228,14 +230,6 @@ class DockerDeploymentAdapter:
             "image_ref": request.image_ref,
             "logs_ref": logs_ref,
         }
-
-    def container_status(self, container_id: str) -> str:
-        try:
-            container = self._client.containers.get(container_id)
-            container.reload()
-        except NotFound as exc:
-            raise RuntimeError(f"Container {container_id} was not found.") from exc
-        return container.status
 
     def verify_still_running(self, container_id: str, *, settle_seconds: float = 5.0) -> str:
         """Wait briefly after start, then require the container to still be running.

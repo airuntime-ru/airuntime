@@ -10,24 +10,15 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
 
 from src.services.agent.codex_runtime import CODEX_ELIGIBLE_PROVIDERS, CodexAgentSession
 from src.services.agent.events import AgentDone, TextDelta, ToolCallRequested, ToolCallResult
 from src.services.agent.providers import get_agent_provider
 from src.services.agent.tools import TOOL_DEFS, WorkspaceTools
 from src.services.file_context import ImageAttachment
+from src.services.orchestration.cancellation import CancellationToken
 
 MAX_ITERATIONS = 100_000
-
-
-@dataclass
-class AgentRunResult:
-    final_text: str
-    touched_files: set[str]
-    iterations: int
-    stopped_reason: str
-    error: str | None = None
 
 
 def _normalize_history(history: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -63,12 +54,16 @@ class CodingAgentSession:
         api_key: str,
         workspace: WorkspaceTools,
         system_prompt: str,
+        correlation_id: str | None = None,
     ) -> None:
         self.provider_name = provider_name
         self.model = model
         self.api_key = api_key
         self.workspace = workspace
         self.system_prompt = system_prompt
+        # Passed straight through to CodexAgentSession - see that class's own docstring on
+        # correlation_id for what it enables (deterministic container naming for cancellation).
+        self.correlation_id = correlation_id
         # Codex CLI (running in its own Docker container - see codex_runtime.py) replaces the
         # HTTP provider loop below for the providers it can drive. Anything else (an explicit
         # anthropic/gemini/openrouter pick, or openai falling back because it's the only one
@@ -83,13 +78,28 @@ class CodingAgentSession:
         history: list[dict[str, str]],
         user_message: str,
         images: list[ImageAttachment] | None = None,
+        cancellation: CancellationToken | None = None,
     ) -> AsyncIterator[TextDelta | ToolCallRequested | ToolCallResult | AgentDone]:
+        if cancellation is not None and cancellation.is_cancelled:
+            # A turn cancelled before it even started (e.g. the user hit Stop while the request
+            # was still queued) must not touch the provider or Codex at all - checked before the
+            # use_codex branch too, since CodexAgentSession.run() itself only starts checking
+            # once its own polling loop begins.
+            yield AgentDone(reason="cancelled", error=cancellation.reason or "Cancelled")
+            return
+
         if self.use_codex:
             session = CodexAgentSession(
-                model=self.model, workspace=self.workspace, system_prompt=self.system_prompt
+                model=self.model,
+                workspace=self.workspace,
+                system_prompt=self.system_prompt,
+                correlation_id=self.correlation_id,
             )
             async for event in session.run(
-                history=_normalize_history(history), user_message=user_message, images=images
+                history=_normalize_history(history),
+                user_message=user_message,
+                images=images,
+                cancellation=cancellation,
             ):
                 yield event
             return
@@ -103,6 +113,17 @@ class CodingAgentSession:
         iterations = 0
 
         while iterations < MAX_ITERATIONS:
+            if cancellation is not None and cancellation.is_cancelled:
+                # Cooperative only: an already-dispatched tool call below (e.g. a build_project
+                # RPC blocked in a real Docker build via asyncio.to_thread) is not force-killed -
+                # Python threads can't be, and the RPC itself has no cancel primitive of its own
+                # (unlike the Codex path's real docker-stop above). It's simply left to finish
+                # server-side with its result discarded, same as an abandoned HTTP disconnect
+                # always did. Checking here still stops any *further* iteration/tool call from
+                # starting once cancellation is requested, which is the achievable half of "Stop"
+                # for this path - see cancellation.py's module docstring for the honest scope.
+                yield AgentDone(reason="cancelled", error=cancellation.reason or "Cancelled")
+                return
             iterations += 1
             turn_final = None
             async for event in self.provider.stream_turn(

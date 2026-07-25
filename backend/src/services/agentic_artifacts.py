@@ -134,7 +134,9 @@ def normalize_psycopg2_requirements(root: Path) -> list[str]:
         notes.append(f"{line.strip()} -> {fixed.strip()}")
     if not notes:
         return []
-    req_path.write_text("\n".join(new_lines) + ("\n" if original.endswith("\n") else ""), encoding="utf-8")
+    req_path.write_text(
+        "\n".join(new_lines) + ("\n" if original.endswith("\n") else ""), encoding="utf-8"
+    )
     return notes
 
 
@@ -174,7 +176,9 @@ def unpin_missing_pip_versions(root: Path, build_error: str) -> list[str]:
         new_lines.append(updated)
     if not changed:
         return []
-    req_path.write_text("\n".join(new_lines) + ("\n" if original.endswith("\n") else ""), encoding="utf-8")
+    req_path.write_text(
+        "\n".join(new_lines) + ("\n" if original.endswith("\n") else ""), encoding="utf-8"
+    )
     return changed
 
 

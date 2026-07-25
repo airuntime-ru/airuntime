@@ -49,7 +49,7 @@ class TurnFinished:
 
 @dataclass
 class AgentDone:
-    reason: Literal["stop", "max_iterations", "error"]
+    reason: Literal["stop", "max_iterations", "error", "cancelled"]
     error: str | None = None
     # Raw provider usage payload (token counts etc.), when the provider reports one - e.g.
     # Codex's turn.completed event. Shape is provider-specific and not normalized here; callers

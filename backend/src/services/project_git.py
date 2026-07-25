@@ -212,12 +212,52 @@ def commit_snapshot(project_dir: Path, *, message: str) -> str | None:
         return head
 
 
+def discard_uncommitted_changes(project_dir: Path) -> None:
+    """Rollback for an unaccepted (failed validation) task transaction to the last accepted
+    checkpoint (HEAD), scoped strictly to this project's own git repository - never a broader
+    filesystem operation against `project_dir`'s parent or anything outside this git root (spec
+    section 15: "Rollback должен быть ограничен project artifact path и последним checkpoint" /
+    "Не применять широкие destructive-команды к workspace root").
+
+    `git reset --hard HEAD` (not just `checkout -- .`) because evidence collection
+    (evidence.py, via project_git._resolve_diff_args) already ran `git add -A` to see new files
+    in the pre-commit diff - by the time a rollback is needed, a brand-new file the task wrote
+    is STAGED, not merely untracked, and `git clean` alone never touches staged content (only
+    genuinely untracked working-tree entries). `reset --hard` un-stages and removes it in one
+    step by making the index and working tree exactly match HEAD again. `git clean -fd`
+    afterward is a belt-and-suspenders pass for anything that ended up untracked regardless.
+    """
+    if not (project_dir / ".git").exists():
+        return
+    if current_head_sha(project_dir) is None:
+        # No accepted checkpoint exists yet (repo has zero commits) - "reset --hard HEAD"
+        # has no HEAD to target on an unborn branch, so the discard is simply "wipe everything
+        # except .git", the same skip-list workspace.clean_project_dir uses.
+        for child in project_dir.iterdir():
+            if child.name in {".git", ".airuntime"}:
+                continue
+            if child.is_dir():
+                shutil.rmtree(child, ignore_errors=True)
+            else:
+                child.unlink(missing_ok=True)
+        return
+    _run_git(cwd=project_dir, args=["reset", "--hard", "HEAD"], check=False)
+    _run_git(cwd=project_dir, args=["clean", "-fd"], check=False)
+
+
 def list_versions(project_dir: Path, *, limit: int = 30) -> list[ProjectVersion]:
     if not (project_dir / ".git").exists():
         return []
 
     fmt = "%H|%ct|%s"
-    proc = _run_git(cwd=project_dir, args=["log", f"-n{int(limit)}", f"--pretty=format:{fmt}"])
+    try:
+        proc = _run_git(cwd=project_dir, args=["log", f"-n{int(limit)}", f"--pretty=format:{fmt}"])
+    except subprocess.CalledProcessError:
+        # A freshly `init_repo_if_needed()`-ed repo with no commits yet is a real, reachable
+        # state (e.g. the orchestration engine builds a context summary - including this history
+        # - before the very first task has ever committed anything) - `git log` exits 128
+        # ("does not have any commits yet"), which is "no history", not an error condition here.
+        return []
     out = proc.stdout.strip()
     if not out:
         return []
@@ -374,6 +414,164 @@ def archive_version_stream(project_dir: Path, *, commit_hash: str) -> bytes:
         )
         raise ProjectGitError(stderr.strip() or "git archive failed") from exc
     return proc.stdout
+
+
+_EMPTY_TREE_SHA1 = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"  # git's well-known empty-tree
+# object hash - a constant, not computed, so this works identically on Windows dev machines
+# (no /dev/null) and Linux containers alike.
+
+
+def current_head_sha(project_dir: Path) -> str | None:
+    """`None` for a repo with no commits yet (or no `.git` at all) - the base_sha
+    git_transaction.py captures at the start of every task transaction, so a freshly-created
+    project's very first task correctly diffs against the empty tree rather than raising."""
+    if not (project_dir / ".git").exists():
+        return None
+    proc = _run_git(cwd=project_dir, args=["rev-parse", "HEAD"], check=False)
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
+
+
+def _resolve_diff_args(project_dir: Path, *, base_sha: str | None, head: str | None) -> list[str]:
+    """Shared arg-builder for diff_stat/changed_files_between/changed_files_by_status.
+
+    `base_sha=None` -> diff against git's empty-tree object (a brand-new project with no prior
+    commit yet still gets a correct "everything is new" diff instead of an empty one).
+
+    `head=None` -> diff against the STAGED INDEX after staging everything (`git add -A` first),
+    not a literal ref. This is what evidence collection needs when it runs BEFORE a commit
+    decision has been made (git_transaction.py always collects evidence pre-commit): a plain
+    `git diff <base>` (or `git diff <base> HEAD`) only shows changes to files git already
+    tracks - a brand-new file the agent just wrote is invisible to it until staged, so without
+    this, evidence.collect_task_evidence would silently miss every newly-created file and scope
+    validation could never catch a forbidden new file being added. Staging first has no side
+    effect beyond updating the index (no commit), and commit_snapshot() re-stages via its own
+    `git add -A` immediately after anyway, so this is not wasted or duplicated work in the
+    success path - it's what makes the evidence collected actually match what gets committed.
+
+    `head="HEAD"` (or any other literal ref) -> ordinary two-commit diff, unchanged.
+    """
+    base = base_sha or _EMPTY_TREE_SHA1
+    if head is None:
+        _run_git(cwd=project_dir, args=["add", "-A"], check=False)
+        return ["--cached", base]
+    return [base, head]
+
+
+def diff_stat(project_dir: Path, *, base_sha: str | None, head: str | None = "HEAD") -> str:
+    """`git diff --stat` between base_sha and head (see `_resolve_diff_args` for what `None`
+    means for each) - the cheap, textual "what changed" summary
+    services/orchestration/evidence.py uses as factual proof of a task's real footprint,
+    independent of whatever the agent's own TaskResult claims."""
+    if not (project_dir / ".git").exists():
+        return ""
+    args = _resolve_diff_args(project_dir, base_sha=base_sha, head=head)
+    proc = _run_git(cwd=project_dir, args=["diff", "--stat", *args], check=False)
+    if proc.returncode != 0:
+        # Most common cause: base_sha not reachable in this repo (e.g. a fresh worktree) -
+        # fall back to a full status listing rather than raising, since this is diagnostic
+        # evidence, not a control-flow-critical operation.
+        return _run_git(cwd=project_dir, args=["status", "--porcelain"], check=False).stdout
+    return proc.stdout
+
+
+def changed_files_between(
+    project_dir: Path, *, base_sha: str | None, head: str | None = "HEAD"
+) -> list[str]:
+    if not (project_dir / ".git").exists():
+        return []
+    args = _resolve_diff_args(project_dir, base_sha=base_sha, head=head)
+    proc = _run_git(cwd=project_dir, args=["diff", "--name-only", *args], check=False)
+    if proc.returncode != 0:
+        return []
+    return [line for line in proc.stdout.splitlines() if line.strip()]
+
+
+def changed_files_by_status(
+    project_dir: Path, *, base_sha: str | None, head: str | None = "HEAD"
+) -> dict[str, list[str]]:
+    """`{"added": [...], "modified": [...], "deleted": [...]}` via `git diff --name-status` -
+    what services/orchestration/evidence.py uses to split TaskEvidence.changed_files into
+    created_files/deleted_files, since `changed_files_between` alone can't distinguish them."""
+    result: dict[str, list[str]] = {"added": [], "modified": [], "deleted": []}
+    if not (project_dir / ".git").exists():
+        return result
+    args = _resolve_diff_args(project_dir, base_sha=base_sha, head=head)
+    proc = _run_git(cwd=project_dir, args=["diff", "--name-status", *args], check=False)
+    if proc.returncode != 0:
+        return result
+    status_map = {"A": "added", "M": "modified", "D": "deleted"}
+    for line in proc.stdout.splitlines():
+        if not line.strip() or "\t" not in line:
+            continue
+        code, path = line.split("\t", 1)
+        # Renames/copies ("R100", "C100") - treat as modified on the new path, close enough
+        # for evidence purposes (the exact rename pairing isn't load-bearing here).
+        bucket = status_map.get(code[0], "modified")
+        result[bucket].append(path)
+    return result
+
+
+def create_worktree(
+    project_dir: Path, *, worktree_path: Path, branch_name: str, base_sha: str | None = None
+) -> None:
+    """Isolated per-task worktree for workspace_mode="isolated_worktree" (spec section 14) -
+    a real separate working directory + branch sharing the same object store, so a parallel
+    write task can never touch the shared checkout other concurrent/sequential tasks use."""
+    init_repo_if_needed(project_dir)
+    worktree_path.parent.mkdir(parents=True, exist_ok=True)
+    start_point = base_sha or "HEAD"
+    _run_git(
+        cwd=project_dir,
+        args=["worktree", "add", "-b", branch_name, str(worktree_path), start_point],
+    )
+
+
+def remove_worktree(
+    project_dir: Path, *, worktree_path: Path, branch_name: str, force: bool = True
+) -> None:
+    args = ["worktree", "remove"]
+    if force:
+        args.append("--force")
+    args.append(str(worktree_path))
+    _run_git(cwd=project_dir, args=args, check=False)
+    _run_git(cwd=project_dir, args=["branch", "-D", branch_name], check=False)
+    _run_git(cwd=project_dir, args=["worktree", "prune"], check=False)
+
+
+def merge_worktree_branch(
+    project_dir: Path, *, branch_name: str, message: str, no_ff: bool = True
+) -> str | None:
+    """Merge an isolated worktree's branch back into the current HEAD of the shared workspace.
+    Never auto-resolves conflicts (spec: "при конфликте не выполнять слепой auto-resolution") -
+    a conflicted merge is aborted and ProjectGitError raised so IntegrationAgent's caller can
+    surface it, rather than silently picking a side."""
+    with with_project_git_lock(project_dir.name):
+        proc = _run_git(
+            cwd=project_dir,
+            args=[
+                "merge",
+                "--no-ff" if no_ff else "--ff",
+                "-m",
+                _short_message(message),
+                branch_name,
+            ],
+            check=False,
+        )
+        if proc.returncode != 0:
+            _run_git(cwd=project_dir, args=["merge", "--abort"], check=False)
+            stderr = proc.stderr.strip() or proc.stdout.strip()
+            raise ProjectGitError(f"merge conflict, aborted: {stderr}")
+        changed = _run_git(
+            cwd=project_dir, args=["status", "--porcelain"], check=False
+        ).stdout.strip()
+        if changed:
+            # Should not normally happen right after a clean merge commit, but stay honest
+            # about the working tree state rather than assuming.
+            _run_git(cwd=project_dir, args=["add", "-A"])
+        head = _run_git(cwd=project_dir, args=["rev-parse", "HEAD"]).stdout.strip()
+        return head
 
 
 def rollback_to(project_dir: Path, *, commit_hash: str, message: str) -> str:

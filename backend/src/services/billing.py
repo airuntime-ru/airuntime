@@ -152,12 +152,6 @@ def list_ledger(
     return rows, total
 
 
-def list_recent_ledger(db: Session, user: User, *, limit: int = 50) -> list[CreditLedgerEntry]:
-    """Backward-compatible helper; prefer :func:`list_ledger` for paginated UIs."""
-    rows, _total = list_ledger(db, user, limit=limit, offset=0, direction="all")
-    return rows
-
-
 def credits_to_rub(credits: int) -> int:
     return max(1, math.ceil(credits * RUB_PER_1000_CREDITS / 1000))
 

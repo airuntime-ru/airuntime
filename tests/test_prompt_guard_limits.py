@@ -1,5 +1,7 @@
 """Tests for chat paste size limits and agent truncation."""
 
+import pytest
+
 from src.services.prompt_guard import (
     MAX_AGENT_INPUT_CHARS,
     MAX_USER_MESSAGE_CHARS,
@@ -25,8 +27,5 @@ def test_prepare_agent_truncates_with_russian_note():
 
 def test_sanitize_rejects_hard_ceiling():
     text = "y" * (MAX_USER_MESSAGE_CHARS + 1)
-    try:
+    with pytest.raises(ValueError, match="слишком длинное"):
         sanitize_user_message(text)
-        assert False, "expected ValueError"
-    except ValueError as exc:
-        assert "слишком длинное" in str(exc)

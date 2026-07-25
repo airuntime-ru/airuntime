@@ -69,7 +69,11 @@ def read_project_logs(db: Session, project: Project) -> ProjectLogsResponse:
             lines.append("")
             lines.append("--- Ошибка деплоя / сборки ---")
             lines.append(deployment.error_text)
-        elif not deployment.log_text and deployment.logs_ref and not deployment.logs_ref.startswith("docker://"):
+        elif (
+            not deployment.log_text
+            and deployment.logs_ref
+            and not deployment.logs_ref.startswith("docker://")
+        ):
             lines.append("")
             lines.append("--- Ошибка деплоя ---")
             lines.append(deployment.logs_ref)

@@ -231,7 +231,9 @@ def invoice_paid_email(
 
 
 # Backward-compatible alias used by billing maintenance.
-def credits_topup_paid_email(*, credits: int, amount_rub: int, new_balance: int | None = None) -> EmailContent:
+def credits_topup_paid_email(
+    *, credits: int, amount_rub: int, new_balance: int | None = None
+) -> EmailContent:
     return invoice_paid_email(credits=credits, amount_rub=amount_rub, new_balance=new_balance)
 
 

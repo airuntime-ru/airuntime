@@ -159,7 +159,9 @@ def delete_dns_for_website_deploy(subdomain: str) -> str | None:
     return host
 
 
-def user_facing_dns_note(subdomain: str, *, host: str | None = None, error: str | None = None) -> str:
+def user_facing_dns_note(
+    subdomain: str, *, host: str | None = None, error: str | None = None
+) -> str:
     """Short Russian line for project.logs / UI — never the full platform DNS dump."""
     resolved = host or project_public_host(subdomain)
     if error:

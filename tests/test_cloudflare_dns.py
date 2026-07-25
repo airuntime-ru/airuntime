@@ -75,7 +75,10 @@ def test_delete_dns_for_website_deploy_deletes_project_a(monkeypatch):
     host = cloudflare_dns.delete_dns_for_website_deploy("demo")
 
     assert host == "demo.airuntime.ru"
-    assert any(call[0] == "GET" and "type=A" in call[1] and "demo.airuntime.ru" in call[1] for call in calls)
+    assert any(
+        call[0] == "GET" and "type=A" in call[1] and "demo.airuntime.ru" in call[1]
+        for call in calls
+    )
     assert ("DELETE", "/dns_records/rec-demo", None) in calls
     # Must not touch wildcard / platform hosts even when they exist in the zone.
     assert not any("*" in (call[1] or "") for call in calls if call[0] == "DELETE")

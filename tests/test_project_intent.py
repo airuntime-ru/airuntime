@@ -18,6 +18,12 @@ def test_infer_project_type_mixed_when_both_mentioned():
     )
 
 
+def test_infer_project_type_mixed_when_site_mentioned_before_bot():
+    # Site term first, with a noun in between before the bot mention - word order alone must
+    # not decide whether a dual-product ask is recognised as "mixed".
+    assert infer_project_type("Сайт студии и Telegram-бот для заявок") == "mixed"
+
+
 def test_infer_project_type_defaults_to_website_on_no_signal():
     assert infer_project_type("Сделай что-нибудь классное") == "website"
 
@@ -28,15 +34,11 @@ def test_infer_project_type_webhook_is_bot_not_mixed():
 
 
 def test_infer_bot_parsing_competitor_site_is_not_mixed():
-    assert (
-        infer_project_type("Сделай бота который парсит сайт конкурента") == "telegram_bot"
-    )
+    assert infer_project_type("Сделай бота который парсит сайт конкурента") == "telegram_bot"
 
 
 def test_infer_bot_menu_pages_is_not_mixed():
-    assert (
-        infer_project_type("Telegram бот с несколькими страницами меню") == "telegram_bot"
-    )
+    assert infer_project_type("Telegram бот с несколькими страницами меню") == "telegram_bot"
 
 
 def test_infer_bot_booking_page_is_not_mixed():
@@ -44,9 +46,7 @@ def test_infer_bot_booking_page_is_not_mixed():
 
 
 def test_infer_bot_with_explicit_no_site():
-    assert (
-        infer_project_type("Сделай бота для заявок. Не нужен сайт.") == "telegram_bot"
-    )
+    assert infer_project_type("Сделай бота для заявок. Не нужен сайт.") == "telegram_bot"
 
 
 def test_infer_bot_site_parsing_phrase():
@@ -55,8 +55,7 @@ def test_infer_bot_site_parsing_phrase():
 
 def test_infer_bot_with_dashboard_word_is_not_mixed():
     assert (
-        infer_project_type("Сделай телеграм бота с дашбордом статистики внутри")
-        == "telegram_bot"
+        infer_project_type("Сделай телеграм бота с дашбордом статистики внутри") == "telegram_bot"
     )
 
 

@@ -5,12 +5,12 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy.orm import Session
+from tests.conftest import auth_tokens
 
 from src.db.models.credit_ledger import CreditLedgerEntry
 from src.db.models.project import Project
 from src.db.models.user import User
 from src.services.billing import list_ledger, record_usage
-from tests.conftest import auth_tokens
 
 
 def _user(db: Session, email: str = "ledger@airuntime.dev") -> User:

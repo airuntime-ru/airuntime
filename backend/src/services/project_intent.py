@@ -50,6 +50,12 @@ _SITE_PRODUCT_INTENT = re.compile(
     r"|"
     r"(?:telegram|телеграм|тг|бот|bot).{0,60}(?:и|,)\s*"
     r"(?:сайт|лендинг|landing|website)"
+    r"|"
+    # Reverse order: a site term mentioned first, then a bot term joined by "и"/",", even with
+    # a noun in between ("Сайт студии и Telegram-бот") - mirrors the alternative above so word
+    # order alone doesn't decide whether a dual-product ask gets recognised as one.
+    r"(?:сайт|лендинг|landing|website).{0,60}(?:и|,)\s*"
+    r"(?:telegram|телеграм|тг|бот|bot)"
     r")",
     re.IGNORECASE,
 )

@@ -10,9 +10,8 @@ from src.db.session import Base
 
 class PipelineRunMetric(Base):
     """Objective per-turn timing/iteration history for the product pipeline
-    (product_pipeline.py) - one row per turn that ran with settings.enable_product_pipeline
-    on, mirroring agent_run_metric.py's shape/precedent but for pipeline-specific stages
-    (brief/preview/review/fix) instead of raw provider usage.
+    (product_pipeline.py) - one row per turn, mirroring agent_run_metric.py's shape/precedent
+    but for pipeline-specific stages (brief/preview/review/fix) instead of raw provider usage.
 
     Complements, not replaces, the plain `logger.info("pipeline_run_metrics %s", ...)` line
     product_pipeline.py already logs on every run for live grep/debugging - this table is for
@@ -37,9 +36,9 @@ class PipelineRunMetric(Base):
     build_iterations: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     review_iterations: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     preview_failures: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    # e.g. "clarifying_questions", "implementation_error", "max_review_iterations" - null means
-    # the turn ran the pipeline to a normal conclusion (review passed, or preview/review were
-    # simply off).
+    # e.g. "clarifying_questions", "implementation_error", "preview_infra_failure" - null means
+    # the turn ran the pipeline to a normal conclusion (review passed, or the project type
+    # doesn't support preview at all).
     skipped_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Full PipelineMetrics.as_log_dict()-shaped payload (stage seconds, review scores, ...) -
     # never a Secret value, see product_pipeline.py's module docstring.

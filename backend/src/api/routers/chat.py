@@ -31,9 +31,8 @@ from src.db.models.pipeline_run_metric import PipelineRunMetric
 from src.db.models.project import Project
 from src.db.models.project_service import ProjectService
 from src.db.models.user import User
-from src.db.session import get_db
+from src.db.session import SessionLocal, get_db
 from src.services.agent.events import AgentDone, TextDelta, ToolCallRequested, ToolCallResult
-from src.services.agent.orchestrator import run_agent_turn
 from src.services.agent.product_pipeline import run_product_pipeline
 from src.services.agent.prompt import REPORT_HEADING, build_system_prompt
 from src.services.agent.tools import WorkspaceTools
@@ -58,6 +57,9 @@ from src.services.moderation import (
     check_project_safety,
     is_token_related_block_reason,
 )
+from src.services.orchestration import engine as orchestration_engine
+from src.services.orchestration import events_bus as orchestration_events_bus
+from src.services.orchestration.repository import OrchestrationRunRepository
 from src.services.project_git import ProjectGitError, commit_snapshot
 from src.services.project_intent import (
     can_update_project_type,
@@ -170,7 +172,10 @@ _COMMAND_LABEL_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bcurl\b|\bwget\b"), "Проверяю ответ сервера"),
     (re.compile(r"\bpytest\b"), "Запускаю тесты"),
     (re.compile(r"\bpython3?\b"), "Проверяю код"),
-    (re.compile(r"\b(rg|grep)\s+--files\b|\bfind\b[^|]*-type\s+f\b|^ls\b"), "Изучаю структуру проекта"),
+    (
+        re.compile(r"\b(rg|grep)\s+--files\b|\bfind\b[^|]*-type\s+f\b|^ls\b"),
+        "Изучаю структуру проекта",
+    ),
     (re.compile(r"\b(sed\s+-n|cat|head|tail)\b"), "Читаю файлы проекта"),
 ]
 
@@ -469,6 +474,200 @@ def _sse_status(phase: str, label: str, state: str = "running") -> str:
     return f"data: {json.dumps({'status': {'phase': phase, 'label': label, 'state': state}})}\n\n"
 
 
+# A run_orchestration() call returns as soon as it hits waiting_for_user (see engine.py) - no
+# further RunEvents will ever arrive for it until something calls resume_task_after_user_input
+# and re-launches the engine. events_bus.TERMINAL_EVENT_TYPES only covers the three truly-final
+# run outcomes (a live tail correctly stays open past waiting_for_user for orchestration.py's
+# own /events endpoint - a client is free to just disconnect there) - but THIS generator's HTTP
+# request is expected to eventually finish and send [DONE], the same way the non-orchestrated
+# turn below always does, so it must stop tailing on waiting_for_user too rather than blocking on
+# events that will never come.
+_CHAT_STREAM_STOPPING_EVENT_TYPES = orchestration_events_bus.TERMINAL_EVENT_TYPES | {
+    "waiting_for_secret",
+    "waiting_for_user",
+}
+
+
+async def _orchestration_event_source(
+    *,
+    db: Session,
+    project: Project,
+    chat_id: UUID,
+    current_user: User,
+    original_request: str,
+    provider_name: str,
+    model: str,
+    api_key: str,
+):
+    """The orchestration-engine path for one chat turn (settings.enable_orchestration_engine),
+    parallel to event_source() below rather than spliced into it - a persisted multi-task run and
+    a single agent turn are different enough models that sharing control flow would cost more in
+    complexity/regression risk than the small amount of duplicated deploy-wait plumbing (reused
+    as-is via _queue_deployment_or_notify_limit/_follow_repair_redeploy, both defined above).
+
+    Credits are already charged per-task inside the engine itself (budget.py's
+    charge_credits_for_run) - unlike the non-orchestrated path below, this must NOT also call
+    record_usage() again at the end."""
+    assistant_full = ""
+
+    def append_visible(text: str) -> str:
+        nonlocal assistant_full
+        assistant_full += text
+        return _sse_chunk(text)
+
+    yield _sse_status("thinking", "AIRuntime осмысляет задачу")
+
+    run = OrchestrationRunRepository(db).create(
+        project_id=project.id,
+        chat_id=chat_id,
+        user_id=current_user.id,
+        original_request=original_request,
+        provider=provider_name,
+        model=model,
+    )
+    db.commit()
+    run_id = run.id
+    orchestration_engine.launch_run_in_background(
+        run_id, provider_name=provider_name, model=model, api_key=api_key
+    )
+
+    ping = Ticker(15.0)
+    terminal_event_type: str | None = None
+    task_titles: dict[str, str] = {}
+    async for envelope in orchestration_events_bus.stream_events(SessionLocal, str(run_id)):
+        event_type = envelope["event_type"]
+        payload = envelope.get("payload") or {}
+        task_id = envelope.get("task_id")
+        if ping.due():
+            yield SSE_PING
+
+        if event_type in ("plan_created", "plan_revised"):
+            count = payload.get("task_count")
+            yield _sse_status(
+                "thinking", f"План готов: {count} задач(и)" if count else "План составлен"
+            )
+        elif event_type == "task_started":
+            title = payload.get("title") or payload.get("local_id") or "Задача"
+            if task_id:
+                task_titles[task_id] = title
+            yield _sse_status("tool", title, "running")
+        elif event_type == "task_completed":
+            yield _sse_status("tool", f"✓ {task_titles.get(task_id, 'Задача')}", "done")
+        elif event_type == "task_repairing":
+            yield _sse_status("tool", "Исправляю ошибку и повторяю", "running")
+        elif event_type == "task_failed":
+            yield _sse_status("tool", f"⚠ {task_titles.get(task_id, 'Задача')}", "error")
+        elif event_type == "waiting_for_secret":
+            lines = []
+            for key in payload.get("requested_secrets") or []:
+                secret_row, created = ensure_secret_placeholder(
+                    db, project, key, "Требуется для продолжения выполнения задачи"
+                )
+                if created:
+                    lines.append(f"- **{secret_row.key}**")
+            db.commit()
+            if lines:
+                yield append_visible(
+                    "\n\nЧтобы продолжить, заполните в настройках проекта "
+                    "(вкладка «Настройки») эти значения:\n" + "\n".join(lines)
+                )
+            yield _sse_status("needs_configuration", "Нужны данные от вас", "error")
+
+        if event_type in _CHAT_STREAM_STOPPING_EVENT_TYPES:
+            terminal_event_type = event_type
+            break
+
+    db.expire_all()
+    db.refresh(project)
+    run = OrchestrationRunRepository(db).get(run_id)
+
+    if terminal_event_type == "run_completed":
+        has_website = project.type in ("website", "mixed")
+        has_bot = project.type in ("telegram_bot", "mixed")
+        if has_website or has_bot:
+            deployment, limit_message = _queue_deployment_or_notify_limit(db, project)
+            db.commit()
+            if limit_message:
+                yield _sse_status("limit", limit_message, "error")
+                yield append_visible(f"\n\n{limit_message}")
+            elif deployment is not None:
+                yield _sse_status("deploy", "Ставлю проект в очередь запуска", "running")
+                deadline = time.monotonic() + _DEPLOY_WAIT_SECONDS
+                last_label = ""
+                watched_id = deployment.id
+                deploy_ping = Ticker(15.0)
+                while time.monotonic() < deadline:
+                    await asyncio.sleep(_DEPLOY_POLL_SECONDS)
+                    if deploy_ping.due():
+                        yield SSE_PING
+                    db.expire_all()
+                    deployment = db.get(Deployment, watched_id)
+                    if deployment is None:
+                        break
+                    label = _deploy_status_label(deployment.status)
+                    if label != last_label:
+                        state = (
+                            "done"
+                            if deployment.status == "completed"
+                            else "error"
+                            if deployment.status == "failed"
+                            else "running"
+                        )
+                        yield _sse_status("deploy", label, state)
+                        last_label = label
+                    if deployment.status in _DEPLOYMENT_TERMINAL:
+                        break
+
+                if deployment is not None and deployment.status == "failed":
+                    async for item in _follow_repair_redeploy(
+                        db,
+                        project=project,
+                        failed_deployment=deployment,
+                        deadline=deadline,
+                        last_label=last_label,
+                    ):
+                        if isinstance(item, tuple):
+                            _, deployment, last_label = item
+                        else:
+                            yield item
+
+                db.expire_all()
+                db.refresh(project)
+                if (
+                    deployment is not None
+                    and deployment.status == "completed"
+                    and project.status == "live"
+                ):
+                    yield append_visible(
+                        _launch_success_message(project, has_website=has_website, has_bot=has_bot)
+                    )
+                    yield _sse_status("done", "Проект запущен и работает", "done")
+                else:
+                    yield append_visible(_launch_failure_message(deployment, project))
+                    yield _sse_status("error", "Запуск не удался", "error")
+        else:
+            yield _sse_status("done", "Готово", "done")
+    elif terminal_event_type == "run_failed":
+        detail = (run.error_message or "").strip() if run else ""
+        yield append_visible(
+            f"\n\nНе удалось выполнить запрос: {detail}"
+            if detail
+            else "\n\nНе удалось выполнить запрос. Подробности — в панели задач."
+        )
+        yield _sse_status("error", "Не удалось выполнить запрос", "error")
+    elif terminal_event_type == "run_cancelled":
+        yield append_visible("\n\nВыполнение остановлено.")
+        yield _sse_status("error", "Остановлено", "error")
+    # waiting_for_secret/waiting_for_user already yielded their own status/message above.
+
+    assistant_message = Message(
+        id=uuid4(), chat_id=chat_id, role="assistant", content_markdown=assistant_full
+    )
+    db.add(assistant_message)
+    db.commit()
+    yield "data: [DONE]\n\n"
+
+
 @router.post("", response_model=ChatCreateResponse)
 def create_chat(
     project_id: UUID,
@@ -692,6 +891,21 @@ async def _stream_events(
                 detail=f"Проект заблокирован модерацией: {reason}",
             )
 
+    if settings.enable_orchestration_engine:
+        return StreamingResponse(
+            _orchestration_event_source(
+                db=db,
+                project=project,
+                chat_id=chat_id,
+                current_user=current_user,
+                original_request=safe_message,
+                provider_name=provider_name,
+                model=model,
+                api_key=api_key,
+            ),
+            media_type="text/event-stream",
+        )
+
     async def event_source():
         assistant_full = ""
 
@@ -734,43 +948,25 @@ async def _stream_events(
             agent_started = time.monotonic()
             logger.info(
                 "Agent turn start: project=%s chat=%s provider=%s model=%s orchestrator=%s "
-                "pipeline=%s message_chars=%d",
+                "message_chars=%d",
                 project.id,
                 chat_id,
                 provider_name,
                 model,
                 settings.enable_agent_orchestrator,
-                settings.enable_product_pipeline,
                 len(safe_message),
             )
             try:
-                # Feature-flagged alternate producer of the same TextDelta/ToolCallRequested/
-                # ToolCallResult/AgentDone event stream (see product_pipeline.py's module
-                # docstring) - off by default, falls straight through to the unchanged
-                # run_agent_turn call below.
-                turn_source = (
-                    run_product_pipeline(
-                        project=project,
-                        provider_name=provider_name,
-                        model=model,
-                        api_key=api_key,
-                        workspace=workspace,
-                        system_prompt=system_prompt,
-                        history=history,
-                        user_message=safe_message,
-                        images=image_attachments,
-                    )
-                    if settings.enable_product_pipeline
-                    else run_agent_turn(
-                        provider_name=provider_name,
-                        model=model,
-                        api_key=api_key,
-                        workspace=workspace,
-                        system_prompt=system_prompt,
-                        history=history,
-                        user_message=safe_message,
-                        images=image_attachments,
-                    )
+                turn_source = run_product_pipeline(
+                    project=project,
+                    provider_name=provider_name,
+                    model=model,
+                    api_key=api_key,
+                    workspace=workspace,
+                    system_prompt=system_prompt,
+                    history=history,
+                    user_message=safe_message,
+                    images=image_attachments,
                 )
                 agent_events = with_heartbeat(turn_source)
                 async for event in agent_events:
@@ -825,8 +1021,7 @@ async def _stream_events(
             # product_pipeline.py folds its own stage timings/iteration counts into
             # AgentDone.usage["pipeline"] (see that module's _finish_usage) - pull it out here,
             # before agent_usage is rendered in the chat footer or stored on AgentRunMetric, so
-            # a raw nested dict never leaks into either of those user-facing/simple views. None
-            # when the pipeline was off this turn (plain run_agent_turn never sets this key).
+            # a raw nested dict never leaks into either of those user-facing/simple views.
             pipeline_metrics: dict[str, object] | None = None
             if isinstance(agent_usage, dict) and "pipeline" in agent_usage:
                 pipeline_metrics = agent_usage.pop("pipeline")
@@ -924,7 +1119,7 @@ async def _stream_events(
                         "Шаблон не подставляется — опишите задачу ещё раз или уточните, что "
                         "нужно дописать, и агент соберёт код с нуля."
                     )
-                    raise _StopDeployment
+                    raise _StopDeployment from None
             for rel_path in _generated_files(artifact_path):
                 yield _sse_status("module", f"В проекте: {rel_path}")
             thin_arch = thin_bot_architecture_warning(artifact_path, project)
@@ -940,9 +1135,7 @@ async def _stream_events(
             except ProjectGitError as git_exc:
                 # Git errors shouldn't break the build/deploy pipeline, and paths/hashes
                 # must not pollute the user-facing project log feed.
-                logger.warning(
-                    "Snapshot commit failed for project %s: %s", project.id, git_exc
-                )
+                logger.warning("Snapshot commit failed for project %s: %s", project.id, git_exc)
 
             project.status = "ready"
             db.add(project)

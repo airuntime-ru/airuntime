@@ -54,6 +54,22 @@ def _telegram_token(db: Session, project: Project) -> str | None:
     return None
 
 
+def _all_secret_environment(db: Session, project: Project) -> dict[str, str]:
+    """Every user-supplied secret (agent's request_secret tool call, filled in via the project's
+    Settings tab) with a value on file, delivered to the deployed container as an env var keyed
+    by its own Secret.key - already normalized to a valid env-var name at creation time (see
+    secrets.py's ensure_secret_placeholder), so no re-normalization is needed here.
+
+    Previously only TELEGRAM_BOT_TOKEN ever made it into the deployed container's environment -
+    every other requested secret (a payment provider key, a third-party API token, ...) was
+    collected from the user but silently never delivered. Service credentials (POSTGRES_PASSWORD
+    etc.) are intentionally not duplicated here; deployment_worker.py layers
+    project_services.build_connection_env() on top of this dict afterwards, and that later
+    `.update()` correctly wins over any same-named entry from here."""
+    rows = db.query(Secret).filter(Secret.project_id == project.id).all()
+    return {row.key: decrypt_secret(row.encrypted_value) for row in rows if row.encrypted_value}
+
+
 # Default Dockerfile only when the agent forgot to write one - not a content template.
 MIXED_DOCKERFILE = """FROM python:3.12-slim
 RUN apt-get update && apt-get install -y --no-install-recommends nginx \\
@@ -265,12 +281,9 @@ def build_project_image(
                 raise ArtifactError(
                     "Docker image build failed after repair attempts; agent code was kept "
                     f"(templates are disabled):\n{last_error}"
-                )
+                ) from exc
 
-    environment: dict[str, str] = {}
-    if project.type in ("telegram_bot", "mixed"):
-        token = _telegram_token(db, project)
-        if not token:
-            raise ArtifactError("Telegram bot token is missing")
-        environment["TELEGRAM_BOT_TOKEN"] = token
+    environment = _all_secret_environment(db, project)
+    if project.type in ("telegram_bot", "mixed") and not environment.get(TELEGRAM_BOT_TOKEN_KEY):
+        raise ArtifactError("Telegram bot token is missing")
     return tag, environment

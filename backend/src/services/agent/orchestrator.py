@@ -170,7 +170,9 @@ def _compose_subtask_prompt(*, base_system_prompt: str, subtask: Subtask, total:
     )
 
 
-def _compose_subtask_user_message(*, original_user_message: str, subtask: Subtask, index: int, total: int) -> str:
+def _compose_subtask_user_message(
+    *, original_user_message: str, subtask: Subtask, index: int, total: int
+) -> str:
     """Keep the original user brief visible so planner-rewritten instructions cannot erase
     launch/deploy constraints the user (or platform contract) relied on."""
     return (

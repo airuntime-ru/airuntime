@@ -1,11 +1,9 @@
 """Product-quality pipeline: brief -> UX -> visual direction -> implementation -> build ->
 preview (multi-page, desktop+mobile) -> review (text + screenshots, per-provider) -> fix.
 
-Off by default at the Settings class level (settings.enable_product_pipeline) - docker-compose
-turns it on for actual deployments, see config.py's own comment. chat.py's _stream_events picks
-this over plain orchestrator.run_agent_turn only when the flag is on; off, behavior is
-byte-identical to before this module existed - the same "opt-in alternate producer of the same
-event stream" shape orchestrator.py itself already uses for enable_agent_orchestrator.
+chat.py's _stream_events always runs a turn through this pipeline (the older single-pass
+orchestrator.run_agent_turn is still used internally here for the implement/fix stages, and
+directly by this module only - not called on its own from chat.py anymore).
 
 Security invariants (do not weaken):
 - No Docker socket on the backend process - preview goes through docker_control_queue's
@@ -80,7 +78,11 @@ _MOBILE_WIDTH_THRESHOLD = 768
 _MAX_REVIEW_IMAGES = 2
 _MAX_REVIEW_IMAGE_BYTES = 4 * 1024 * 1024
 
-# Independent of max_review_iterations - infra hiccups (worker down, image not built, a
+# Hard ceiling on fix->re-preview->re-review loops per turn. Keep small - each extra
+# iteration is a full extra agent turn plus a preview+review call.
+_MAX_REVIEW_ITERATIONS = 2
+
+# Independent of _MAX_REVIEW_ITERATIONS - infra hiccups (worker down, image not built, a
 # timeout) must not eat into the budget of content-fix passes the coding agent gets.
 _MAX_INFRA_RETRIES = 1
 
@@ -348,8 +350,7 @@ async def run_product_pipeline(
     images: list[ImageAttachment] | None = None,
 ) -> AsyncIterator[TextDelta | ToolCallRequested | ToolCallResult | AgentDone]:
     """Drop-in alternative to orchestrator.run_agent_turn - same event stream shape, ending in
-    exactly one AgentDone. Only ever called when settings.enable_product_pipeline is True
-    (chat.py branches to plain run_agent_turn otherwise, before this module is imported-used)."""
+    exactly one AgentDone."""
     metrics: dict[str, Any] = {
         "stages_s": {},
         "build_iterations": 0,
@@ -420,7 +421,7 @@ async def run_product_pipeline(
         # --- UX + Visual direction ---------------------------------------------------
         ux: UXSpec | None = None
         visual: VisualDirection | None = None
-        if brief is not None and settings.enable_ux_planning:
+        if brief is not None:
             started = time.monotonic()
             yield ToolCallRequested(call_id="ux", name="ux_planning", arguments={})
             ux = await _plan_ux(
@@ -444,7 +445,7 @@ async def run_product_pipeline(
                     summary="UX-спека недоступна - пропускаю",
                 )
 
-        if brief is not None and settings.enable_visual_planning:
+        if brief is not None:
             started = time.monotonic()
             yield ToolCallRequested(call_id="visual", name="visual_direction", arguments={})
             visual = await _plan_visual(
@@ -509,15 +510,11 @@ async def run_product_pipeline(
             return
 
         # --- Preview + review + fix loop ----------------------------------------------
-        max_iterations = max(0, int(settings.max_review_iterations))
+        max_iterations = _MAX_REVIEW_ITERATIONS
         iteration = 0
         infra_retries = 0
 
-        while (
-            settings.enable_browser_preview
-            and _supports_preview(project)
-            and workspace.build_succeeded is not False
-        ):
+        while _supports_preview(project) and workspace.build_succeeded is not False:
             started = time.monotonic()
             targets = _preview_targets_from_brief(brief)
             yield ToolCallRequested(
@@ -566,9 +563,6 @@ async def run_product_pipeline(
                     timeout_seconds=180,
                 )
                 continue  # skip review this round - retry preview, not a content fix pass
-
-            if not settings.enable_design_review:
-                break
 
             started = time.monotonic()
             yield ToolCallRequested(

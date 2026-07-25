@@ -225,7 +225,7 @@ def test_ensure_required_files_rewrites_copy_app_py_only_dockerfile(tmp_path):
     )
     (tmp_path / "requirements.txt").write_text("aiogram\n", encoding="utf-8")
     (tmp_path / "Dockerfile").write_text(
-        "FROM python:3.12-slim\nCOPY app.py .\nCMD [\"python\", \"app.py\"]\n",
+        'FROM python:3.12-slim\nCOPY app.py .\nCMD ["python", "app.py"]\n',
         encoding="utf-8",
     )
     ensure_required_files(project, tmp_path)
@@ -346,7 +346,11 @@ def test_agent_session_writes_a_file_then_stops(tmp_path, monkeypatch):
 
     workspace = WorkspaceTools(tmp_path)
     session = CodingAgentSession(
-        provider_name="openai",
+        # Not "openai": CODEX_ELIGIBLE_PROVIDERS routes that through a real Docker-backed
+        # CodexAgentSession instead of get_agent_provider()/FakeProvider (see codex_runtime.py) -
+        # these tests exercise CodingAgentSession's own HTTP-provider loop, so they need a
+        # provider name that actually reaches it.
+        provider_name="anthropic",
         model="gpt-4o-mini",
         api_key="test-key",
         workspace=workspace,
@@ -385,7 +389,7 @@ def test_agent_session_stops_at_max_iterations(tmp_path, monkeypatch):
 
     workspace = WorkspaceTools(tmp_path)
     session = CodingAgentSession(
-        provider_name="openai",
+        provider_name="anthropic",  # not "openai" - see comment on the first test in this file
         model="gpt-4o-mini",
         api_key="test-key",
         workspace=workspace,
@@ -412,7 +416,7 @@ def test_agent_session_surfaces_provider_error(tmp_path, monkeypatch):
 
     workspace = WorkspaceTools(tmp_path)
     session = CodingAgentSession(
-        provider_name="openai",
+        provider_name="anthropic",  # not "openai" - see comment on the first test in this file
         model="gpt-4o-mini",
         api_key="",
         workspace=workspace,

@@ -254,7 +254,14 @@ def iter_codex_events(job: dict) -> Iterator[dict]:
                 settings.codex_image,
                 command=command,
                 detach=True,
-                name=f"airuntime-codex-{uuid.uuid4().hex[:12]}",
+                # Named after the job's own job_id (== the orchestration AgentTask id, when
+                # this run came from executors.py - see codex_runtime.py's correlation_id) so
+                # docker_control_actions.cancel_codex_run can compute this exact name from a
+                # task id alone and issue a real `docker stop`, with no separate name registry.
+                # codex_simple_complete's one-shot planning/review calls and non-orchestrated
+                # turns have no meaningful job_id, so they still fall back to a fresh random
+                # name (unchanged behavior - nothing can or needs to cancel those).
+                name=f"airuntime-codex-{job.get('job_id') or uuid.uuid4().hex[:12]}",
                 environment=_container_env(api_key),
                 volumes=volumes,
                 network=settings.codex_network,
