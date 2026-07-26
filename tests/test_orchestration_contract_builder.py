@@ -274,3 +274,135 @@ class TestBuildTaskContractEndToEnd:
         assert contract.forbidden_paths == ["*"]
         assert "write_file" not in contract.allowed_tools
         assert "read_file" in contract.allowed_tools
+
+
+class TestAllowedCapabilitiesAndSkillsFromTask:
+    """capability_router.py's route() decision is persisted onto task.skill_id/capability_id
+    (engine.py's _materialize_plan_tasks) - the contract must surface that exact decision as
+    what executors.py's Deterministic/Skill/McpExecutor read (allowed_capabilities[0] /
+    allowed_skills[0]), not leave it stranded on the ORM row. Regression test for a bug where
+    build_task_contract hardcoded allowed_capabilities=[] and never read task.capability_id at
+    all, so every deterministic/MCP-routed task failed immediately in production."""
+
+    def test_task_capability_id_reaches_the_contract(
+        self, db: Session, project: Project, run_and_plan, tmp_path
+    ) -> None:
+        run, plan = run_and_plan
+        task = AgentTask(
+            run_id=run.id,
+            plan_id=plan.id,
+            local_id="check",
+            title="Build check",
+            role=SpecialistRole.QA_REVIEWER.value,
+            execution_kind="deterministic_validation",
+            status="pending",
+            max_attempts=1,
+            capability_id="platform:build_check",
+        )
+        db.add(task)
+        db.flush()
+
+        planned = PlannedTask(
+            local_id="check",
+            title="Build check",
+            role=SpecialistRole.QA_REVIEWER,
+            goal="Проверить сборку",
+            reason="Часть плана после Implementer",
+        )
+
+        contract = build_task_contract(
+            task=task,
+            planned_task=planned,
+            run_goal="Лендинг кофейни",
+            context_engine=ContextEngine(db),
+            project=project,
+            workspace_root=tmp_path,
+            git_sha=None,
+            dependency_tasks=[],
+            available_files=[],
+            registered_skill_ids=set(),
+        )
+
+        assert contract.allowed_capabilities == ["platform:build_check"]
+
+    def test_task_skill_id_is_first_in_allowed_skills(
+        self, db: Session, project: Project, run_and_plan, tmp_path
+    ) -> None:
+        run, plan = run_and_plan
+        task = AgentTask(
+            run_id=run.id,
+            plan_id=plan.id,
+            local_id="provision",
+            title="Provision Postgres",
+            role=SpecialistRole.IMPLEMENTER.value,
+            execution_kind="skill",
+            status="pending",
+            max_attempts=1,
+            skill_id="provision_postgres",
+        )
+        db.add(task)
+        db.flush()
+
+        planned = PlannedTask(
+            local_id="provision",
+            title="Provision Postgres",
+            role=SpecialistRole.IMPLEMENTER,
+            goal="Подключить Postgres",
+            reason="Проекту нужна база данных",
+            suggested_skills=["provision_postgres", "database_migrations"],
+        )
+
+        contract = build_task_contract(
+            task=task,
+            planned_task=planned,
+            run_goal="Сайт с базой данных",
+            context_engine=ContextEngine(db),
+            project=project,
+            workspace_root=tmp_path,
+            git_sha=None,
+            dependency_tasks=[],
+            available_files=[],
+            registered_skill_ids={"provision_postgres", "database_migrations"},
+        )
+
+        assert contract.allowed_skills[0] == "provision_postgres"
+
+    def test_no_router_decision_leaves_capabilities_empty(
+        self, db: Session, project: Project, run_and_plan, tmp_path
+    ) -> None:
+        run, plan = run_and_plan
+        task = AgentTask(
+            run_id=run.id,
+            plan_id=plan.id,
+            local_id="impl",
+            title="Implement",
+            role=SpecialistRole.IMPLEMENTER.value,
+            execution_kind="specialist_agent",
+            status="pending",
+            max_attempts=3,
+        )
+        db.add(task)
+        db.flush()
+
+        planned = PlannedTask(
+            local_id="impl",
+            title="Implement",
+            role=SpecialistRole.IMPLEMENTER,
+            goal="Написать страницу",
+            reason="Ключевой сценарий брифа",
+        )
+
+        contract = build_task_contract(
+            task=task,
+            planned_task=planned,
+            run_goal="Лендинг кофейни",
+            context_engine=ContextEngine(db),
+            project=project,
+            workspace_root=tmp_path,
+            git_sha=None,
+            dependency_tasks=[],
+            available_files=[],
+            registered_skill_ids=set(),
+        )
+
+        assert contract.allowed_capabilities == []

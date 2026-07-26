@@ -521,6 +521,17 @@ def create_worktree(
     write task can never touch the shared checkout other concurrent/sequential tasks use."""
     init_repo_if_needed(project_dir)
     worktree_path.parent.mkdir(parents=True, exist_ok=True)
+    if base_sha is None and _run_git(
+        cwd=project_dir, args=["rev-parse", "--verify", "-q", "HEAD"], check=False
+    ).returncode != 0:
+        # Brand-new project, zero commits yet (HEAD is unborn) - `worktree add ... HEAD` has
+        # nothing to branch from and fails outright. commit_snapshot() can't help here either
+        # (an empty tree has no diff to no-op against), so give the shared checkout a real root
+        # commit first; the worktree then branches from that like any other.
+        _run_git(
+            cwd=project_dir,
+            args=["commit", "--allow-empty", "-q", "-m", "airuntime: initial commit"],
+        )
     start_point = base_sha or "HEAD"
     _run_git(
         cwd=project_dir,

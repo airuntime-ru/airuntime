@@ -2,11 +2,10 @@
 the browser and this process.
 
 Why this exists: a coding-agent turn can go tens of seconds to several minutes between visible
-events - Codex "thinking" with no tool call yet, a slow `docker build`/`npm install` step, or (with
-settings.enable_agent_orchestrator on) the up-front planning call that decides whether to split the
-request into subtasks, which by design produces zero visible output while it runs. None of that is
-a bug in the agent - but a chunked HTTP response that goes quiet for long enough gets treated as
-dead by *something* on a real network path (a NAT box, a corporate/VPN proxy, even some OS-level
+events - Codex "thinking" with no tool call yet, a slow `docker build`/`npm install` step, or the
+orchestration engine's own planning call, which by design produces zero visible output while it
+runs. None of that is a bug in the agent - but a chunked HTTP response that goes quiet for long
+enough gets treated as dead by *something* on a real network path (a NAT box, a corporate/VPN proxy, even some OS-level
 socket handling) and the browser sees a raw connection failure (Safari surfaces this as literally
 "Load failed", Chrome as "Failed to fetch") with no HTTP status and no body to show the user -
 worse than any error this app could format itself. Interleaving a harmless ping during silence

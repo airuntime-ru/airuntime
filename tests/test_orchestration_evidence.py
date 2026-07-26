@@ -82,3 +82,52 @@ class TestCollectTaskEvidence:
         init_repo_if_needed(tmp_path)
         result = evidence.collect_task_evidence(workspace_root=tmp_path, base_commit_sha=None)
         assert result.changed_files == []
+
+
+class TestRunStaticChecks:
+    """Server-side parse check - the static-validation layer (spec section 9). Deliberately
+    parse-only: the backend must never execute agent-authored project code."""
+
+    def test_returns_none_when_nothing_checkable_changed(self, tmp_path) -> None:
+        (tmp_path / "index.html").write_text("<html></html>", encoding="utf-8")
+        assert evidence.run_static_checks(tmp_path, ["index.html"]) is None
+
+    def test_clean_python_and_json_pass(self, tmp_path) -> None:
+        (tmp_path / "app.py").write_text("def main():\n    return 1\n", encoding="utf-8")
+        (tmp_path / "package.json").write_text('{"name": "x"}', encoding="utf-8")
+        result = evidence.run_static_checks(tmp_path, ["app.py", "package.json"])
+        assert result == {"ok": True, "checked_files": 2, "errors": []}
+
+    def test_broken_python_is_reported(self, tmp_path) -> None:
+        (tmp_path / "app.py").write_text("def main(\n    return 1\n", encoding="utf-8")
+        result = evidence.run_static_checks(tmp_path, ["app.py"])
+        assert result["ok"] is False
+        assert any("app.py" in e for e in result["errors"])
+
+    def test_malformed_package_json_is_reported(self, tmp_path) -> None:
+        (tmp_path / "package.json").write_text('{"name": "x",}', encoding="utf-8")
+        result = evidence.run_static_checks(tmp_path, ["package.json"])
+        assert result["ok"] is False
+        assert any("package.json" in e for e in result["errors"])
+
+    def test_deleted_file_is_skipped_not_an_error(self, tmp_path) -> None:
+        assert evidence.run_static_checks(tmp_path, ["gone.py"]) is None
+
+    def test_collect_task_evidence_populates_lint_result_itself(self, tmp_path) -> None:
+        """The whole point: lint_result must be server-collected, so validate_static can never
+        be satisfied purely by an executor claiming it passed."""
+        init_repo_if_needed(tmp_path)
+        (tmp_path / "app.py").write_text("def broken(\n", encoding="utf-8")
+        result = evidence.collect_task_evidence(workspace_root=tmp_path, base_commit_sha=None)
+        assert result.lint_result is not None
+        assert result.lint_result["ok"] is False
+
+    def test_executor_claim_cannot_clear_a_real_server_finding(self, tmp_path) -> None:
+        init_repo_if_needed(tmp_path)
+        (tmp_path / "app.py").write_text("def broken(\n", encoding="utf-8")
+        result = evidence.collect_task_evidence(
+            workspace_root=tmp_path,
+            base_commit_sha=None,
+            lint_result={"ok": True, "errors": []},
+        )
+        assert result.lint_result["ok"] is False

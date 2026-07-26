@@ -60,6 +60,19 @@ def ensure_tables() -> Generator[None, None, None]:
 
 
 @pytest.fixture(autouse=True)
+def _no_startup_run_recovery(monkeypatch: pytest.MonkeyPatch) -> None:
+    """main.py's lifespan sweeps for crash-stranded orchestration runs and relaunches them.
+    That is correct in production and wrong in tests: every TestClient(app) would fire it
+    against the shared test database on its own connection - outside this test's rolled-back
+    transaction - and start background work for rows other tests created. Tests that want to
+    exercise the sweep call engine.recover_stranded_runs() directly (see
+    TestRestartRecoverySweep)."""
+    from src.services.orchestration import engine as orchestration_engine
+
+    monkeypatch.setattr(orchestration_engine, "recover_stranded_runs", lambda *a, **k: 0)
+
+
+@pytest.fixture(autouse=True)
 def mock_s3() -> Generator[None, None, None]:
     storage_module._internal_client.cache_clear()
     storage_module._public_client.cache_clear()

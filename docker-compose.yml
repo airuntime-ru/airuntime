@@ -63,7 +63,6 @@ services:
     logging: *default-logging
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      IMAGE_JANITOR_ENABLED: ${IMAGE_JANITOR_ENABLED:-true}
       DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/airuntime
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET_KEY: change-me
@@ -77,23 +76,11 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      # Splits a big openai-provider turn into sequential subtasks - see orchestrator.py's
-      # module docstring before flipping this on (least-verified piece of the Codex work).
-      ENABLE_AGENT_ORCHESTRATOR: ${ENABLE_AGENT_ORCHESTRATOR:-false}
-      # Product-quality pipeline (brief -> implement -> preview -> review -> fix) - see
-      # product_pipeline.py's module docstring. On by default here (config.py's own Settings
-      # default is the conservative `false` - see its comment) so a plain `docker compose up`
-      # shows the full current flow. Run `docker compose build preview` once first, or
-      # ENABLE_BROWSER_PREVIEW turns every preview attempt into a graceful "image not built"
-      # failure (never a crash) until you do. Set to false in .env to opt back out.
-      ENABLE_PRODUCT_PIPELINE: ${ENABLE_PRODUCT_PIPELINE:-true}
-      ENABLE_UX_PLANNING: ${ENABLE_UX_PLANNING:-true}
-      ENABLE_VISUAL_PLANNING: ${ENABLE_VISUAL_PLANNING:-true}
-      ENABLE_BROWSER_PREVIEW: ${ENABLE_BROWSER_PREVIEW:-true}
-      ENABLE_DESIGN_REVIEW: ${ENABLE_DESIGN_REVIEW:-true}
-      MAX_REVIEW_ITERATIONS: ${MAX_REVIEW_ITERATIONS:-2}
-      REVIEWER_PROVIDER: ${REVIEWER_PROVIDER:-}
-      REVIEWER_MODEL: ${REVIEWER_MODEL:-}
+      # Every agent/orchestration capability (specialist roles, skills, MCP, worktree
+      # isolation, replanning, preview/design review) always runs - there are no on/off
+      # switches for them any more. Run `docker compose build preview` once so the preview
+      # step has its image; without it every preview attempt degrades to a graceful
+      # "image not built" result (never a crash).
       PREVIEW_IMAGE: ${PREVIEW_IMAGE:-airuntime-preview}
       PREVIEW_TIMEOUT_SECONDS: ${PREVIEW_TIMEOUT_SECONDS:-90}
       DEPLOYMENT_DEFAULT_IMAGE: nginx:alpine
@@ -123,7 +110,6 @@ services:
     logging: *default-logging
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      IMAGE_JANITOR_ENABLED: ${IMAGE_JANITOR_ENABLED:-true}
       DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/airuntime
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET_KEY: change-me
@@ -143,7 +129,7 @@ services:
       S3_BUCKET: airuntime-files
       DEPLOYMENT_VOLUMES_DIR: ${DEPLOYMENT_VOLUMES_DIR:-/var/lib/airuntime/volumes}
       # preview_runner.py (worker-only) reads these to launch the per-run preview container -
-      # see the `preview` service below and product_pipeline.py for the backend-side flags.
+      # see the `preview` service below.
       PREVIEW_IMAGE: ${PREVIEW_IMAGE:-airuntime-preview}
       PREVIEW_TIMEOUT_SECONDS: ${PREVIEW_TIMEOUT_SECONDS:-90}
       PREVIEW_MEMORY_LIMIT: ${PREVIEW_MEMORY_LIMIT:-1g}

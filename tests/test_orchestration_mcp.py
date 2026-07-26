@@ -203,3 +203,76 @@ class TestMcpRegistry:
         results = await registry.list_capabilities_for_role(repo, role=SpecialistRole.IMPLEMENTER)
         server_names = {srv.name for srv, _cap in results}
         assert server_names == {"fake2"}
+
+
+class TestRateLimiter:
+    """Distinct from the circuit breaker: caps call VOLUME even when every call succeeds, so a
+    runaway retry/replan loop cannot hammer a third-party server (spec section 11)."""
+
+    def test_allows_calls_up_to_the_cap_then_refuses(self) -> None:
+        from src.services.orchestration.mcp.client import McpRateLimitedError, _RateLimiter
+
+        limiter = _RateLimiter(max_calls=3, window_seconds=60)
+        for _ in range(3):
+            limiter.before_call()
+        with pytest.raises(McpRateLimitedError):
+            limiter.before_call()
+
+    def test_window_rollover_restores_the_budget(self, monkeypatch) -> None:
+        from src.services.orchestration.mcp import client as client_module
+        from src.services.orchestration.mcp.client import McpRateLimitedError, _RateLimiter
+
+        now = [1000.0]
+        monkeypatch.setattr(client_module.time, "monotonic", lambda: now[0])
+        limiter = _RateLimiter(max_calls=1, window_seconds=60)
+        limiter.before_call()
+        with pytest.raises(McpRateLimitedError):
+            limiter.before_call()
+        now[0] += 61
+        limiter.before_call()  # new window - must not raise
+
+
+class TestCredentialResolution:
+    """credential_ref is a KEY into the admin settings store, never the value - and the resolved
+    value must never leave the transport (spec section 11's "секрет передаётся capability через
+    secure reference, а не LLM")."""
+
+    def test_resolves_ref_through_system_settings(self, monkeypatch) -> None:
+        from src.db.models.mcp_server import McpServer
+        from src.services.orchestration.mcp import registry
+
+        monkeypatch.setattr(
+            registry,
+            "get_system_setting_value",
+            lambda key: "s3cr3t-value" if key == "mcp:github:token" else None,
+        )
+        server = McpServer(
+            name="github", transport="http", endpoint="https://x", credential_ref="mcp:github:token"
+        )
+        assert registry.resolve_credential(server) == "s3cr3t-value"
+
+    def test_missing_ref_is_none_not_an_error(self, monkeypatch) -> None:
+        from src.db.models.mcp_server import McpServer
+        from src.services.orchestration.mcp import registry
+
+        monkeypatch.setattr(registry, "get_system_setting_value", lambda key: None)
+        server = McpServer(name="x", transport="http", endpoint="https://x", credential_ref=None)
+        assert registry.resolve_credential(server) is None
+
+    def test_unresolvable_ref_degrades_instead_of_crashing(self, monkeypatch) -> None:
+        from src.db.models.mcp_server import McpServer
+        from src.services.orchestration.mcp import registry
+
+        monkeypatch.setattr(registry, "get_system_setting_value", lambda key: None)
+        server = McpServer(
+            name="x", transport="http", endpoint="https://x", credential_ref="mcp:x:absent"
+        )
+        assert registry.resolve_credential(server) is None
+
+    def test_http_transport_sends_the_credential_as_a_bearer_header(self) -> None:
+        from src.services.orchestration.mcp.client import HttpTransport
+
+        plain = HttpTransport("https://x")
+        authed = HttpTransport("https://x", auth_token="tok")
+        assert plain._auth_token is None
+        assert authed._auth_token == "tok"

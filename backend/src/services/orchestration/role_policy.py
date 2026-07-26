@@ -302,9 +302,11 @@ def compute_write_scope(
 
 
 def can_execute_role(role: SpecialistRole, *, specialist_agents_enabled: bool) -> bool:
-    """When settings.enable_specialist_agents is False, only the generalist Implementer role
-    may run - every other role's task should be skipped/merged into a plain Implementer task
-    upstream in planner.py, not silently executed with the wrong policy."""
+    """When specialist_agents_enabled is False, only the generalist Implementer role may run -
+    every other role's task should be skipped/merged into a plain Implementer task upstream in
+    planner.py, not silently executed with the wrong policy. capability_router.py's engine.py
+    caller always passes True in production; the parameter stays for direct unit testing of
+    this collapse behavior."""
     if specialist_agents_enabled:
         return True
     return role == SpecialistRole.IMPLEMENTER

@@ -21,6 +21,8 @@ class OrchestrationRunResponse(BaseModel):
     complexity: str | None
     plan_version: int
     credits_used: int
+    # None means "no explicit ceiling for this run" - the UI renders just the spend in that case.
+    credit_budget: int | None = None
     cancel_requested: bool
     error_code: str | None
     error_message: str | None
@@ -45,6 +47,9 @@ class OrchestrationTaskResponse(BaseModel):
     status: str
     attempt: int
     max_attempts: int
+    sequence: int
+    workspace_mode: str
+    dependencies: list[str] = Field(default_factory=list)
     error_code: str | None
     error_message: str | None
 

@@ -14,6 +14,7 @@ Manager, evidence collection, validation, failure_policy, budget, events_bus - r
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from dataclasses import dataclass, field
 
@@ -26,6 +27,9 @@ from src.db.models.project import Project
 from src.db.models.user import User
 from src.services import project_git
 from src.services.orchestration import engine
+from src.services.orchestration.engine import (
+    recover_stranded_runs as _real_recover_stranded_runs,
+)
 from src.services.orchestration.executors import AgentExecutionResult, TaskContext
 from src.services.orchestration.repository import (
     AgentTaskRepository,
@@ -177,12 +181,23 @@ class TestHappyPath:
         assert tasks[0].status == "completed"
         assert tasks[0].accepted_commit_sha == refreshed.final_commit_sha
 
+        # The full durable phase trace for a one-task run - spec section 19 requires each of
+        # these to be a real event, not just an internal status change.
         assert _events(db, run.id) == [
             "run_created",
             "planning_started",
             "plan_created",
+            "task_ready",
             "task_started",
+            # Right after the task's credits are charged, so spend is visible while the run is
+            # still going rather than only once it's over.
+            "budget_updated",
+            "task_validating",
             "task_completed",
+            "integration_started",
+            "build_started",
+            "deploy_started",
+            "runtime_verification_started",
             "run_completed",
         ]
 
@@ -258,26 +273,6 @@ class TestRetryThenSucceed:
 
 
 class TestExhaustedAttempts:
-    @pytest.mark.asyncio
-    async def test_fails_the_run_when_replanning_disabled(
-        self, db: Session, db_factory, project: Project, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(engine.settings, "enable_replanning", False)
-        run = _make_run(db, project, original_request="Сделай лендинг для кофейни")
-        db.commit()
-        fake = _FakeExecutor(script=[_build_failed_result()])
-        _install_fake_executor(monkeypatch, fake)
-
-        await engine.run_orchestration(
-            run.id, db_factory=db_factory, provider_name="openai", model="m", api_key="k"
-        )
-
-        db.expire_all()
-        refreshed = OrchestrationRunRepository(db).get(run.id)
-        assert refreshed.status == "failed"
-        # default_max_attempts for Implementer is 3 (role_policy.py) - three real attempts, no more.
-        assert fake.calls == 3
-
     @pytest.mark.asyncio
     async def test_replans_and_completes_under_the_new_plan(
         self, db: Session, db_factory, project: Project, monkeypatch: pytest.MonkeyPatch
@@ -393,6 +388,41 @@ class TestWaitingForSecret:
         assert fake.calls == 2
 
 
+async def _two_task_plan(**kwargs):
+    """Two independent Implementer tasks - shared by the budget tests, which need a second task
+    still pending when the first one exhausts the run's credits."""
+    from src.services.orchestration.planner import PlanGenerationResult
+
+    plan = ExecutionPlan(
+        goal="two tasks",
+        complexity="compound",
+        tasks=[
+            PlannedTask(
+                local_id="first",
+                title="First",
+                role=SpecialistRole.IMPLEMENTER,
+                goal="first",
+                reason="r",
+                acceptance_criteria=[
+                    AcceptanceCriterion(id="c1", description="d", verification_method="build")
+                ],
+            ),
+            PlannedTask(
+                local_id="second",
+                title="Second",
+                role=SpecialistRole.IMPLEMENTER,
+                goal="second",
+                reason="r",
+                acceptance_criteria=[
+                    AcceptanceCriterion(id="c2", description="d", verification_method="build")
+                ],
+            ),
+        ],
+        estimated_budget=ExecutionBudget(),
+    )
+    return PlanGenerationResult(plan=plan, source="llm")
+
+
 class TestBudget:
     @pytest.mark.asyncio
     async def test_second_task_is_stopped_once_budget_is_exceeded(
@@ -403,43 +433,7 @@ class TestBudget:
         )
         db.commit()
 
-        async def _fake_generate_plan(**kwargs):
-            from src.services.orchestration.planner import PlanGenerationResult
-
-            plan = ExecutionPlan(
-                goal="two tasks",
-                complexity="compound",
-                tasks=[
-                    PlannedTask(
-                        local_id="first",
-                        title="First",
-                        role=SpecialistRole.IMPLEMENTER,
-                        goal="first",
-                        reason="r",
-                        acceptance_criteria=[
-                            AcceptanceCriterion(
-                                id="c1", description="d", verification_method="build"
-                            )
-                        ],
-                    ),
-                    PlannedTask(
-                        local_id="second",
-                        title="Second",
-                        role=SpecialistRole.IMPLEMENTER,
-                        goal="second",
-                        reason="r",
-                        acceptance_criteria=[
-                            AcceptanceCriterion(
-                                id="c2", description="d", verification_method="build"
-                            )
-                        ],
-                    ),
-                ],
-                estimated_budget=ExecutionBudget(),
-            )
-            return PlanGenerationResult(plan=plan, source="llm")
-
-        monkeypatch.setattr(engine, "generate_plan", _fake_generate_plan)
+        monkeypatch.setattr(engine, "generate_plan", _two_task_plan)
         # A long summary pushes estimate_task_cost() (char-count fallback, no usage reported)
         # comfortably over the 150-credit run budget on the very first task.
         fake = _FakeExecutor(script=[_ok_result(summary="x" * 500)])
@@ -451,16 +445,60 @@ class TestBudget:
 
         db.expire_all()
         refreshed = OrchestrationRunRepository(db).get(run.id)
-        assert refreshed.status == "failed"
+        # waiting_for_user, not failed: running out of budget is recoverable by topping up, and
+        # `failed` is terminal with no outgoing transition (spec section 18 requires the run be
+        # continuable afterwards).
+        assert refreshed.status == "waiting_for_user"
         assert refreshed.error_code == "budget_exceeded"
         assert fake.calls == 1
 
         tasks = {t.local_id: t for t in AgentTaskRepository(db).list_by_run(run.id)}
         assert tasks["first"].status == "completed"
-        # "skipped", not "failed" - it never got a chance to run at all.
-        assert tasks["second"].status == "skipped"
+        # Parked, not skipped/failed - it never ran, and must still run after a top-up.
+        assert tasks["second"].status == "waiting_for_user"
         assert tasks["second"].error_code == "budget_exceeded"
         assert tasks["second"].attempt == 0
+
+    @pytest.mark.asyncio
+    async def test_topped_up_run_resumes_and_finishes_the_remaining_task(
+        self, db: Session, db_factory, project: Project, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The whole point of parking instead of failing: after extend_budget_after_topup() the
+        run must actually make progress, not re-park having done nothing."""
+        run = _make_run(
+            db, project, original_request="Сделай лендинг для кофейни", credit_budget=150
+        )
+        db.commit()
+
+        monkeypatch.setattr(engine, "generate_plan", _two_task_plan)
+        fake = _FakeExecutor(script=[_ok_result(summary="x" * 500), _ok_result()])
+        _install_fake_executor(monkeypatch, fake)
+
+        await engine.run_orchestration(
+            run.id, db_factory=db_factory, provider_name="openai", model="m", api_key="k"
+        )
+        db.expire_all()
+        assert OrchestrationRunRepository(db).get(run.id).status == "waiting_for_user"
+
+        # Simulate the user topping up and hitting resume (what the API router does).
+        run = OrchestrationRunRepository(db).get(run.id)
+        assert engine.extend_budget_after_topup(db, run) is True
+        plan = OrchestrationPlanRepository(db).get_active(run.id)
+        for task in AgentTaskRepository(db).list_by_plan(plan.id):
+            if task.status == "waiting_for_user":
+                engine.resume_task_after_user_input(db, task.id)
+        db.commit()
+
+        await engine.run_orchestration(
+            run.id, db_factory=db_factory, provider_name="openai", model="m", api_key="k"
+        )
+
+        db.expire_all()
+        refreshed = OrchestrationRunRepository(db).get(run.id)
+        assert refreshed.status == "completed"
+        assert refreshed.error_code is None
+        tasks = {t.local_id: t for t in AgentTaskRepository(db).list_by_run(run.id)}
+        assert tasks["second"].status == "completed"
 
 
 class TestCancellation:
@@ -615,6 +653,83 @@ class TestContractCompleteness:
         assert tasks["bare"].status == "failed"
         assert tasks["bare"].error_code == "contract_incomplete"
         assert tasks["fixed"].status == "completed"
+
+
+class TestRestartRecoverySweep:
+    """engine.recover_stranded_runs() is what makes the durable rows actually survive a crash -
+    without it a run interrupted mid-flight has nothing driving it ever again.
+
+    Calls `_real_recover_stranded_runs` (bound at import time) rather than the module attribute:
+    conftest's autouse fixture no-ops the latter so the production startup sweep doesn't fire on
+    every TestClient(app) and start background work against other tests' rows."""
+
+    def test_lists_a_stranded_run_but_not_terminal_or_user_parked_ones(
+        self, db: Session, project: Project
+    ) -> None:
+        repo = OrchestrationRunRepository(db)
+        stranded = _make_run(db, project, original_request="stranded")
+        repo.transition(stranded, "analyzing")
+        repo.transition(stranded, "planning")
+
+        done = _make_run(db, project, original_request="done")
+        repo.transition(done, "analyzing")
+        repo.transition(done, "failed")
+
+        parked = _make_run(db, project, original_request="parked")
+        repo.transition(parked, "analyzing")
+        repo.transition(parked, "planning")
+        repo.transition(parked, "waiting_for_user")
+
+        fresh = _make_run(db, project, original_request="never started")
+        db.commit()
+
+        resumable_ids = {r.id for r in repo.list_resumable()}
+        assert stranded.id in resumable_ids
+        assert done.id not in resumable_ids, "terminal runs must not be resumed"
+        assert parked.id not in resumable_ids, "user-parked runs must not be auto-resumed"
+        assert fresh.id not in resumable_ids, "never-started runs are the creator's job"
+
+    @pytest.mark.asyncio
+    async def test_sweep_relaunches_the_stranded_run(
+        self, db: Session, db_factory, project: Project, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        repo = OrchestrationRunRepository(db)
+        run = _make_run(db, project, original_request="Сделай лендинг для кофейни")
+        repo.transition(run, "analyzing")
+        repo.transition(run, "planning")
+        db.commit()
+
+        launched: list = []
+        monkeypatch.setattr(
+            engine,
+            "launch_run_in_background",
+            lambda run_id, **kwargs: launched.append((run_id, kwargs)),
+        )
+        monkeypatch.setattr(engine.settings, "openai_api_key", "test-key")
+
+        assert _real_recover_stranded_runs(db_factory=db_factory) == 1
+        assert [rid for rid, _ in launched] == [run.id]
+
+    @pytest.mark.asyncio
+    async def test_sweep_skips_runs_with_no_configured_api_key(
+        self, db: Session, db_factory, project: Project, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        repo = OrchestrationRunRepository(db)
+        run = _make_run(db, project, original_request="Сделай лендинг", provider="anthropic")
+        repo.transition(run, "analyzing")
+        db.commit()
+
+        launched: list = []
+        monkeypatch.setattr(
+            engine,
+            "launch_run_in_background",
+            lambda run_id, **kwargs: launched.append(run_id),
+        )
+        monkeypatch.setattr(engine.settings, "anthropic_api_key", "")
+        monkeypatch.setattr(engine, "resolve_api_key_for_provider", lambda _p: "")
+
+        assert _real_recover_stranded_runs(db_factory=db_factory) == 0
+        assert launched == []
 
 
 class TestRestartSafety:
@@ -775,3 +890,98 @@ class TestDependencyChaining:
         assert dep.status == "completed"
         assert "каркас готов" in dep.summary
         assert "output_1.txt" in dep.key_outputs
+
+
+class TestParallelWaveExecution:
+    """_select_wave (engine.py) dispatches every ready parallel_read_only/isolated_worktree task
+    concurrently via asyncio.gather - one shared_sequential-only plan (every other test in this
+    file) can't tell that apart from one-at-a-time dispatch, since there's never more than one
+    task ready at once. Two independent read-only-role tasks can be ready simultaneously, which
+    is what this proves actually overlap in time."""
+
+    @pytest.mark.asyncio
+    async def test_two_independent_read_only_tasks_run_concurrently(
+        self, db: Session, db_factory, project: Project, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        run = _make_run(db, project, original_request="Сделай сайт и проверь его дважды")
+        db.commit()
+
+        async def _fake_generate_plan(**kwargs):
+            from src.services.orchestration.planner import PlanGenerationResult
+
+            plan = ExecutionPlan(
+                goal="two independent read-only reviews",
+                complexity="compound",
+                tasks=[
+                    PlannedTask(
+                        local_id="review_a",
+                        title="Review A",
+                        role=SpecialistRole.QA_REVIEWER,
+                        goal="review a",
+                        reason="r",
+                        acceptance_criteria=[
+                            AcceptanceCriterion(
+                                id="c1", description="d", verification_method="build"
+                            )
+                        ],
+                    ),
+                    PlannedTask(
+                        local_id="review_b",
+                        title="Review B",
+                        role=SpecialistRole.SECURITY_REVIEWER,
+                        goal="review b",
+                        reason="r",
+                        acceptance_criteria=[
+                            AcceptanceCriterion(
+                                id="c2", description="d", verification_method="build"
+                            )
+                        ],
+                    ),
+                ],
+                estimated_budget=ExecutionBudget(),
+            )
+            return PlanGenerationResult(plan=plan, source="llm")
+
+        monkeypatch.setattr(engine, "generate_plan", _fake_generate_plan)
+
+        a_started = asyncio.Event()
+        b_started = asyncio.Event()
+
+        class _RendezvousExecutor:
+            """Each side signals its own start, then waits for the OTHER side's start signal
+            before finishing - only possible if the engine actually dispatched them
+            concurrently. A regression to sequential dispatch makes task A wait forever on a
+            task B that was never even started yet - asyncio.wait_for's own timeout turns that
+            into a fast, clear assertion failure instead of hanging the whole suite."""
+
+            async def execute(self, contract, context, cancellation):
+                if contract.task_goal == "review a":
+                    a_started.set()
+                    await asyncio.wait_for(b_started.wait(), timeout=5)
+                else:
+                    b_started.set()
+                    await asyncio.wait_for(a_started.wait(), timeout=5)
+                return AgentExecutionResult(
+                    task_result=TaskResult(status="completed", summary="ok"),
+                    build_result={"ok": True, "log_tail": "ok"},
+                )
+
+        monkeypatch.setattr(
+            engine, "_build_executor", lambda kind, *, db, mcp_repo: _RendezvousExecutor()
+        )
+
+        await engine.run_orchestration(
+            run.id, db_factory=db_factory, provider_name="openai", model="m", api_key="k"
+        )
+
+        db.expire_all()
+        refreshed = OrchestrationRunRepository(db).get(run.id)
+        assert refreshed.status == "completed"
+        assert a_started.is_set()
+        assert b_started.is_set()
+
+        tasks = {t.local_id: t for t in AgentTaskRepository(db).list_by_run(run.id)}
+        assert tasks["review_a"].status == "completed"
+        assert tasks["review_b"].status == "completed"
+        assert tasks["review_a"].workspace_mode == "parallel_read_only"
+        assert tasks["review_b"].workspace_mode == "parallel_read_only"

@@ -1,9 +1,8 @@
-import asyncio
+﻿import asyncio
 import json
 import logging
 import re
 import time
-from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -21,21 +20,15 @@ from src.api.dto.chat import (
 from src.api.dto.files import RepairStreamRequest
 from src.api.mappers.chat_files import chat_file_to_response
 from src.core.config import settings
-from src.db.models.agent_run_metric import AgentRunMetric
 from src.db.models.chat import Chat
 from src.db.models.chat_file import ChatFile
 from src.db.models.deployment import Deployment
 from src.db.models.message import Message
 from src.db.models.moderation_event import ModerationEvent
-from src.db.models.pipeline_run_metric import PipelineRunMetric
 from src.db.models.project import Project
 from src.db.models.project_service import ProjectService
 from src.db.models.user import User
 from src.db.session import SessionLocal, get_db
-from src.services.agent.events import AgentDone, TextDelta, ToolCallRequested, ToolCallResult
-from src.services.agent.product_pipeline import run_product_pipeline
-from src.services.agent.prompt import REPORT_HEADING, build_system_prompt
-from src.services.agent.tools import WorkspaceTools
 from src.services.agentic_artifacts import (
     ensure_dockerfile,
     ensure_required_files,
@@ -43,14 +36,10 @@ from src.services.agentic_artifacts import (
     workspace_has_agent_code,
 )
 from src.services.artifacts import ArtifactError, _telegram_token
-from src.services.billing import record_usage
-from src.services.chat_context import build_llm_context
-from src.services.deployment_check import is_repairable_app_error
-from src.services.deployments import create_deployment_for_project, store_deployment_error
+from src.services.deployments import create_deployment_for_project
 from src.services.file_context import (
     attach_files_to_message,
     build_attachment_context,
-    extract_image_attachments,
     serialize_message_metadata,
 )
 from src.services.moderation import (
@@ -67,11 +56,7 @@ from src.services.project_intent import (
     update_project_type_from_prompt,
 )
 from src.services.project_runtime import RunningProjectLimitError, block_project, unblock_project
-from src.services.project_services import (
-    ProjectServiceError,
-    ensure_service_request,
-    is_likely_service_credential_key,
-)
+from src.services.project_services import is_likely_service_credential_key
 from src.services.project_subdomain import (
     assert_subdomain_available,
     ensure_deploy_subdomain,
@@ -80,7 +65,7 @@ from src.services.project_subdomain import (
 from src.services.prompt_guard import prepare_agent_user_message, sanitize_user_message
 from src.services.provider.factory import resolve_provider_and_model
 from src.services.secrets import capture_telegram_tokens_from_text, ensure_secret_placeholder
-from src.services.sse_heartbeat import SSE_PING, Ticker, with_heartbeat
+from src.services.sse_heartbeat import SSE_PING, Ticker
 from src.services.system_settings import resolve_api_key_for_provider
 from src.services.workspace import project_dir
 
@@ -499,15 +484,13 @@ async def _orchestration_event_source(
     model: str,
     api_key: str,
 ):
-    """The orchestration-engine path for one chat turn (settings.enable_orchestration_engine),
-    parallel to event_source() below rather than spliced into it - a persisted multi-task run and
-    a single agent turn are different enough models that sharing control flow would cost more in
-    complexity/regression risk than the small amount of duplicated deploy-wait plumbing (reused
-    as-is via _queue_deployment_or_notify_limit/_follow_repair_redeploy, both defined above).
+    """The (only) chat-turn path: a persisted, DB-backed multi-task orchestration run. Ported the
+    pre-engine event_source()'s required-files/Dockerfile-self-heal/thin-architecture/Telegram-
+    token safety net in here directly rather than trusting it to be fully redundant with per-task
+    validation - see the run_completed branch below.
 
-    Credits are already charged per-task inside the engine itself (budget.py's
-    charge_credits_for_run) - unlike the non-orchestrated path below, this must NOT also call
-    record_usage() again at the end."""
+    Credits are charged per-task inside the engine itself (budget.py's charge_credits_for_run) -
+    this must NOT also call record_usage() again at the end."""
     assistant_full = ""
 
     def append_visible(text: str) -> str:
@@ -553,13 +536,43 @@ async def _orchestration_event_source(
             yield _sse_status("tool", title, "running")
         elif event_type == "task_completed":
             yield _sse_status("tool", f"✓ {task_titles.get(task_id, 'Задача')}", "done")
+        elif event_type == "task_progress":
+            # Mid-task notes worth showing the user in plain language - notably the engine's
+            # "Подключаю сервисы: postgres" after auto-provisioning a requested service, which
+            # the pre-engine turn handler used to report itself.
+            note = payload.get("note")
+            if note:
+                yield _sse_status("tool", str(note), "running")
+        elif event_type == "budget_updated":
+            spent = payload.get("credits_used")
+            limit = payload.get("credit_budget")
+            if spent is not None:
+                label = f"Потрачено кредитов: {spent}" + (f" из {limit}" if limit else "")
+                # Only escalate to a visible warning when the run is genuinely near the ceiling -
+                # a loud running total on every task would just be noise otherwise.
+                if payload.get("status") == "approaching":
+                    yield _sse_status("limit", f"{label} — бюджет почти исчерпан", "error")
+                else:
+                    yield _sse_status("tool", label, "running")
         elif event_type == "task_repairing":
             yield _sse_status("tool", "Исправляю ошибку и повторяю", "running")
         elif event_type == "task_failed":
             yield _sse_status("tool", f"⚠ {task_titles.get(task_id, 'Задача')}", "error")
         elif event_type == "waiting_for_secret":
+            # A task may ask for a credential belonging to a service it (or an earlier task)
+            # already provisioned via request_service - e.g. POSTGRES_PASSWORD. The platform
+            # generates and wires those up itself, so the user must never be asked to fill one
+            # in. Same suppression the pre-engine turn handler applied.
+            existing_service_kinds = {
+                row.kind
+                for row in db.query(ProjectService)
+                .filter(ProjectService.project_id == project.id)
+                .all()
+            }
             lines = []
             for key in payload.get("requested_secrets") or []:
+                if is_likely_service_credential_key(key, existing_service_kinds):
+                    continue
                 secret_row, created = ensure_secret_placeholder(
                     db, project, key, "Требуется для продолжения выполнения задачи"
                 )
@@ -582,71 +595,141 @@ async def _orchestration_event_source(
     run = OrchestrationRunRepository(db).get(run_id)
 
     if terminal_event_type == "run_completed":
-        has_website = project.type in ("website", "mixed")
-        has_bot = project.type in ("telegram_bot", "mixed")
-        if has_website or has_bot:
-            deployment, limit_message = _queue_deployment_or_notify_limit(db, project)
-            db.commit()
-            if limit_message:
-                yield _sse_status("limit", limit_message, "error")
-                yield append_visible(f"\n\n{limit_message}")
-            elif deployment is not None:
-                yield _sse_status("deploy", "Ставлю проект в очередь запуска", "running")
-                deadline = time.monotonic() + _DEPLOY_WAIT_SECONDS
-                last_label = ""
-                watched_id = deployment.id
-                deploy_ping = Ticker(15.0)
-                while time.monotonic() < deadline:
-                    await asyncio.sleep(_DEPLOY_POLL_SECONDS)
-                    if deploy_ping.due():
-                        yield SSE_PING
-                    db.expire_all()
-                    deployment = db.get(Deployment, watched_id)
-                    if deployment is None:
-                        break
-                    label = _deploy_status_label(deployment.status)
-                    if label != last_label:
-                        state = (
-                            "done"
-                            if deployment.status == "completed"
-                            else "error"
-                            if deployment.status == "failed"
-                            else "running"
-                        )
-                        yield _sse_status("deploy", label, state)
-                        last_label = label
-                    if deployment.status in _DEPLOYMENT_TERMINAL:
-                        break
-
-                if deployment is not None and deployment.status == "failed":
-                    async for item in _follow_repair_redeploy(
-                        db,
-                        project=project,
-                        failed_deployment=deployment,
-                        deadline=deadline,
-                        last_label=last_label,
-                    ):
-                        if isinstance(item, tuple):
-                            _, deployment, last_label = item
-                        else:
-                            yield item
-
-                db.expire_all()
+        # Last-resort backstop before deploy, ported from the pre-engine event_source() path
+        # rather than trusted to always be redundant with per-task validation: a heuristic_simple
+        # single-task plan may never route through a QAReviewer/project_structure_review step,
+        # so this still catches a missing entrypoint file directly against the same
+        # WEBSITE_REQUIRED/TELEGRAM_REQUIRED contract deploy would enforce anyway.
+        artifact_path = project_dir(project.id)
+        yield _sse_status("verify", "Проверяю готовые файлы проекта")
+        files_ok = True
+        try:
+            if reconcile_type_with_workspace(
+                project, artifact_path, has_bot_secret=bool(_telegram_token(db, project))
+            ):
+                db.add(project)
+                db.commit()
                 db.refresh(project)
-                if (
-                    deployment is not None
-                    and deployment.status == "completed"
-                    and project.status == "live"
-                ):
-                    yield append_visible(
-                        _launch_success_message(project, has_website=has_website, has_bot=has_bot)
-                    )
-                    yield _sse_status("done", "Проект запущен и работает", "done")
-                else:
-                    yield append_visible(_launch_failure_message(deployment, project))
-                    yield _sse_status("error", "Запуск не удался", "error")
-        else:
-            yield _sse_status("done", "Готово", "done")
+            ensure_required_files(project, artifact_path)
+        except ArtifactError as verify_exc:
+            if workspace_has_agent_code(artifact_path, project):
+                ensure_dockerfile(project, artifact_path)
+                yield append_visible(
+                    f"\n\nПроверка entrypoint неполная ({verify_exc}), но код агента сохранён. "
+                    "Если бот ведёт себя не так - напишите в чат, что поправить."
+                )
+            else:
+                files_ok = False
+                yield _sse_status("verify", "Не хватает файлов проекта", "error")
+                yield append_visible(
+                    f"\n\nАгент не создал обязательные файлы ({verify_exc}). "
+                    "Опишите задачу ещё раз или уточните, что нужно дописать."
+                )
+
+        if files_ok:
+            thin_arch = thin_bot_architecture_warning(artifact_path, project)
+            if thin_arch:
+                yield _sse_status("verify", "Архитектура выглядит слишком тонкой", "error")
+                yield append_visible(f"\n\n{thin_arch}")
+            try:
+                commit_snapshot(artifact_path, message=f"{project.name}: {original_request}")
+            except ProjectGitError as git_exc:
+                logger.warning("Snapshot commit failed for project %s: %s", project.id, git_exc)
+
+            project.status = "ready"
+            db.add(project)
+            has_website = project.type in ("website", "mixed")
+            has_bot = project.type in ("telegram_bot", "mixed")
+            if reconcile_type_with_workspace(
+                project, artifact_path, has_bot_secret=bool(_telegram_token(db, project))
+            ):
+                has_website = project.type in ("website", "mixed")
+                has_bot = project.type in ("telegram_bot", "mixed")
+                db.add(project)
+            if has_bot and not _telegram_token(db, project):
+                ensure_secret_placeholder(
+                    db, project, "TELEGRAM_BOT_TOKEN", "Нужен для запуска Telegram-бота"
+                )
+                project.status = "needs_configuration"
+                db.add(project)
+                db.commit()
+                token_help_url = (
+                    f"{settings.resolved_frontend_url}/help/telegram-token"
+                    f"?projectId={project.id}"
+                )
+                token_note = (
+                    "Код бота готов, но запуск остановлен: добавьте секрет TELEGRAM_BOT_TOKEN "
+                    "в настройках проекта и повторите запуск.\n\n"
+                    "Как получить токен: откройте @BotFather в Telegram, выполните /newbot "
+                    f"и скопируйте выданный token. [Подробная инструкция]({token_help_url})"
+                )
+                yield _sse_status("needs_configuration", "Нужен TELEGRAM_BOT_TOKEN", "error")
+                yield append_visible(f"\n\n{token_note}")
+            elif has_website or has_bot:
+                deployment, limit_message = _queue_deployment_or_notify_limit(db, project)
+                db.commit()
+                if limit_message:
+                    yield _sse_status("limit", limit_message, "error")
+                    yield append_visible(f"\n\n{limit_message}")
+                elif deployment is not None:
+                    yield _sse_status("deploy", "Ставлю проект в очередь запуска", "running")
+                    deadline = time.monotonic() + _DEPLOY_WAIT_SECONDS
+                    last_label = ""
+                    watched_id = deployment.id
+                    deploy_ping = Ticker(15.0)
+                    while time.monotonic() < deadline:
+                        await asyncio.sleep(_DEPLOY_POLL_SECONDS)
+                        if deploy_ping.due():
+                            yield SSE_PING
+                        db.expire_all()
+                        deployment = db.get(Deployment, watched_id)
+                        if deployment is None:
+                            break
+                        label = _deploy_status_label(deployment.status)
+                        if label != last_label:
+                            state = (
+                                "done"
+                                if deployment.status == "completed"
+                                else "error"
+                                if deployment.status == "failed"
+                                else "running"
+                            )
+                            yield _sse_status("deploy", label, state)
+                            last_label = label
+                        if deployment.status in _DEPLOYMENT_TERMINAL:
+                            break
+
+                    if deployment is not None and deployment.status == "failed":
+                        async for item in _follow_repair_redeploy(
+                            db,
+                            project=project,
+                            failed_deployment=deployment,
+                            deadline=deadline,
+                            last_label=last_label,
+                        ):
+                            if isinstance(item, tuple):
+                                _, deployment, last_label = item
+                            else:
+                                yield item
+
+                    db.expire_all()
+                    db.refresh(project)
+                    if (
+                        deployment is not None
+                        and deployment.status == "completed"
+                        and project.status == "live"
+                    ):
+                        yield append_visible(
+                            _launch_success_message(
+                                project, has_website=has_website, has_bot=has_bot
+                            )
+                        )
+                        yield _sse_status("done", "Проект запущен и работает", "done")
+                    else:
+                        yield append_visible(_launch_failure_message(deployment, project))
+                        yield _sse_status("error", "Запуск не удался", "error")
+            else:
+                yield _sse_status("done", "Готово", "done")
     elif terminal_event_type == "run_failed":
         detail = (run.error_message or "").strip() if run else ""
         yield append_visible(
@@ -856,7 +939,6 @@ async def _stream_events(
     # Content already passed sanitize_user_message (injection + hard size). For the agent,
     # keep the useful tail of oversized log pastes instead of 400/422 rejecting the turn.
     safe_message = prepare_agent_user_message(user_agent_message)
-    image_attachments = extract_image_attachments(db, attachment_ids)
 
     provider_name, model = resolve_provider_and_model(
         provider_override=provider_override,
@@ -891,590 +973,19 @@ async def _stream_events(
                 detail=f"Проект заблокирован модерацией: {reason}",
             )
 
-    if settings.enable_orchestration_engine:
-        return StreamingResponse(
-            _orchestration_event_source(
-                db=db,
-                project=project,
-                chat_id=chat_id,
-                current_user=current_user,
-                original_request=safe_message,
-                provider_name=provider_name,
-                model=model,
-                api_key=api_key,
-            ),
-            media_type="text/event-stream",
-        )
-
-    async def event_source():
-        assistant_full = ""
-
-        def append_visible(text: str) -> str:
-            nonlocal assistant_full
-            assistant_full += text
-            return _sse_chunk(text)
-
-        yield _sse_status("thinking", "AIRuntime осмысляет задачу")
-        if attachment_ids:
-            yield _sse_status(
-                "context",
-                f"Читаю вложения и готовлю контекст: {len(attachment_ids)} файл(ов)",
-            )
-
-        artifact_path = project_dir(project.id)
-        agent_error: str | None = None
-        agent_usage: dict[str, object] | None = None
-        pipeline_metrics: dict[str, object] | None = None
-        requested_secret_keys: set[str] = set()
-        turn_started = time.monotonic()
-        agent_elapsed: float | None = None
-
-        if not api_key:
-            yield append_visible(
-                "AI-провайдер не настроен (нет API ключа). Без агента проект не соберётся — "
-                "шаблоны отключены. Настройте ключ провайдера и повторите запрос."
-            )
-            yield _sse_status("error", "Нет API-ключа провайдера", "error")
-        else:
-            history, summary = await build_llm_context(
-                db, chat_id, provider_name=provider_name, model=model, api_key=api_key
-            )
-            system_prompt = build_system_prompt(project)
-            if summary:
-                system_prompt += f"\n\nКонтекст более раннего диалога в этом чате:\n{summary}"
-
-            workspace = WorkspaceTools(artifact_path, project_id=str(project.id))
-
-            agent_started = time.monotonic()
-            logger.info(
-                "Agent turn start: project=%s chat=%s provider=%s model=%s orchestrator=%s "
-                "message_chars=%d",
-                project.id,
-                chat_id,
-                provider_name,
-                model,
-                settings.enable_agent_orchestrator,
-                len(safe_message),
-            )
-            try:
-                turn_source = run_product_pipeline(
-                    project=project,
-                    provider_name=provider_name,
-                    model=model,
-                    api_key=api_key,
-                    workspace=workspace,
-                    system_prompt=system_prompt,
-                    history=history,
-                    user_message=safe_message,
-                    images=image_attachments,
-                )
-                agent_events = with_heartbeat(turn_source)
-                async for event in agent_events:
-                    if isinstance(event, str):
-                        # Heartbeat ping (with_heartbeat's own synthetic frame, not an agent
-                        # event) - keeps the connection alive during long silent stretches
-                        # (Codex "thinking", a slow build step, orchestrator's planning call).
-                        yield event
-                    elif isinstance(event, TextDelta):
-                        yield append_visible(event.text)
-                    elif isinstance(event, ToolCallRequested):
-                        yield _sse_status("tool", _tool_status_label(event.name, event.arguments))
-                    elif isinstance(event, ToolCallResult):
-                        # A single failed shell command (e.g. `rg --files` on an empty new
-                        # project) is routine mid-turn agent behavior, not a turn failure - the
-                        # agent sees this result and keeps going. Still reported with
-                        # state="error" so the tool activity feed can flag it, but
-                        # chat-stream-runtime.ts deliberately does not let a "tool" phase frame
-                        # drive the top-level status panel, so it can't look like the whole
-                        # request failed.
-                        icon = "✓" if event.ok else "⚠"
-                        yield _sse_status(
-                            "tool", f"{icon} {event.summary}", "done" if event.ok else "error"
-                        )
-                    elif isinstance(event, AgentDone):
-                        if event.usage:
-                            agent_usage = event.usage
-                        if event.reason == "error":
-                            agent_error = event.error
-                            label = (agent_error or "Агент завершился с ошибкой").strip()[:160]
-                            yield _sse_status("error", label, "error")
-            except Exception as exc:  # noqa: BLE001 - the SSE stream must end with a status the
-                # user can see (and the turn still needs to persist/close out below) rather than
-                # silently dying mid-turn and leaving a stale status frame on screen.
-                agent_error = str(exc) or "Неизвестная ошибка агента"
-                logger.exception(
-                    "Agent turn crashed: project=%s chat=%s provider=%s model=%s",
-                    project.id,
-                    chat_id,
-                    provider_name,
-                    model,
-                )
-                yield _sse_status("error", f"Внутренний сбой агента: {agent_error}"[:160], "error")
-            agent_elapsed = time.monotonic() - agent_started
-            logger.info(
-                "Agent turn end: project=%s chat=%s elapsed=%.1fs error=%s",
-                project.id,
-                chat_id,
-                agent_elapsed,
-                agent_error or "none",
-            )
-            # product_pipeline.py folds its own stage timings/iteration counts into
-            # AgentDone.usage["pipeline"] (see that module's _finish_usage) - pull it out here,
-            # before agent_usage is rendered in the chat footer or stored on AgentRunMetric, so
-            # a raw nested dict never leaks into either of those user-facing/simple views.
-            pipeline_metrics: dict[str, object] | None = None
-            if isinstance(agent_usage, dict) and "pipeline" in agent_usage:
-                pipeline_metrics = agent_usage.pop("pipeline")
-
-            existing_service_kinds = {
-                row.kind
-                for row in db.query(ProjectService)
-                .filter(ProjectService.project_id == project.id)
-                .all()
-            }
-
-            new_service_lines: list[str] = []
-            for service_request in workspace.requested_services:
-                try:
-                    service_row, created = ensure_service_request(
-                        db,
-                        project,
-                        service_request.kind,
-                        service_request.reason,
-                        image=service_request.image,
-                        env=service_request.env,
-                        data_path=service_request.data_path,
-                    )
-                except ProjectServiceError:
-                    continue
-                existing_service_kinds.add(service_row.kind)
-                reason = service_request.reason
-                if created:
-                    label = f"**{service_row.kind}** ({service_row.image})"
-                    new_service_lines.append(f"- {label} - {reason}" if reason else f"- {label}")
-
-            new_secret_lines: list[str] = []
-            for key, reason in workspace.requested_secrets:
-                if is_likely_service_credential_key(key, existing_service_kinds):
-                    # The agent asked for a piece of a service it already provisioned via
-                    # request_service (e.g. POSTGRES_PASSWORD) - that's already generated and
-                    # wired up automatically, so there's nothing for the user to fill in here.
-                    continue
-                secret_row, created = ensure_secret_placeholder(db, project, key, reason)
-                requested_secret_keys.add(secret_row.key)
-                if created:
-                    label = f"**{secret_row.key}**"
-                    new_secret_lines.append(f"- {label} - {reason}" if reason else f"- {label}")
-            if new_secret_lines:
-                yield append_visible(
-                    "\n\nЧтобы проект заработал, заполните в настройках проекта "
-                    "(вкладка «Настройки») эти значения:\n" + "\n".join(new_secret_lines)
-                )
-            if new_service_lines:
-                yield append_visible(
-                    "\n\nПодключаю для проекта:\n"
-                    + "\n".join(new_service_lines)
-                    + "\n\nСервис поднимется автоматически при следующем запуске проекта."
-                )
-
-            if agent_error:
-                lowered = (agent_error or "").lower()
-                if "api key" in lowered or "not configured" in lowered:
-                    yield append_visible(
-                        "\n\nAI-провайдер вернул ошибку авторизации. Без ключа проект не "
-                        "соберётся — шаблоны отключены. Настройте провайдера и повторите запрос."
-                    )
-                else:
-                    yield append_visible(f"\n\nАгент столкнулся с ошибкой: {agent_error}")
-
-        try:
-            if not api_key:
-                raise _StopDeployment
-            yield _sse_status("verify", "Проверяю готовые файлы проекта")
-            try:
-                # Demote false mixed/website → telegram_bot before requiring website files,
-                # so a bot-only workspace is not forced to invent public/index.html. A real
-                # token counts the same as bot files on disk (see reconcile_type_with_workspace) -
-                # without this a `mixed` project could get flipped to `website` mid-turn, before
-                # this turn's bot code had even landed yet.
-                if reconcile_type_with_workspace(
-                    project, artifact_path, has_bot_secret=bool(_telegram_token(db, project))
-                ):
-                    db.add(project)
-                    db.commit()
-                    db.refresh(project)
-                ensure_required_files(project, artifact_path)
-            except ArtifactError as verify_exc:
-                if workspace_has_agent_code(artifact_path, project):
-                    # Keep the agent's implementation. Never wipe real code with a stub.
-                    ensure_dockerfile(project, artifact_path)
-                    yield append_visible(
-                        f"\n\nПроверка entrypoint неполная ({verify_exc}), но код агента сохранён. "
-                        "Если бот ведёт себя не так - напишите в чат, что поправить."
-                    )
-                else:
-                    yield _sse_status("verify", "Не хватает файлов проекта", "error")
-                    yield append_visible(
-                        f"\n\nАгент не создал обязательные файлы ({verify_exc}). "
-                        "Шаблон не подставляется — опишите задачу ещё раз или уточните, что "
-                        "нужно дописать, и агент соберёт код с нуля."
-                    )
-                    raise _StopDeployment from None
-            for rel_path in _generated_files(artifact_path):
-                yield _sse_status("module", f"В проекте: {rel_path}")
-            thin_arch = thin_bot_architecture_warning(artifact_path, project)
-            if thin_arch:
-                yield _sse_status("verify", "Архитектура выглядит слишком тонкой", "error")
-                yield append_visible(f"\n\n{thin_arch}")
-            try:
-                yield _sse_status("version", "Сохраняю версию проекта")
-                commit_snapshot(
-                    artifact_path,
-                    message=f"{project.name}: {safe_message}",
-                )
-            except ProjectGitError as git_exc:
-                # Git errors shouldn't break the build/deploy pipeline, and paths/hashes
-                # must not pollute the user-facing project log feed.
-                logger.warning("Snapshot commit failed for project %s: %s", project.id, git_exc)
-
-            project.status = "ready"
-            db.add(project)
-            has_website = project.type in ("website", "mixed")
-            has_bot = project.type in ("telegram_bot", "mixed")
-            if reconcile_type_with_workspace(
-                project, artifact_path, has_bot_secret=bool(_telegram_token(db, project))
-            ):
-                has_website = project.type in ("website", "mixed")
-                has_bot = project.type in ("telegram_bot", "mixed")
-                db.add(project)
-            if has_bot and not _telegram_token(db, project):
-                ensure_secret_placeholder(
-                    db, project, "TELEGRAM_BOT_TOKEN", "Нужен для запуска Telegram-бота"
-                )
-                project.status = "needs_configuration"
-                if "TELEGRAM_BOT_TOKEN" in requested_secret_keys:
-                    # Already explained above (agent called request_secret this turn) -
-                    # avoid repeating the same instructions twice in one reply.
-                    token_note = "Запуск отложен до заполнения токена."
-                else:
-                    token_help_url = (
-                        f"{settings.resolved_frontend_url}/help/telegram-token"
-                        f"?projectId={project.id}"
-                    )
-                    token_note = (
-                        "Entrypoint бота (app.py) на месте, но запуск остановлен: добавьте секрет "
-                        "TELEGRAM_BOT_TOKEN в настройках проекта и повторите запуск.\n\n"
-                        "Как получить токен: откройте @BotFather в Telegram, выполните /newbot "
-                        f"и скопируйте выданный token. [Подробная инструкция]({token_help_url})"
-                    )
-                project.logs = f"{project.logs}\n{token_note}".strip()
-                db.add(project)
-                yield _sse_status("needs_configuration", "Нужен TELEGRAM_BOT_TOKEN", "error")
-                yield append_visible(f"\n\n{token_note}")
-                raise _StopDeployment
-            if has_website and has_bot:
-                yield _sse_status("deploy", "Ставлю сайт и бота в очередь запуска", "running")
-                deployment, limit_message = _queue_deployment_or_notify_limit(db, project)
-            elif has_website and settings.auto_deploy_websites:
-                yield _sse_status("deploy", "Ставлю сайт в очередь запуска", "running")
-                deployment, limit_message = _queue_deployment_or_notify_limit(db, project)
-            elif has_bot:
-                yield _sse_status("deploy", "Ставлю бота в очередь запуска", "running")
-                deployment, limit_message = _queue_deployment_or_notify_limit(db, project)
-            else:
-                deployment, limit_message = None, None
-
-            if limit_message:
-                yield _sse_status("limit", limit_message, "error")
-                yield append_visible(f"\n\n{limit_message}")
-            elif deployment is not None:
-                last_label = ""
-                watched_id = deployment.id
-                deadline = time.monotonic() + _DEPLOY_WAIT_SECONDS
-                deploy_ping = Ticker(15.0)
-
-                # Emit an immediate status from the current row (sync path may already be done).
-                db.refresh(deployment)
-                label = _deploy_status_label(deployment.status)
-                if label != last_label:
-                    state = (
-                        "done"
-                        if deployment.status == "completed"
-                        else "error"
-                        if deployment.status == "failed"
-                        else "running"
-                    )
-                    yield _sse_status("deploy", label, state)
-                    last_label = label
-
-                if deployment.status not in _DEPLOYMENT_TERMINAL:
-                    while time.monotonic() < deadline:
-                        await asyncio.sleep(_DEPLOY_POLL_SECONDS)
-                        if deploy_ping.due():
-                            yield SSE_PING
-                        db.expire_all()
-                        deployment = db.get(Deployment, watched_id)
-                        if deployment is None:
-                            break
-                        label = _deploy_status_label(deployment.status)
-                        if label != last_label:
-                            state = (
-                                "done"
-                                if deployment.status == "completed"
-                                else "error"
-                                if deployment.status == "failed"
-                                else "running"
-                            )
-                            yield _sse_status("deploy", label, state)
-                            last_label = label
-                        if deployment.status in _DEPLOYMENT_TERMINAL:
-                            break
-
-                db.expire_all()
-                db.refresh(project)
-                if deployment is not None:
-                    db.refresh(deployment)
-
-                # If the first deploy looked successful, wait for post-deploy auto-check /
-                # possible repair redeploy before celebrating in chat.
-                if (
-                    deployment is not None
-                    and deployment.status == "completed"
-                    and project.status == "live"
-                ):
-                    await asyncio.sleep(_DEPLOY_SETTLE_SECONDS)
-                    db.expire_all()
-                    db.refresh(project)
-                    newer = (
-                        db.query(Deployment)
-                        .filter(
-                            Deployment.project_id == project.id,
-                            Deployment.id != watched_id,
-                        )
-                        .order_by(Deployment.started_at.desc().nullslast())
-                        .first()
-                    )
-                    if newer is not None and newer.started_at is not None:
-                        watched = db.get(Deployment, watched_id)
-                        if (
-                            watched
-                            and watched.started_at
-                            and newer.started_at >= watched.started_at
-                        ):
-                            if newer.status not in _DEPLOYMENT_TERMINAL:
-                                yield _sse_status(
-                                    "deploy",
-                                    "Проверяю запуск и при необходимости пересобираю",
-                                    "running",
-                                )
-                                while time.monotonic() < deadline:
-                                    await asyncio.sleep(_DEPLOY_POLL_SECONDS)
-                                    if deploy_ping.due():
-                                        yield SSE_PING
-                                    db.expire_all()
-                                    newer = db.get(Deployment, newer.id)
-                                    if newer is None:
-                                        break
-                                    label = _deploy_status_label(newer.status)
-                                    if label != last_label:
-                                        state = (
-                                            "done"
-                                            if newer.status == "completed"
-                                            else "error"
-                                            if newer.status == "failed"
-                                            else "running"
-                                        )
-                                        yield _sse_status("deploy", label, state)
-                                        last_label = label
-                                    if newer.status in _DEPLOYMENT_TERMINAL:
-                                        break
-                            if newer is not None:
-                                deployment = newer
-                                watched_id = newer.id
-                    db.expire_all()
-                    db.refresh(project)
-                    if deployment is not None:
-                        db.refresh(deployment)
-
-                if (
-                    deployment is not None
-                    and deployment.status == "completed"
-                    and project.status == "live"
-                ):
-                    yield append_visible(
-                        _launch_success_message(project, has_website=has_website, has_bot=has_bot)
-                    )
-                    yield _sse_status("done", "Проект запущен и работает", "done")
-                elif deployment is not None and deployment.status == "failed":
-                    error_blob = (
-                        (deployment.error_text or "")
-                        or (
-                            deployment.logs_ref
-                            if deployment.logs_ref
-                            and not deployment.logs_ref.startswith("docker://")
-                            else ""
-                        )
-                        or (project.logs or "")
-                    )
-                    if is_repairable_app_error(error_blob):
-                        async for frame in _follow_repair_redeploy(
-                            db,
-                            project=project,
-                            failed_deployment=deployment,
-                            deadline=deadline,
-                            last_label=last_label,
-                        ):
-                            if isinstance(frame, tuple) and frame and frame[0] == "done":
-                                _, deployment, last_label = frame
-                            else:
-                                yield frame
-                        db.expire_all()
-                        db.refresh(project)
-                        if deployment is not None:
-                            db.refresh(deployment)
-
-                    if (
-                        deployment is not None
-                        and deployment.status == "completed"
-                        and project.status == "live"
-                    ):
-                        yield append_visible(
-                            _launch_success_message(
-                                project, has_website=has_website, has_bot=has_bot
-                            )
-                        )
-                        yield _sse_status("done", "Проект запущен и работает", "done")
-                    else:
-                        yield append_visible(_launch_failure_message(deployment, project))
-                        yield _sse_status("error", "Запуск не удался", "error")
-                elif deployment is not None and deployment.status in {"cancelled", "stopped"}:
-                    yield append_visible("\n\nЗапуск остановлен.")
-                    yield _sse_status("error", "Запуск остановлен", "error")
-                else:
-                    # Still queued/running past the wait window - fail the row so UI can't stick.
-                    if deployment is not None and deployment.status not in _DEPLOYMENT_TERMINAL:
-                        deployment.status = "failed"
-                        store_deployment_error(
-                            deployment,
-                            f"Timed out waiting for deployment after {_DEPLOY_WAIT_SECONDS}s",
-                        )
-                        deployment.finished_at = datetime.now(UTC)
-                        db.add(deployment)
-                        if project.status == "deploying":
-                            project.status = "ready"
-                            note = f"Deployment timed out in chat wait: {deployment.id}"
-                            project.logs = (
-                                f"{project.logs}\n{note}".strip() if project.logs else note
-                            )
-                            db.add(project)
-                        db.commit()
-                        yield append_visible(_launch_failure_message(deployment, project))
-                        yield _sse_status("error", "Запуск не удался (таймаут)", "error")
-                    else:
-                        yield append_visible(
-                            "\n\nЗапуск ещё не завершён. Итог смотрите во вкладках «Деплои» и «Логи» — "
-                            "сообщение «запущено» появится только когда контейнер реально станет live."
-                        )
-                        yield _sse_status("deploy", "Запуск ещё идёт", "running")
-            elif has_website or has_bot:
-                # Queued path requested but no deployment object (shouldn't happen without limit).
-                yield _sse_status("error", "Не удалось поставить деплой в очередь", "error")
-            else:
-                yield _sse_status("done", "Файлы сохранены", "done")
-        except _StopDeployment:
-            pass
-        except RunningProjectLimitError as exc:
-            project.status = "ready"
-            project.logs = f"{project.logs}\n{exc}".strip() if project.logs else str(exc)
-            db.add(project)
-            yield _sse_status("limit", "Достигнут лимит запущенных проектов", "error")
-            yield append_visible(f"\n\n{exc}")
-        except ArtifactError as exc:
-            project.status = "needs_configuration"
-            project.logs = str(exc)
-            db.add(project)
-            yield _sse_status("error", f"Нужно действие: {exc}", "error")
-            yield append_visible(f"\n\nНужно действие: {exc}")
-
-        deploy_elapsed = 0.0
-        if agent_elapsed is not None:
-            # Objective numbers, deliberately kept separate from the agent's own qualitative
-            # self-report (see prompt.py's REPORT_HEADING instructions) - the model isn't asked
-            # to guess elapsed time/tokens, this is measured server-side and from the provider's
-            # own usage payload instead. Appended under the SAME heading the model was told to
-            # use (adding it here too if the model's turn didn't produce one - trivial turns, or
-            # a non-Codex provider not given the same instructions) so the frontend has exactly
-            # one marker to split the message on when styling this as a separate, muted block.
-            deploy_elapsed = max(0.0, time.monotonic() - turn_started - agent_elapsed)
-            timing_bits = [
-                f"генерация ~{agent_elapsed:.1f}с",
-                f"сборка/проверка ~{deploy_elapsed:.1f}с",
-            ]
-            lines = [f"_Время: {', '.join(timing_bits)}._"]
-            if agent_usage:
-                usage_line = ", ".join(f"{k}: {v}" for k, v in agent_usage.items())
-                if usage_line:
-                    lines.append(f"_Использование провайдера: {usage_line}._")
-            if REPORT_HEADING in assistant_full:
-                footer = "\n" + "\n".join(lines)
-            else:
-                footer = f"\n\n{REPORT_HEADING}\n" + "\n".join(lines)
-            yield append_visible(footer)
-
-        # Explicit id (rather than relying on the column's client-side default at flush time) so
-        # the same id can link an AgentRunMetric row below without an extra round-trip.
-        assistant_message = Message(
-            id=uuid4(), chat_id=chat_id, role="assistant", content_markdown=assistant_full
-        )
-        db.add(assistant_message)
-        # Flush now: AgentRunMetric.message_id below is a bare FK column with no ORM
-        # relationship() linking the two mappers, so the unit-of-work has no dependency edge
-        # telling it to insert the message first - without this flush the two INSERTs can be
-        # emitted in either order within the same transaction, and a metric-before-message
-        # ordering trips agent_run_metrics_message_id_fkey (confirmed by a real
-        # ForeignKeyViolation while testing this against Postgres).
-        db.flush()
-        if agent_elapsed is not None:
-            db.add(
-                AgentRunMetric(
-                    project_id=project.id,
-                    chat_id=chat_id,
-                    message_id=assistant_message.id,
-                    provider=provider_name,
-                    model=model,
-                    agent_seconds=agent_elapsed,
-                    deploy_seconds=deploy_elapsed,
-                    usage_json=json.dumps(agent_usage) if agent_usage else None,
-                    agent_error=agent_error,
-                )
-            )
-        if pipeline_metrics is not None:
-            db.add(
-                PipelineRunMetric(
-                    project_id=project.id,
-                    chat_id=chat_id,
-                    message_id=assistant_message.id,
-                    provider=provider_name,
-                    model=model,
-                    build_iterations=int(pipeline_metrics.get("build_iterations") or 0),
-                    review_iterations=int(pipeline_metrics.get("review_iterations") or 0),
-                    preview_failures=int(pipeline_metrics.get("preview_failures") or 0),
-                    skipped_reason=pipeline_metrics.get("skipped_reason"),
-                    metrics_json=json.dumps(pipeline_metrics),
-                )
-            )
-        usage_cost = max(100, len(safe_message) + len(assistant_full))
-        record_usage(
-            db,
-            current_user,
-            project_id=project.id,
-            amount=usage_cost,
-            project_name=project.name,
-        )
-        db.commit()
-        yield "data: [DONE]\n\n"
-
-    return StreamingResponse(event_source(), media_type="text/event-stream")
+    return StreamingResponse(
+        _orchestration_event_source(
+            db=db,
+            project=project,
+            chat_id=chat_id,
+            current_user=current_user,
+            original_request=safe_message,
+            provider_name=provider_name,
+            model=model,
+            api_key=api_key,
+        ),
+        media_type="text/event-stream",
+    )
 
 
 @router.post("/{chat_id}/stream")

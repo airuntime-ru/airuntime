@@ -49,6 +49,11 @@ class McpCircuitOpenError(McpError):
     pass
 
 
+class McpRateLimitedError(McpError):
+    """Raised instead of making the call when this server's call budget for the current window
+    is spent. Deliberately not retried - retrying is exactly what the limit exists to stop."""
+
+
 @dataclass
 class McpToolDefinition:
     name: str
@@ -147,15 +152,19 @@ class StdioTransport:
 
 
 class HttpTransport:
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, *, auth_token: str | None = None) -> None:
         self._url = url
+        # Resolved server-side from McpServer.credential_ref (see registry._build_client) - the
+        # raw value never passes through an LLM prompt, tool arguments, or the capability router.
+        self._auth_token = auth_token
 
     async def request(self, method: str, params: dict, *, timeout_seconds: float) -> dict:
         request_id = uuid.uuid4().hex
         payload = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
+        headers = {"Authorization": f"Bearer {self._auth_token}"} if self._auth_token else None
         try:
             async with httpx.AsyncClient(timeout=timeout_seconds) as client:
-                response = await client.post(self._url, json=payload)
+                response = await client.post(self._url, json=payload, headers=headers)
                 response.raise_for_status()
                 data = response.json()
         except httpx.TimeoutException as exc:
@@ -197,6 +206,35 @@ class _CircuitBreaker:
             self._opened_at = time.monotonic()
 
 
+class _RateLimiter:
+    """Fixed-window per-server call cap (spec section 11's "rate limits").
+
+    A third-party MCP server is the one dependency here that is neither ours nor the user's, so
+    a runaway retry/replan loop must not be able to hammer it (or burn the user's quota with it)
+    unbounded. Distinct from the circuit breaker, which reacts to *failures*: this caps call
+    volume even when every call succeeds.
+    """
+
+    def __init__(self, *, max_calls: int, window_seconds: float) -> None:
+        self._max_calls = max_calls
+        self._window_seconds = window_seconds
+        self._window_started_at = time.monotonic()
+        self._calls_in_window = 0
+
+    def before_call(self) -> None:
+        now = time.monotonic()
+        if now - self._window_started_at >= self._window_seconds:
+            self._window_started_at = now
+            self._calls_in_window = 0
+        if self._calls_in_window >= self._max_calls:
+            retry_in = self._window_seconds - (now - self._window_started_at)
+            raise McpRateLimitedError(
+                f"MCP rate limit reached ({self._max_calls} calls / {self._window_seconds:.0f}s); "
+                f"retry in {max(retry_in, 0):.0f}s"
+            )
+        self._calls_in_window += 1
+
+
 class McpClient:
     def __init__(
         self,
@@ -205,15 +243,24 @@ class McpClient:
         transport: McpTransport,
         timeout_seconds: float = 20.0,
         max_retries: int = 2,
+        max_calls_per_window: int = 60,
+        rate_limit_window_seconds: float = 60.0,
     ) -> None:
         self.name = name
         self._transport = transport
         self._timeout_seconds = timeout_seconds
         self._max_retries = max_retries
         self._breaker = _CircuitBreaker()
+        self._rate_limiter = _RateLimiter(
+            max_calls=max_calls_per_window, window_seconds=rate_limit_window_seconds
+        )
         self._initialized = False
 
     async def _call(self, method: str, params: dict) -> dict:
+        # Before the breaker and before any retry loop: a rate-limit rejection is a deliberate
+        # refusal to make the call at all, not a failure of the server, so it must neither be
+        # retried nor counted toward the breaker's failure threshold.
+        self._rate_limiter.before_call()
         self._breaker.before_call()
         last_exc: Exception | None = None
         for attempt in range(self._max_retries + 1):

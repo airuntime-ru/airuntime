@@ -3,12 +3,12 @@
     1. deterministic platform operation (PlannedTask.required_capabilities names one that
        actually exists in PlatformToolCapabilityProvider - declarative, never guessed from
        free-text goal wording)
-    2. verified skill match (SkillRegistry.find_best_match, gated by settings.enable_skills and
+    2. verified skill match (SkillRegistry.find_best_match, gated by
        role_policy.py's per-role skill allowlist)
-    3. allowed MCP capability match (gated by settings.enable_mcp + role_policy + the server's
+    3. allowed MCP capability match (gated by role_policy + the server's
        own admin allowlist/role allowlist)
     4. specialist agent (codex_task/specialist_agent, per role_policy's default_execution_kind),
-       collapsed to a plain Implementer task if settings.enable_specialist_agents is off
+       collapsed to a plain Implementer task if the calling role isn't permitted to execute
     5. user_input (only reachable today via a task explicitly planned with role requiring
        information the contract can't supply - see contract_builder's completeness gate,
        which is really where this is caught upstream)

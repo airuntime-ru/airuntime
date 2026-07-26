@@ -1,7 +1,6 @@
 """Standalone REST + SSE surface for the persistent orchestration engine (services/orchestration/
-engine.py), independent of chat.py's own turn-shaped `/stream` endpoint (see that router's own
-wiring, gated separately by the same `enable_orchestration_engine` flag, for the path a normal
-chat message actually takes through the engine).
+engine.py), independent of chat.py's own turn-shaped `/stream` endpoint (see that router for the
+path a normal chat message actually takes through the engine).
 
 Run creation returns as soon as the OrchestrationRun row exists - the engine itself runs as a
 background asyncio task on this process, not tied to the HTTP request's lifetime, so a client
@@ -49,11 +48,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/projects/{project_id}/orchestration", tags=["orchestration"])
 
 
-def _require_orchestration_enabled() -> None:
-    if not settings.enable_orchestration_engine:
-        raise HTTPException(status_code=404, detail="Orchestration engine is not enabled")
-
-
 def _get_owned_project(project_id: UUID, current_user: User, db: Session) -> Project:
     project = (
         db.query(Project)
@@ -72,12 +66,34 @@ def _get_owned_run(project: Project, run_id: UUID, db: Session):
     return run
 
 
+def _task_response(task) -> OrchestrationTaskResponse:
+    # Not a plain model_validate(task, from_attributes=True): AgentTask has no `dependencies`
+    # attribute at all (only depends_on_json, a JSON-stringified list of local_ids) - Pydantic's
+    # attribute-matching would silently fall back to the field's default ([]) rather than error,
+    # which would make every task look dependency-free instead of surfacing the real DAG.
+    return OrchestrationTaskResponse(
+        id=task.id,
+        local_id=task.local_id,
+        title=task.title,
+        role=task.role,
+        execution_kind=task.execution_kind,
+        status=task.status,
+        attempt=task.attempt,
+        max_attempts=task.max_attempts,
+        sequence=task.sequence,
+        workspace_mode=task.workspace_mode,
+        dependencies=json.loads(task.depends_on_json or "[]"),
+        error_code=task.error_code,
+        error_message=task.error_message,
+    )
+
+
 def _run_detail_response(db: Session, run) -> OrchestrationRunDetailResponse:
     plan = OrchestrationPlanRepository(db).get_active(run.id)
     tasks = AgentTaskRepository(db).list_by_plan(plan.id) if plan is not None else []
     return OrchestrationRunDetailResponse(
         **OrchestrationRunResponse.model_validate(run).model_dump(),
-        tasks=[OrchestrationTaskResponse.model_validate(t) for t in tasks],
+        tasks=[_task_response(t) for t in sorted(tasks, key=lambda t: t.sequence)],
     )
 
 
@@ -92,7 +108,6 @@ async def create_run(
     # than in a worker thread (its default for sync endpoints) - engine.launch_run_in_background's
     # asyncio.create_task() below requires a *running* loop in the calling thread, and a
     # threadpool worker thread has none.
-    _require_orchestration_enabled()
     project = _get_owned_project(project_id, current_user, db)
     chat = db.query(Chat).filter(Chat.id == payload.chat_id, Chat.project_id == project.id).first()
     if not chat:
@@ -145,7 +160,6 @@ def list_runs(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> OrchestrationRunListResponse:
-    _require_orchestration_enabled()
     project = _get_owned_project(project_id, current_user, db)
     from src.db.models.orchestration_run import OrchestrationRun
 
@@ -164,7 +178,6 @@ def get_run(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> OrchestrationRunDetailResponse:
-    _require_orchestration_enabled()
     project = _get_owned_project(project_id, current_user, db)
     run = _get_owned_run(project, run_id, db)
     return _run_detail_response(db, run)
@@ -178,7 +191,6 @@ async def stream_run_events(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
-    _require_orchestration_enabled()
     project = _get_owned_project(project_id, current_user, db)
     _get_owned_run(project, run_id, db)  # 404s before opening the stream if not owned/found
 
@@ -199,7 +211,6 @@ def cancel_run(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> OrchestrationRunResponse:
-    _require_orchestration_enabled()
     project = _get_owned_project(project_id, current_user, db)
     run = _get_owned_run(project, run_id, db)
     if is_run_terminal(run.status):
@@ -223,18 +234,22 @@ async def resume_run(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> OrchestrationRunResponse:
-    """For a run parked at waiting_for_user (a task requested a secret/service/decision) - call
-    once whatever was missing has actually been supplied (e.g. via the existing secrets PATCH
-    endpoint). Un-blocks every task in that state under the active plan and re-launches the
+    """For a run parked at waiting_for_user - either because a task requested a
+    secret/service/decision, or because the run's budget was exhausted (error_code
+    "budget_exceeded"). Call once whatever was missing has actually been supplied (secret filled
+    in, credits topped up). Un-blocks the affected tasks under the active plan and re-launches the
     engine as a fresh background task; a run not currently waiting is a no-op.
 
     Async for the same reason as create_run: engine.launch_run_in_background's
     asyncio.create_task() needs a running event loop in the calling thread."""
-    _require_orchestration_enabled()
     project = _get_owned_project(project_id, current_user, db)
     run = _get_owned_run(project, run_id, db)
     if run.status != "waiting_for_user":
         return OrchestrationRunResponse.model_validate(run)
+
+    # Must happen before relaunching: a run parked on budget would otherwise immediately re-park,
+    # since the engine reseeds its BudgetTracker from the same persisted credits_used/credit_budget.
+    engine.extend_budget_after_topup(db, run)
 
     plan = OrchestrationPlanRepository(db).get_active(run.id)
     if plan is not None:

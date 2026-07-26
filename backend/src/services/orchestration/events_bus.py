@@ -46,6 +46,10 @@ EVENT_TYPES = frozenset(
         "task_completed",
         "task_repairing",
         "task_failed",
+        # Per-task running total of what this run has cost, plus an APPROACHING warning as it
+        # nears its ceiling - so spend is visible while the run is still going, not only after
+        # it parks on an exhausted budget.
+        "budget_updated",
         "waiting_for_secret",
         "waiting_for_user",
         "integration_started",

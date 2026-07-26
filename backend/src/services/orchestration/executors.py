@@ -20,6 +20,8 @@ layer, not just at the after-the-fact validation layer.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 import time
 from dataclasses import dataclass, field
@@ -70,6 +72,12 @@ class AgentExecutionResult:
     raw_logs: str = ""
     usage: dict | None = None
     build_result: dict | None = None
+    # Optional {"ok": bool, ...} from an executor that ran a REAL linter/test suite (a skill
+    # shelling out through the worker, say). The server runs its own parse-level static check
+    # regardless (evidence.run_static_checks) and merges the two - these fields can only add
+    # findings, never clear the server's own (spec section 8: claims aren't evidence).
+    lint_result: dict | None = None
+    test_result: dict | None = None
     preview_result: dict | None = None
     runtime_health_result: dict | None = None
     error: str | None = None
@@ -393,6 +401,40 @@ class DeterministicExecutor:
         )
 
 
+class _Cancelled(Exception):
+    """Internal signal that a capability call was abandoned because the run was cancelled."""
+
+
+async def _await_or_cancel(coro, cancellation: CancellationToken | None):
+    """Run `coro`, but abandon it the moment `cancellation` fires.
+
+    Skill and MCP calls are plain awaits with no internal cancellation checkpoints, so without
+    this a Stop pressed mid-call would sit blocked until the call finished on its own (an MCP
+    server's full 20s timeout + retries, say). Racing the two and cancelling the loser turns
+    Stop into an actually-prompt stop for these executors too, matching the Codex/HTTP paths.
+
+    `None` means "no cancellation wired for this call" - just await it plainly.
+    """
+    if cancellation is None:
+        return await coro
+    if cancellation.is_cancelled:
+        raise _Cancelled
+    work = asyncio.ensure_future(coro)
+    waiter = asyncio.ensure_future(cancellation.wait())
+    try:
+        await asyncio.wait({work, waiter}, return_when=asyncio.FIRST_COMPLETED)
+        if work.done():
+            return work.result()
+        work.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await work
+        raise _Cancelled
+    finally:
+        waiter.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await waiter
+
+
 class SkillExecutor:
     def __init__(self, provider: SkillCapabilityProvider) -> None:
         self._provider = provider
@@ -414,18 +456,28 @@ class SkillExecutor:
             role=contract.role,
         )
         started = time.monotonic()
-        result = await self._provider.invoke(
-            f"skill:{skill_id}",
-            {
-                "workspace_root": str(context.workspace_root),
-                "project_type": contract.current_state.project_type,
-                "provider_name": context.provider_name,
-                "model": context.model,
-                "api_key": context.api_key,
-                "brief_text": contract.task_goal,
-            },
-            cap_context,
-        )
+        try:
+            result = await _await_or_cancel(
+                self._provider.invoke(
+                    f"skill:{skill_id}",
+                    {
+                        "workspace_root": str(context.workspace_root),
+                        "project_type": contract.current_state.project_type,
+                        "provider_name": context.provider_name,
+                        "model": context.model,
+                        "api_key": context.api_key,
+                        "brief_text": contract.task_goal,
+                    },
+                    cap_context,
+                ),
+                cancellation,
+            )
+        except _Cancelled:
+            return AgentExecutionResult(
+                task_result=TaskResult(status="failed", summary=f"skill {skill_id}: отменено"),
+                usage={"duration_seconds": time.monotonic() - started},
+                error=cancellation.reason or "cancelled",
+            )
         status = "completed" if result.status == "completed" else "partial"
         return AgentExecutionResult(
             task_result=TaskResult(status=status, summary=f"skill {skill_id}: {result.status}"),
@@ -461,7 +513,17 @@ class McpExecutor:
             task_id=contract.task_id,
             role=contract.role,
         )
-        result = await self._provider.invoke(capability_id, {}, cap_context)
+        try:
+            result = await _await_or_cancel(
+                self._provider.invoke(capability_id, {}, cap_context), cancellation
+            )
+        except _Cancelled:
+            return AgentExecutionResult(
+                task_result=TaskResult(
+                    status="failed", summary=f"mcp {capability_id}: отменено"
+                ),
+                error=cancellation.reason or "cancelled",
+            )
         status = "completed" if result.status == "completed" else "failed"
         return AgentExecutionResult(
             task_result=TaskResult(status=status, summary=f"mcp {capability_id}: {result.status}"),

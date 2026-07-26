@@ -1,12 +1,9 @@
-"""Tests for chat.py's settings.enable_orchestration_engine branch (_orchestration_event_source)
-- the path a real chat message takes through the persistent engine instead of
-run_product_pipeline. The engine's own correctness is exhaustively covered elsewhere
-(test_orchestration_engine_e2e.py); this file only proves the *wiring*: a POST /stream with the
-flag on creates a real OrchestrationRun, drives it via the same launch_run_in_background seam the
-API router uses, translates its events into the existing SSE {chunk}/{status} shape, reuses the
-existing deploy pipeline on success, and persists the assistant reply - while leaving the flag-off
-path provably untouched (already exercised by every other test in test_api.py, none of which
-enable this flag).
+"""Tests for chat.py's _orchestration_event_source - the only path a real chat message takes,
+through the persistent orchestration engine. The engine's own correctness is exhaustively covered
+elsewhere (test_orchestration_engine_e2e.py); this file only proves the *wiring*: a POST /stream
+creates a real OrchestrationRun, drives it via the same launch_run_in_background seam the API
+router uses, translates its events into the existing SSE {chunk}/{status} shape, reuses the
+existing deploy pipeline on success, and persists the assistant reply.
 """
 
 from __future__ import annotations
@@ -21,7 +18,7 @@ from tests.conftest import TestingSessionLocal, auth_tokens
 from src.api.routers import chat as chat_router
 from src.core.config import settings
 from src.db.models.orchestration_run import OrchestrationRun
-from src.services import project_git
+from src.services import project_git, workspace
 from src.services.orchestration import engine as orchestration_engine
 from src.services.orchestration.executors import AgentExecutionResult
 from src.services.orchestration.schemas import TaskResult
@@ -34,7 +31,9 @@ class _FakeExecutor:
 
     async def execute(self, contract, context, cancellation) -> AgentExecutionResult:
         self.calls += 1
-        (context.workspace_root / "output.txt").write_text("hi", encoding="utf-8")
+        public_dir = context.workspace_root / "public"
+        public_dir.mkdir(parents=True, exist_ok=True)
+        (public_dir / "index.html").write_text("<html>hi</html>", encoding="utf-8")
         return self.result
 
 
@@ -77,8 +76,7 @@ def _fake_live_deployment(db, project):
 
 
 @pytest.fixture(autouse=True)
-def _enable_orchestration(monkeypatch: pytest.MonkeyPatch, tmp_path):
-    monkeypatch.setattr(settings, "enable_orchestration_engine", True)
+def _configure_settings(monkeypatch: pytest.MonkeyPatch, tmp_path):
     monkeypatch.setattr(settings, "openai_api_key", "test-key")
     monkeypatch.setattr(settings, "generated_projects_dir", str(tmp_path))
 
@@ -104,10 +102,15 @@ def _share_test_connection(monkeypatch: pytest.MonkeyPatch, db: Session):
 
 
 @pytest.fixture(autouse=True)
-def _workspace_dir(monkeypatch: pytest.MonkeyPatch, tmp_path):
+def _workspace_dir(monkeypatch: pytest.MonkeyPatch):
+    """engine.py imports services.workspace.project_dir AS project_workspace_dir, so in
+    production the engine and chat.py's own post-run checks resolve the exact same directory.
+    This fixture must preserve that (sending them to different roots would make the deploy-gate
+    backstop in _orchestration_event_source silently inspect an empty dir) - it only adds the
+    git init the engine's first git transaction needs."""
+
     def _dir(project_id):
-        root = tmp_path / "workspaces" / str(project_id)
-        root.mkdir(parents=True, exist_ok=True)
+        root = workspace.project_dir(project_id)
         project_git.init_repo_if_needed(root)
         return root
 
@@ -175,35 +178,6 @@ class TestOrchestrationEnabledHappyPath:
         assert any(
             "Сайт запущен" in m["content_markdown"] for m in messages if m["role"] == "assistant"
         )
-
-    def test_flag_off_does_not_touch_orchestration_runs_table(
-        self, client, db: Session, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        # Regression guard for "off means untouched": with the flag off, a normal turn must not
-        # create any OrchestrationRun row at all - it takes the pre-existing run_product_pipeline
-        # path.
-        monkeypatch.setattr(settings, "enable_orchestration_engine", False)
-        headers = auth_tokens(client, "chat-orch-off@airuntime.dev")
-        project_id, chat_id = _create_project_and_chat(client, headers)
-
-        async def _fake_run_product_pipeline(**kwargs):
-            from src.services.agent.events import AgentDone, TextDelta
-
-            yield TextDelta(text="ok")
-            yield AgentDone(reason="stop")
-
-        monkeypatch.setattr(chat_router, "run_product_pipeline", _fake_run_product_pipeline)
-
-        response = client.post(
-            f"/api/v1/projects/{project_id}/chats/{chat_id}/stream",
-            headers=headers,
-            json={"content": "Сделай лендинг"},
-        )
-        assert response.status_code == 200
-
-        db.expire_all()
-        run_count = db.query(OrchestrationRun).filter_by(project_id=uuid.UUID(project_id)).count()
-        assert run_count == 0
 
 
 class TestOrchestrationWaitingForSecret:

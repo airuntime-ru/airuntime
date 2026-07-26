@@ -8,19 +8,21 @@ project policy"):
   2. `allowed_roles(server)` - which SpecialistRole(s) may use this server at all, further
      narrowed per-task by role_policy.py's own allowed_capabilities computation.
 
-`settings.enable_mcp` (core/config.py) is the master switch checked upstream in
-capability_router.py - this module doesn't need to know about it.
+These two gates are the only authorization layer - there is no separate blanket on/off switch;
+MCP capabilities are always in the routing mix, individually allowlisted per server and role.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 
 from src.db.models.mcp_server import McpServer
 from src.services.orchestration.mcp.client import HttpTransport, McpClient, StdioTransport
 from src.services.orchestration.repository import McpServerRepository
 from src.services.orchestration.schemas import CapabilityDefinition, RiskLevel, SpecialistRole
+from src.services.system_settings import get_system_setting_value
 
 logger = logging.getLogger(__name__)
 
@@ -33,11 +35,39 @@ _client_cache: dict[str, McpClient] = {}
 _capability_cache: dict[str, list[CapabilityDefinition]] = {}
 
 
+def resolve_credential(server: McpServer) -> str | None:
+    """Turn McpServer.credential_ref into the actual secret value, server-side.
+
+    `credential_ref` is a *key* into the admin-managed system settings store, never the value
+    itself (see the model docstring). Resolution happens here, at connection-build time, so the
+    real credential only ever exists inside this process and the transport - it is never part of
+    a CapabilityDefinition, a TaskContract, tool arguments, or anything an LLM can observe, which
+    is the same boundary request_secret enforces for project secrets.
+    """
+    ref = (server.credential_ref or "").strip()
+    if not ref:
+        return None
+    value = get_system_setting_value(ref)
+    if not value:
+        logger.warning(
+            "MCP server %s declares credential_ref %r but no such system setting is set - "
+            "connecting without credentials",
+            server.name,
+            ref,
+        )
+        return None
+    return value
+
+
 def _build_client(server: McpServer) -> McpClient:
+    credential = resolve_credential(server)
     if server.transport == "stdio":
-        transport = StdioTransport(server.endpoint or "")
+        # Passed as an env var rather than on the command line: argv is world-readable via
+        # /proc on Linux, so an inline secret would leak to any process on the host.
+        env = {**os.environ, "MCP_CREDENTIAL": credential} if credential else None
+        transport = StdioTransport(server.endpoint or "", env=env)
     elif server.transport == "http":
-        transport = HttpTransport(server.endpoint or "")
+        transport = HttpTransport(server.endpoint or "", auth_token=credential)
     else:
         raise ValueError(
             f"unsupported MCP transport {server.transport!r} for server {server.name!r}"

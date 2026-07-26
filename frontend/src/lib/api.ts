@@ -621,3 +621,96 @@ export async function getUsageHistory(
   });
   return requestJson<CreditLedgerPageType>(`/billing/usage?${params.toString()}`);
 }
+
+export type OrchestrationRunType = {
+  id: string;
+  project_id: string;
+  chat_id: string;
+  status: string;
+  goal: string | null;
+  original_request: string | null;
+  complexity: string | null;
+  plan_version: number;
+  credits_used: number;
+  credit_budget: number | null;
+  cancel_requested: boolean;
+  error_code: string | null;
+  error_message: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+};
+
+export type OrchestrationTaskType = {
+  id: string;
+  local_id: string;
+  title: string;
+  role: string;
+  execution_kind: string;
+  status: string;
+  attempt: number;
+  max_attempts: number;
+  sequence: number;
+  workspace_mode: string;
+  dependencies: string[];
+  error_code: string | null;
+  error_message: string | null;
+};
+
+export type OrchestrationRunDetailType = OrchestrationRunType & {
+  tasks: OrchestrationTaskType[];
+};
+
+export async function listOrchestrationRuns(
+  projectId: string,
+  limit = 20,
+  offset = 0,
+): Promise<PagedResult<OrchestrationRunType>> {
+  return requestJson<PagedResult<OrchestrationRunType>>(
+    `/projects/${projectId}/orchestration/runs?limit=${limit}&offset=${offset}`,
+  );
+}
+
+export async function getOrchestrationRun(
+  projectId: string,
+  runId: string,
+): Promise<OrchestrationRunDetailType> {
+  return requestJson<OrchestrationRunDetailType>(
+    `/projects/${projectId}/orchestration/runs/${runId}`,
+  );
+}
+
+export async function cancelOrchestrationRun(
+  projectId: string,
+  runId: string,
+): Promise<OrchestrationRunType> {
+  return requestJson<OrchestrationRunType>(
+    `/projects/${projectId}/orchestration/runs/${runId}/cancel`,
+    { method: "POST" },
+  );
+}
+
+export async function resumeOrchestrationRun(
+  projectId: string,
+  runId: string,
+): Promise<OrchestrationRunType> {
+  return requestJson<OrchestrationRunType>(
+    `/projects/${projectId}/orchestration/runs/${runId}/resume`,
+    { method: "POST" },
+  );
+}
+
+/** Raw Response for SSE consumption (events_bus wire format) - see lib/orchestration-stream.ts. */
+export function streamOrchestrationRunEvents(
+  projectId: string,
+  runId: string,
+  options: { afterSeq?: number; signal?: AbortSignal } = {},
+): Promise<Response> {
+  const params = new URLSearchParams();
+  if (options.afterSeq) params.set("after_seq", String(options.afterSeq));
+  const query = params.toString();
+  return rawRequest(
+    `/projects/${projectId}/orchestration/runs/${runId}/events${query ? `?${query}` : ""}`,
+    { method: "GET", signal: options.signal },
+  );
+}

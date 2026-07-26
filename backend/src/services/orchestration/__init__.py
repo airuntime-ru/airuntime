@@ -1,8 +1,9 @@
 """Persistent multi-agent orchestration engine.
 
-Sits behind `settings.enable_orchestration_engine` (default False). When off, chat.py's
-dispatch is untouched - identical to the pre-existing `enable_product_pipeline` /
-`enable_agent_orchestrator` flags' own "off means byte-identical old behavior" contract.
+The only chat-turn path (backend/src/api/routers/chat.py's `_orchestration_event_source` always
+uses it). Supersedes and replaces the older `agent/orchestrator.py` in-memory decomposition
+experiment (`enable_agent_orchestrator`) and the `agent/product_pipeline.py` staged pipeline it
+fed into - both deleted, along with their own on/off flags.
 
 Module map:
   schemas.py            - Pydantic contracts: ExecutionPlan, TaskContract, TaskResult, TaskEvidence, ...

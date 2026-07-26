@@ -71,12 +71,17 @@ class OrchestrationRunRepository:
         )
 
     def list_resumable(self) -> list[OrchestrationRun]:
-        """Runs that were mid-flight when the process last stopped - used on worker/backend
-        startup to resume execution (restart recovery)."""
+        """Runs that were mid-flight when the process last stopped - used on backend startup to
+        resume execution (restart recovery, see engine.recover_stranded_runs).
+
+        Excludes `waiting_for_user`: those are not stranded, they are deliberately parked on
+        something only the user can supply (a secret, a credit top-up), and auto-resuming them
+        would just burn straight back into the same wait. `created` is excluded too - nothing has
+        started, and whoever created the row is responsible for launching it."""
         return (
             self.db.query(OrchestrationRun)
             .filter(OrchestrationRun.status.notin_(RUN_TERMINAL_STATUSES))
-            .filter(OrchestrationRun.status != "created")
+            .filter(OrchestrationRun.status.notin_(("created", "waiting_for_user")))
             .all()
         )
 

@@ -80,61 +80,14 @@ class Settings(BaseSettings):
     # key) - verify against `docker volume ls` on the target host if COMPOSE_PROJECT_NAME differs.
     generated_projects_volume_name: str = "airuntime_airruntime_projects_data"
 
-    # Off by default - see backend/src/services/agent/orchestrator.py's module docstring for why
-    # this is the least-tested piece of the 2026-07-17 architecture work (no live model run to
-    # validate the planning call's output against) and docs/architecture.md for the design.
-    enable_agent_orchestrator: bool = False
-
-    # Product-quality pipeline (brief -> UX -> visual -> implement -> build -> preview ->
-    # review -> fix) - see backend/src/services/agent/product_pipeline.py. Always runs (every
-    # stage, review iterations capped at product_pipeline._MAX_REVIEW_ITERATIONS) - this used
-    # to be a bundle of independently-toggleable flags; once every stage had been running by
-    # default for a while with no reason to turn any of them off individually, they were
-    # removed rather than kept as permanently-True dead toggles.
-    # None (default) means "use this turn's own provider/model" for the review call. Set to pin
-    # review to a specific stronger/cheaper model regardless of what the project is generating
-    # with - e.g. always review with a strong model even if generation runs on a cheaper one.
-    reviewer_provider: str | None = None
-    reviewer_model: str | None = None
-
-    # Persistent orchestration engine (backend/src/services/orchestration/) - a DB-backed
-    # planner/task-graph/validation layer that sits ABOVE run_agent_turn/run_product_pipeline,
-    # not a replacement for the coding loop itself. Off by default: chat.py's dispatch is
-    # byte-identical to today when this is False (same "off means untouched" contract as
-    # enable_product_pipeline). See docs in services/orchestration/__init__.py.
-    enable_orchestration_engine: bool = False
-    # Sub-switches below only matter when enable_orchestration_engine is True.
-    # False routes every task straight to the generalist Implementer instead of the full
-    # role registry (product_planner/solution_architect/ui_ux_specialist/build_fixer/
-    # deploy_fixer/qa_reviewer/security_reviewer/integration_agent) - useful for isolating
-    # "is the graph/validation machinery the problem" from "is role-specific prompting the
-    # problem" during rollout.
-    enable_specialist_agents: bool = True
-    # False routes every task to a specialist agent even when a deterministic skill
-    # (services/orchestration/skills/) would match - skills stay registered either way, this
-    # only affects capability_router.py's routing preference.
-    enable_skills: bool = True
-    # MCP servers are admin-allowlisted individually (db/models/mcp_server.py) regardless of
-    # this flag - this is the master switch that keeps McpCapabilityProvider out of the
-    # capability router entirely until MCP has been exercised in staging.
-    enable_mcp: bool = False
-    # False forces every write task onto shared_sequential workspace mode even if the planner
-    # marked it independently-scoped - isolated_worktree is the newest/highest-blast-radius
-    # isolation mode (real git worktrees + branches, see workspace_isolation.py), kept opt-in
-    # even after the base engine ships.
-    enable_worktree_isolation: bool = False
-    # False makes FailurePolicyEngine's "replan" decision degrade to "fail" instead - keeps the
-    # rest of repair/retry working while replanning (the least-tested decision, since it
-    # depends on planner call quality) stays isolated during rollout.
-    enable_replanning: bool = True
-    # Persisting OrchestrationRun/Plan/AgentTask rows to Postgres is not optional once the
-    # engine is on (that's what makes it survive a restart - see DEFINITION OF DONE). This flag
-    # exists as the documented single point that must be True for enable_orchestration_engine
-    # to actually take effect; setting it False is equivalent to disabling the whole engine
-    # (engine.py checks both and logs a warning if they disagree) rather than a second,
-    # non-persistent execution mode - deliberately not built, since it would just be a worse
-    # duplicate of the old in-memory orchestrator.py this system replaces.
-    enable_persistent_runs: bool = True
+    # Persistent orchestration engine (backend/src/services/orchestration/) - the only chat-turn
+    # path (backend/src/api/routers/chat.py always uses it; the pre-engine event_source()/
+    # run_product_pipeline path was removed once the engine covered its required-files/
+    # deploy-gate safety net too - see chat.py's _orchestration_event_source). Every capability
+    # tier (specialist agents, skills, MCP, worktree isolation, replanning) always runs; there
+    # are no on/off switches left for any of them. OrchestrationRun/Plan/AgentTask rows are
+    # always persisted to Postgres - that's what makes a run survive a restart, not optional
+    # infrastructure to gate.
 
     orchestration_run_lease_ttl_seconds: int = 180
     orchestration_task_default_timeout_seconds: int = 900

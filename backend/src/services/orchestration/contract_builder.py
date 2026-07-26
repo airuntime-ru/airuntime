@@ -110,6 +110,16 @@ def derive_validation_steps(
                 required=True,
             )
         )
+        # Required (not advisory) for anything that writes: validation.py only treats a finding as
+        # blocking when its step is declared here, so without this row a syntactically broken .py
+        # or malformed package.json would be recorded in the evidence and then accepted anyway.
+        steps.append(
+            ValidationStep(
+                kind="static",
+                description="Изменённые .py/.json файлы синтаксически корректны",
+                required=True,
+            )
+        )
     methods = {c.verification_method for c in planned_task.acceptance_criteria}
     build_roles = (
         SpecialistRole.IMPLEMENTER,
@@ -171,9 +181,20 @@ def build_task_contract(
         fallback_relevant_paths=planned_task.relevant_paths,
     )
     allowed_tools = filter_tools(role)
-    allowed_skills = filter_skills(
+    role_permitted_skills = filter_skills(
         role, planned_task.suggested_skills, registered_skill_ids=registered_skill_ids
     )
+    # capability_router.py's route() already decided *the* skill/capability for this task
+    # (persisted as task.skill_id/task.capability_id at creation, engine.py's
+    # _materialize_plan_tasks) - executors.py's SkillExecutor/DeterministicExecutor/McpExecutor
+    # read allowed_skills[0]/allowed_capabilities[0] (or, for MCP, the "mcp:"-prefixed entry) as
+    # THE thing to run, not a menu to choose from, so the router's actual match must be first.
+    allowed_skills = (
+        [task.skill_id, *[s for s in role_permitted_skills if s != task.skill_id]]
+        if task.skill_id
+        else role_permitted_skills
+    )
+    allowed_capabilities = [task.capability_id] if task.capability_id else []
 
     current_state = context_engine.build_project_state_summary(
         project,
@@ -223,7 +244,7 @@ def build_task_contract(
         forbidden_paths=forbidden_paths,
         allowed_tools=allowed_tools,
         allowed_skills=allowed_skills,
-        allowed_capabilities=[],
+        allowed_capabilities=allowed_capabilities,
         constraints=constraints,
         architectural_rules=list(policy.default_architectural_rules),
         acceptance_criteria=planned_task.acceptance_criteria,

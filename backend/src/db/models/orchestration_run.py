@@ -9,8 +9,8 @@ from src.db.session import Base
 
 
 class OrchestrationRun(Base):
-    """One row per persistent orchestration run - the top-level unit of work spawned by a
-    single user chat message when settings.enable_orchestration_engine is on. Everything else
+    """One row per persistent orchestration run - the top-level unit of work spawned by every
+    user chat message (the orchestration engine is the only chat-turn path). Everything else
     in the orchestration domain (OrchestrationPlan, AgentTask, WorkspaceLease, RunEvent) hangs
     off run_id, so a run surviving a backend/worker restart (it's a DB row, not in-memory state)
     is what makes the whole engine restart-safe - see services/orchestration/engine.py.

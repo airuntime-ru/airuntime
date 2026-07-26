@@ -5,9 +5,9 @@ this file's requests drive a REAL asyncio.create_task background run would mean 
 TestClient's anyio portal threading model for no additional coverage. Instead:
   - `engine.launch_run_in_background` (the one seam that calls `asyncio.create_task`, shared with
     chat.py's own wiring) is replaced with a synchronous fake that records its arguments - this
-    router's OWN job (build the row, return the right response shape, gate on ownership/flags,
-    wire cancel/resume's DB effects) is fully exercised without ever depending on a background
-    task actually running.
+    router's OWN job (build the row, return the right response shape, gate on project/run
+    ownership, wire cancel/resume's DB effects) is fully exercised without ever depending on a
+    background task actually running.
   - `SessionLocal` (the production session factory `stream_run_events` and the real
     `engine.launch_run_in_background` use) is monkeypatched to share this test's own connection/
     transaction - otherwise anything written via the `db` fixture (uncommitted until teardown,
@@ -30,8 +30,7 @@ from src.services.orchestration.repository import OrchestrationRunRepository
 
 
 @pytest.fixture(autouse=True)
-def _enable_orchestration(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(settings, "enable_orchestration_engine", True)
+def _configure_settings(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(settings, "openai_api_key", "test-key")
 
 
@@ -65,20 +64,6 @@ def _create_project_and_chat(client, headers) -> tuple[str, str]:
     ).json()
     chat = client.post(f"/api/v1/projects/{project['id']}/chats", headers=headers).json()
     return project["id"], chat["id"]
-
-
-class TestFeatureFlagGate:
-    def test_disabled_flag_returns_404(self, client, monkeypatch, launch_calls):
-        monkeypatch.setattr(settings, "enable_orchestration_engine", False)
-        headers = auth_tokens(client, "orch-disabled@airuntime.dev")
-        project_id, chat_id = _create_project_and_chat(client, headers)
-        response = client.post(
-            f"/api/v1/projects/{project_id}/orchestration/runs",
-            headers=headers,
-            json={"chat_id": chat_id, "content": "Сделай лендинг"},
-        )
-        assert response.status_code == 404
-        assert launch_calls == []
 
 
 class TestCreateRun:

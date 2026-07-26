@@ -18,6 +18,7 @@ from src.api.routers import (  # noqa: E402
     deployments,
     files,
     orchestration,
+    orchestration_admin,
     project_versions,
     projects,
     providers,
@@ -25,6 +26,7 @@ from src.api.routers import (  # noqa: E402
     telegram,
 )
 from src.core.config import settings  # noqa: E402
+from src.services.orchestration import engine as orchestration_engine  # noqa: E402
 from src.services.orchestration.mcp import registry as mcp_registry  # noqa: E402
 from src.services.storage import storage_service  # noqa: E402
 
@@ -35,10 +37,15 @@ logger = logging.getLogger(__name__)
 async def lifespan(_: FastAPI):
     logger.info("AIRuntime API starting (environment=%s)", settings.environment)
     storage_service.ensure_bucket()
+    # Restart recovery: orchestration runs are durable DB rows, but a run that was mid-flight
+    # when this process died has nothing driving it any more. Relaunch those here (runs parked
+    # on the user - waiting_for_user - are deliberately excluded; see list_resumable). Runs on
+    # this process's event loop, which is why it lives in lifespan rather than at import time.
+    orchestration_engine.recover_stranded_runs()
     yield
     # Terminates any cached MCP stdio/http clients (registry.py's get_client cache) - a no-op
-    # if MCP was never exercised this process's lifetime (enable_mcp off, or no task ever
-    # reached a capability call), otherwise avoids leaking subprocess/connection handles.
+    # if no task this process's lifetime ever reached an MCP capability call, otherwise avoids
+    # leaking subprocess/connection handles.
     await mcp_registry.close_all_clients()
 
 
@@ -81,6 +88,7 @@ app.include_router(secrets.router, prefix=settings.api_prefix)
 app.include_router(telegram.router, prefix=settings.api_prefix)
 app.include_router(billing.router, prefix=settings.api_prefix)
 app.include_router(orchestration.router, prefix=settings.api_prefix)
+app.include_router(orchestration_admin.router, prefix=settings.api_prefix)
 
 
 @app.get("/health")

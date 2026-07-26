@@ -87,7 +87,10 @@ TASK_TERMINAL_STATUSES = frozenset({"completed", "failed", "skipped", "cancelled
 _TASK_FORWARD_EDGES: dict[str, frozenset[str]] = {
     "pending": frozenset({"blocked", "ready", "skipped"}),
     "blocked": frozenset({"ready", "skipped"}),
-    "ready": frozenset({"running", "skipped"}),
+    # ready -> waiting_for_user: the run's budget ran out before this task ever started, so it is
+    # parked (not skipped - skipped is terminal and would silently drop the work) until the user
+    # tops up and resumes. See engine.py's BudgetStatus.EXCEEDED branch.
+    "ready": frozenset({"running", "skipped", "waiting_for_user"}),
     "running": frozenset({"collecting_evidence"}),
     "collecting_evidence": frozenset({"validating"}),
     "validating": frozenset({"completed", "repairing", "waiting_for_user"}),

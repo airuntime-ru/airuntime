@@ -21,14 +21,20 @@ Manager's `begin()`/`complete()` pairing carries live ORM objects (the lease, th
 not cross a session boundary - this mirrors the existing precedent of chat.py's own turn handler,
 which already holds one session open across a whole (potentially multi-minute) agent turn.
 
-Scheduling scope for this cut: tasks are executed ONE AT A TIME even when the plan marks several
-as independently schedulable (parallel_read_only / isolated_worktree). Workspace isolation mode
-is still computed and genuinely exercised per task (a parallel_read_only task really does skip
-the lease; an isolated_worktree task really does get its own `git worktree` + branch) - what is
-NOT built here is concurrent scheduling (asyncio.gather over independent-and-isolated tasks) or
-IntegrationAgent-driven multi-branch merge orchestration. Sequential-but-correctly-isolated is an
-honest subset of the spec, not a fake implementation of parallelism; see the final report's
-limitations section.
+Scheduling: each outer-loop iteration dispatches a "wave" of ready tasks concurrently via
+asyncio.gather (see `_select_wave`), not just one - every ready parallel_read_only task (no
+lease at all, workspace_isolation.py's own words: "nothing to serialize against since nothing
+writes") and every ready isolated_worktree task (its own lease + real `git worktree`, can't
+collide with anything else) go out together, plus at most ONE ready shared_sequential task -
+that mode's lease has a single active holder per project, so sending more than one at once
+would just have the rest sit in the lease-contention wait loop for no benefit, and risks a
+timeout there that sequential-only dispatch never had. Each wave member runs in its OWN Session
+(`_run_task_wave_member`) - a SQLAlchemy Session is never safe to share across concurrently
+running coroutines. What is still NOT built: IntegrationAgent-driven multi-branch merge
+orchestration wiring an isolated_worktree task's finished branch back into the shared workspace
+(project_git.merge_worktree_branch exists and is tested, but nothing calls it yet - seeing two
+isolated tasks actually complete concurrently in the same run is the natural trigger for that
+follow-up, not built here).
 """
 
 from __future__ import annotations
@@ -111,12 +117,20 @@ from src.services.orchestration.skills.base import registry as skill_registry
 from src.services.orchestration.status import is_run_terminal, is_task_terminal
 from src.services.orchestration.workspace_isolation import WorkspaceIsolationManager, make_holder_id
 from src.services.project_services import ProjectServiceError, ensure_service_request
+from src.services.system_settings import resolve_api_key_for_provider
 from src.services.workspace import project_dir as project_workspace_dir
 
 logger = logging.getLogger(__name__)
 
 _LEASE_CONTENTION_MAX_WAIT_SECONDS = 30
 _LEASE_CONTENTION_POLL_SECONDS = 2.0
+
+# workspace_isolation.py: these two modes never contend for the single shared_sequential lease
+# (parallel_read_only takes no lease at all; isolated_worktree's own lease never contends with
+# another task's) - anything else (today just shared_sequential, but any future/unrecognized
+# mode defaults here too) is treated as needing exclusive access and gets the cautious,
+# one-at-a-time treatment.
+_CONCURRENT_WORKSPACE_MODES = frozenset({"parallel_read_only", "isolated_worktree"})
 
 _RETRYABLE_DECISIONS = frozenset(
     {
@@ -128,13 +142,40 @@ _RETRYABLE_DECISIONS = frozenset(
 )
 
 
-def _select_workspace_mode(role: SpecialistRole, planned_task: PlannedTask) -> str:
+def _select_workspace_mode(
+    role: SpecialistRole, planned_task: PlannedTask, *, concurrent_write_task_count: int
+) -> str:
     policy = get_role_policy(role)
     if policy.write_scope_ceiling == WriteScope.NONE:
         return "parallel_read_only"
-    if settings.enable_worktree_isolation and not planned_task.dependencies:
+    # Worktree isolation only pays for itself (a real git worktree + branch + merge step) when
+    # there's actually another independent write task it could run alongside - a lone
+    # dependency-free write task has nothing to contend with and is strictly better off in the
+    # plain shared workspace (see spec: "Parallel write включается только если planner и
+    # dependency analyzer доказали независимость scope").
+    if not planned_task.dependencies and concurrent_write_task_count > 1:
         return "isolated_worktree"
     return "shared_sequential"
+
+
+def _select_wave(ready: list[AgentTask]) -> list[AgentTask]:
+    """Which ready tasks run THIS iteration, concurrently. Every ready task in a mode that can't
+    contend with anything (_CONCURRENT_WORKSPACE_MODES) goes out together; at most one
+    shared_sequential task joins them (`ready`'s own ordering - sequence, then created_at - keeps
+    that pick deterministic). `ready` is never empty when this is called, and every task falls
+    into exactly one of the two buckets, so the result is never empty either."""
+    concurrent = [t for t in ready if t.workspace_mode in _CONCURRENT_WORKSPACE_MODES]
+    sequential = [t for t in ready if t.workspace_mode not in _CONCURRENT_WORKSPACE_MODES]
+    return concurrent + sequential[:1]
+
+
+# Which "this capability is now running" event each execution kind announces itself with. The
+# specialist/codex kinds are already covered by task_started, so they get no second event.
+_CAPABILITY_START_EVENTS: dict[str, str] = {
+    _ExecutionKind.SKILL.value: "skill_started",
+    _ExecutionKind.MCP.value: "capability_started",
+    _ExecutionKind.DETERMINISTIC_VALIDATION.value: "capability_started",
+}
 
 
 def _build_executor(
@@ -183,19 +224,28 @@ async def _materialize_plan_tasks(
     task_repo = AgentTaskRepository(db)
     mcp_repo = McpServerRepository(db)
     mcp_ids_by_role: dict[SpecialistRole, frozenset[str]] = {}
-    if settings.enable_mcp:
-        for role in {t.role for t in execution_plan.tasks}:
-            pairs = await mcp_registry.list_capabilities_for_role(mcp_repo, role=role)
-            mcp_ids_by_role[role] = frozenset(cap.id for _server, cap in pairs)
+    for role in {t.role for t in execution_plan.tasks}:
+        pairs = await mcp_registry.list_capabilities_for_role(mcp_repo, role=role)
+        mcp_ids_by_role[role] = frozenset(cap.id for _server, cap in pairs)
+
+    # Precomputed once against the *planned* roles (routing never actually changes a task's
+    # write-vs-read-only nature - can_execute_role's collapse-to-Implementer branch is dead now
+    # that specialist agents always run) so _select_workspace_mode can tell a genuinely
+    # concurrent write task from a lone one before any task row exists yet.
+    concurrent_write_task_count = sum(
+        1
+        for t in execution_plan.tasks
+        if not t.dependencies and get_role_policy(t.role).write_scope_ceiling != WriteScope.NONE
+    )
 
     created: list[AgentTask] = []
     for sequence, planned in enumerate(execution_plan.tasks):
         decision = await router.route(
             planned_task=planned,
             project_type=project_type,
-            specialist_agents_enabled=settings.enable_specialist_agents,
-            skills_enabled=settings.enable_skills,
-            mcp_enabled=settings.enable_mcp,
+            specialist_agents_enabled=True,
+            skills_enabled=True,
+            mcp_enabled=True,
             mcp_capability_ids=mcp_ids_by_role.get(planned.role, frozenset()),
         )
         task = task_repo.create(
@@ -211,7 +261,11 @@ async def _materialize_plan_tasks(
             depends_on_json=json.dumps(planned.dependencies),
             skill_id=decision.skill_id,
             capability_id=decision.capability_id,
-            workspace_mode=_select_workspace_mode(decision.effective_role, planned),
+            workspace_mode=_select_workspace_mode(
+                decision.effective_role,
+                planned,
+                concurrent_write_task_count=concurrent_write_task_count,
+            ),
         )
         created.append(task)
     task_repo.refresh_readiness(plan.id)
@@ -270,6 +324,18 @@ async def _persist_new_plan(
             "reason": replan_reason,
         },
     )
+    # After plan_created, never before: the plan's dependency-free tasks are already `ready` by
+    # the time _materialize_plan_tasks returns, so without announcing them here the very first
+    # wave would silently skip task_ready and only dependency-unblocked tasks would emit it.
+    for task in AgentTaskRepository(db).list_by_plan(plan.id):
+        if task.status == "ready":
+            events_bus.emit(
+                db,
+                run_id=run.id,
+                task_id=task.id,
+                event_type="task_ready",
+                payload={"local_id": task.local_id, "title": task.title},
+            )
     return plan
 
 
@@ -286,8 +352,20 @@ def _walk_run_to_completed(db: Session, run: OrchestrationRun) -> None:
     responsibility (chat.py wiring), exactly as it already is for the non-orchestrated path,
     rather than engine.py reaching into that project-wide subsystem itself."""
     run_repo = OrchestrationRunRepository(db)
+    # Each phase gets its own event so the run's durable log (and the UI replaying it) shows the
+    # same phases the run status walks through, instead of jumping straight from the last task
+    # to run_completed with no trace of why.
+    phase_events = {
+        "integrating": "integration_started",
+        "building": "build_started",
+        "deploying": "deploy_started",
+        "verifying_runtime": "runtime_verification_started",
+    }
     for status in ("validating", "integrating", "building", "deploying", "verifying_runtime"):
         run_repo.transition(run, status)
+        event_type = phase_events.get(status)
+        if event_type is not None:
+            events_bus.emit(db, run_id=run.id, event_type=event_type, payload={})
     workspace_root = project_workspace_dir(run.project_id)
     final_sha = project_git.current_head_sha(workspace_root)
     run_repo.transition(run, "completed", final_commit_sha=final_sha)
@@ -343,6 +421,9 @@ async def _ensure_planned(
 class _TaskAttemptOutcome:
     signal: Literal["completed", "failed", "waiting_for_user", "replan", "run_should_stop"]
     evaluation: FailureEvaluation | None = None
+    # Human-readable "why" for a run_should_stop, e.g. the exceeded budget dimension - surfaced
+    # to the user on OrchestrationRun.error_message rather than left only in the logs.
+    detail: str | None = None
 
 
 async def _run_one_task(
@@ -380,13 +461,17 @@ async def _run_one_task(
 
         budget_check = budget.check()
         if budget_check.status == BudgetStatus.EXCEEDED:
-            # "skipped", not "failed": this task never got a chance to run at all - the RUN
-            # (not the task) is what actually failed on budget grounds, recorded on
-            # OrchestrationRun.error_code by the caller once this outcome bubbles up.
+            # "waiting_for_user", not "skipped"/"failed": this task never got a chance to run,
+            # and the thing it is waiting on (the user topping up credits) is recoverable. Both
+            # of the terminal options would silently drop this work forever; parking it here is
+            # what lets resume_run() re-ready it after a top-up (spec section 18).
             task_repo.transition(
-                task, "skipped", error_code="budget_exceeded", error_message=budget_check.message
+                task,
+                "waiting_for_user",
+                error_code="budget_exceeded",
+                error_message=budget_check.message,
             )
-            return _TaskAttemptOutcome("run_should_stop")
+            return _TaskAttemptOutcome("run_should_stop", detail=budget_check.message)
 
         task_repo.transition(task, "running")
         events_bus.emit(
@@ -492,7 +577,41 @@ async def _run_one_task(
             api_key=api_key,
             db=db,
         )
+        # Granular per-capability audit trail (spec section 11's "каждый вызов записывается в
+        # audit log"): task_started alone doesn't say WHICH skill/MCP capability ran, and after
+        # the fact the task row only carries the router's decision, not that it was reached.
+        started_event = _CAPABILITY_START_EVENTS.get(task.execution_kind)
+        if started_event is not None:
+            events_bus.emit(
+                db,
+                run_id=run.id,
+                task_id=task.id,
+                event_type=started_event,
+                payload={
+                    "local_id": task.local_id,
+                    "skill_id": task.skill_id,
+                    "capability_id": task.capability_id,
+                    "execution_kind": task.execution_kind,
+                },
+            )
+            db.commit()
+
         agent_result = await executor.execute(contract, task_context, cancellation)
+
+        if task.execution_kind == _ExecutionKind.SKILL.value:
+            events_bus.emit(
+                db,
+                run_id=run.id,
+                task_id=task.id,
+                event_type="skill_completed",
+                payload={
+                    "local_id": task.local_id,
+                    "skill_id": task.skill_id,
+                    "status": agent_result.task_result.status
+                    if agent_result.task_result
+                    else "failed",
+                },
+            )
 
         budget.record_task()
         summary_text = agent_result.task_result.summary if agent_result.task_result else ""
@@ -504,6 +623,23 @@ async def _run_one_task(
             )
         run.credits_used = (run.credits_used or 0) + cost
         db.add(run)
+
+        # Tell the user what this run has actually cost so far, and warn once it is close to the
+        # ceiling - BudgetStatus.APPROACHING exists precisely so spending is visible BEFORE the
+        # run parks itself on an exhausted budget rather than only after.
+        post_charge = budget.check()
+        events_bus.emit(
+            db,
+            run_id=run.id,
+            task_id=task.id,
+            event_type="budget_updated",
+            payload={
+                "credits_used": run.credits_used,
+                "credit_budget": run.credit_budget,
+                "status": str(post_charge.status),
+                "detail": post_charge.message,
+            },
+        )
 
         task_repo.transition(task, "collecting_evidence")
         db.commit()
@@ -542,6 +678,8 @@ async def _run_one_task(
             handle,
             result=agent_result.task_result,
             build_result=agent_result.build_result,
+            lint_result=agent_result.lint_result,
+            test_result=agent_result.test_result,
             preview_result=agent_result.preview_result,
             runtime_health_result=agent_result.runtime_health_result,
             service_requests=service_requests,
@@ -558,6 +696,13 @@ async def _run_one_task(
             else None,
             evidence_json=outcome.evidence.model_dump_json(),
             validation_result_json=outcome.validation_result.model_dump_json(),
+        )
+        events_bus.emit(
+            db,
+            run_id=run.id,
+            task_id=task.id,
+            event_type="task_validating",
+            payload={"local_id": task.local_id, "accepted": outcome.validation_result.accepted},
         )
         db.commit()
 
@@ -680,6 +825,88 @@ async def _run_one_task(
         )
         db.commit()
         return _TaskAttemptOutcome("failed", evaluation=evaluation)
+
+
+async def _run_task_wave_member(
+    *,
+    db_factory: Callable[[], Session],
+    run_id: uuid.UUID | str,
+    project_id: uuid.UUID | str,
+    plan_id: uuid.UUID | str,
+    task_id: uuid.UUID | str,
+    provider_name: str,
+    model: str,
+    api_key: str,
+    cancellation: CancellationToken,
+    loop_detector: LoopDetector,
+    budget: BudgetTracker,
+    replanning_enabled: bool,
+) -> tuple[uuid.UUID | str, _TaskAttemptOutcome, str | None]:
+    """One member of a concurrently-dispatched wave (see this module's docstring and
+    `_select_wave`). Opens its OWN Session - never safe to share one across coroutines running
+    concurrently under asyncio.gather. budget/loop_detector/cancellation ARE shared across wave
+    members by design: every mutating method on them is plain synchronous code with no `await`
+    in the middle of a read-modify-write, and the event loop only ever switches coroutines at an
+    actual `await` point, so concurrent calls from different wave members can't tear a write.
+
+    Returns (task_id, outcome, evidence_json) rather than the ORM AgentTask itself, which is
+    unusable the moment this function's own session closes below - a "replan" outcome needs the
+    failed task's evidence, so that one field is captured while the session is still open."""
+    db = db_factory()
+    try:
+        run = OrchestrationRunRepository(db).get(run_id)
+        project = db.query(Project).filter(Project.id == project_id).one_or_none()
+        plan = OrchestrationPlanRepository(db).get(plan_id)
+        task = AgentTaskRepository(db).get(task_id)
+        if run is None or project is None or plan is None or task is None:
+            # Can't happen in practice - all four were just read, moments ago, from the same DB
+            # rows the caller's own session saw. Fail safe rather than crash the whole wave.
+            return task_id, _TaskAttemptOutcome("failed"), None
+        outcome = await _run_one_task(
+            db,
+            run=run,
+            project=project,
+            task=task,
+            plan=plan,
+            context_engine=ContextEngine(db),
+            isolation=WorkspaceIsolationManager(db),
+            provider_name=provider_name,
+            model=model,
+            api_key=api_key,
+            cancellation=cancellation,
+            loop_detector=loop_detector,
+            budget=budget,
+            replanning_enabled=replanning_enabled,
+        )
+        return task_id, outcome, task.evidence_json
+    finally:
+        db.close()
+
+
+def extend_budget_after_topup(db: Session, run: OrchestrationRun) -> bool:
+    """Grant a budget-exhausted run a fresh allowance so resuming it can actually make progress.
+
+    Without this, resuming is a no-op loop: run_orchestration reseeds BudgetTracker from the
+    persisted `credits_used` and compares it against the same `credit_budget` it already blew, so
+    the very first budget check re-parks the run at waiting_for_user having done nothing. Extends
+    the ceiling by one more default allowance ON TOP of what's already been spent, and clears the
+    budget error so the run doesn't keep presenting as failed-on-budget.
+
+    Returns True when it actually extended anything (i.e. this run was parked on budget).
+    """
+    if run.error_code != "budget_exceeded":
+        return False
+    allowance = settings.orchestration_default_credit_budget
+    if allowance is None:
+        # No configured per-run ceiling at all - the only limit was an explicit per-run
+        # credit_budget, so lifting it entirely is what "continue after top-up" means here.
+        run.credit_budget = None
+    else:
+        run.credit_budget = (run.credits_used or 0) + allowance
+    run.error_code = None
+    run.error_message = None
+    db.add(run)
+    return True
 
 
 def resume_task_after_user_input(db: Session, task_id: uuid.UUID | str) -> AgentTask:
@@ -866,9 +1093,26 @@ async def _run_orchestration_inner(
                 return
 
             task_repo = AgentTaskRepository(db)
+            before_ready = {
+                t.id for t in task_repo.list_by_plan(plan.id) if t.status == "ready"
+            }
             task_repo.refresh_readiness(plan.id)
             plan_tasks = task_repo.list_by_plan(plan.id)
             ready = [t for t in plan_tasks if t.status == "ready"]
+            # Only tasks that BECAME ready this iteration - re-announcing an already-ready task
+            # every loop would flood the durable event log.
+            for task in ready:
+                if task.id in before_ready:
+                    continue
+                events_bus.emit(
+                    db,
+                    run_id=run.id,
+                    task_id=task.id,
+                    event_type="task_ready",
+                    payload={"local_id": task.local_id, "title": task.title},
+                )
+            if len(ready) > len(before_ready):
+                db.commit()
 
             if not ready:
                 non_terminal = [t for t in plan_tasks if not is_task_terminal(t.status)]
@@ -912,32 +1156,48 @@ async def _run_orchestration_inner(
                 db.commit()
                 return
 
-            task = ready[0]
-            run.current_task_id = task.id
+            wave = _select_wave(ready)
+            # Captured as plain values before commit/close below - expire_on_commit means every
+            # attribute on `run`/`plan`/each task in `wave` would otherwise need a lazy-load
+            # against a Session that's about to be closed (DetachedInstanceError).
+            wave_task_ids = [t.id for t in wave]
+            plan_id = plan.id
+            plan_version = plan.version
+            run.current_task_id = wave_task_ids[0]
             db.add(run)
-            db.flush()
+            db.commit()
+            project_id = run.project_id
+            db.close()
 
-            project = db.query(Project).filter(Project.id == run.project_id).one_or_none()
-            context_engine = ContextEngine(db)
-            isolation = WorkspaceIsolationManager(db)
-            outcome = await _run_one_task(
-                db,
-                run=run,
-                project=project,
-                task=task,
-                plan=plan,
-                context_engine=context_engine,
-                isolation=isolation,
-                provider_name=provider_name,
-                model=model,
-                api_key=api_key,
-                cancellation=cancellation,
-                loop_detector=loop_detector,
-                budget=budget,
-                replanning_enabled=settings.enable_replanning,
+            # Concurrency unit: each wave member opens its own Session (see
+            # _run_task_wave_member) - none of them share `db` above, which stays closed for the
+            # whole gather so this process doesn't hold an idle connection while the wave runs.
+            results = await asyncio.gather(
+                *(
+                    _run_task_wave_member(
+                        db_factory=db_factory,
+                        run_id=run_id,
+                        project_id=project_id,
+                        plan_id=plan_id,
+                        task_id=wave_task_id,
+                        provider_name=provider_name,
+                        model=model,
+                        api_key=api_key,
+                        cancellation=cancellation,
+                        loop_detector=loop_detector,
+                        budget=budget,
+                        replanning_enabled=True,
+                    )
+                    for wave_task_id in wave_task_ids
+                )
             )
 
-            if outcome.signal == "run_should_stop":
+            db = db_factory()
+            run = OrchestrationRunRepository(db).get(run_id)
+            project = db.query(Project).filter(Project.id == project_id).one_or_none()
+
+            stopped = next((r for r in results if r[1].signal == "run_should_stop"), None)
+            if stopped is not None:
                 run_repo = OrchestrationRunRepository(db)
                 if cancellation.is_cancelled:
                     run_repo.transition(run, "cancelled")
@@ -948,18 +1208,37 @@ async def _run_orchestration_inner(
                         payload={"reason": cancellation.reason},
                     )
                 else:
-                    run_repo.transition(run, "failed", error_code="budget_exceeded")
+                    # waiting_for_user, NOT failed: the run stopped because the user ran out of
+                    # credits/budget, which they can fix by topping up - spec section 18's
+                    # "позволяет продолжить после пополнения". `failed` is terminal with no
+                    # outgoing transition, so parking here is what makes resume_run() able to
+                    # pick the run back up (it re-readies the budget-skipped tasks).
+                    run_repo.transition(
+                        run,
+                        "waiting_for_user",
+                        error_code="budget_exceeded",
+                        error_message=stopped[1].detail or "Бюджет запуска исчерпан",
+                    )
                     events_bus.emit(
                         db,
                         run_id=run.id,
-                        event_type="run_failed",
-                        payload={"reason": "budget_exceeded"},
+                        event_type="waiting_for_user",
+                        payload={
+                            "reason": "budget_exceeded",
+                            "detail": stopped[1].detail,
+                            "credits_used": run.credits_used,
+                        },
                     )
                 db.commit()
                 return
 
-            if outcome.signal == "replan":
-                if not replan_gate.can_replan(current_plan_version=plan.version):
+            # If several wave members request a replan at once, the first (wave order) is used -
+            # replanning replaces the rest of the plan wholesale regardless of how many tasks
+            # failed around the same time, so one is enough context for generate_replan.
+            replan_hit = next((r for r in results if r[1].signal == "replan"), None)
+            if replan_hit is not None:
+                failed_task_id, outcome, evidence_json = replan_hit
+                if not replan_gate.can_replan(current_plan_version=plan_version):
                     OrchestrationRunRepository(db).transition(
                         run, "failed", error_message="replan limit reached"
                     )
@@ -975,18 +1254,20 @@ async def _run_orchestration_inner(
                 OrchestrationRunRepository(db).transition(run, "replanning")
                 db.commit()
 
-                completed_tasks = [t for t in plan_tasks if t.status == "completed"]
+                task_repo = AgentTaskRepository(db)
+                completed_tasks = [
+                    t for t in task_repo.list_by_plan(plan_id) if t.status == "completed"
+                ]
+                failed_task = task_repo.get(failed_task_id)
                 evidence = (
-                    TaskEvidence.model_validate_json(task.evidence_json)
-                    if task.evidence_json
-                    else None
+                    TaskEvidence.model_validate_json(evidence_json) if evidence_json else None
                 )
                 assert outcome.evaluation is not None
                 generation = await generate_replan(
                     original_request=run.original_request or "",
                     context_summary=run.context_summary or "",
                     completed_tasks=completed_tasks,
-                    failed_task=task,
+                    failed_task=failed_task,
                     evaluation=outcome.evaluation,
                     evidence=evidence,
                     provider_name=provider_name,
@@ -997,7 +1278,7 @@ async def _run_orchestration_inner(
                 loop_detector.record_plan(
                     json.dumps(sorted(t.local_id for t in generation.plan.tasks))
                 )
-                reason = summarize_replan_reason(outcome.evaluation, task)
+                reason = summarize_replan_reason(outcome.evaluation, failed_task)
                 await _persist_new_plan(
                     db,
                     run=run,
@@ -1010,8 +1291,9 @@ async def _run_orchestration_inner(
                 db.commit()
                 continue
 
-            # "completed" / "waiting_for_user" / "failed" (single task failed without a replan,
-            # e.g. replanning disabled) - loop again; refresh_readiness reflects the consequences.
+            # Every wave member landed on "completed" / "waiting_for_user" / "failed" (no stop or
+            # replan signal) - loop again; refresh_readiness reflects all of the wave's
+            # consequences at once.
             db.commit()
         finally:
             db.close()
@@ -1075,3 +1357,52 @@ def launch_run_in_background(
             logger.error("orchestration run %s background task raised", key, exc_info=exc)
 
     task.add_done_callback(_on_done)
+
+
+def recover_stranded_runs(db_factory: Callable[[], Session] | None = None) -> int:
+    """Restart recovery: relaunch runs that were mid-flight when this process last died.
+
+    An OrchestrationRun is a DB row, not in-memory state, and run_orchestration() is written to be
+    re-entrant on an in-progress run (it re-reads the persisted plan/task statuses rather than
+    replanning - see TestRestartSafety), so recovery is just "find the stranded rows and drive
+    them again". Without this the rows are durable but nothing ever picks them back up, and a
+    backend crash strands those runs forever.
+
+    Called from main.py's lifespan on startup. Returns how many runs were relaunched. Never
+    raises: a failure to recover must not stop the API from booting.
+    """
+    factory = db_factory or SessionLocal
+    relaunched = 0
+    try:
+        db = factory()
+        try:
+            stranded = OrchestrationRunRepository(db).list_resumable()
+            # Capture as plain values - the session closes before the runs are driven.
+            pending = [(r.id, r.provider or settings.provider_name, r.model or "") for r in stranded]
+        finally:
+            db.close()
+
+        for run_id, provider_name, model in pending:
+            if str(run_id) in _background_tasks:
+                continue  # already being driven by this process
+            api_key = (
+                resolve_api_key_for_provider(provider_name)
+                or getattr(settings, f"{provider_name}_api_key", None)
+                or ""
+            )
+            if not api_key:
+                logger.warning(
+                    "orchestration restart recovery: skipping run %s - no API key for provider %s",
+                    run_id,
+                    provider_name,
+                )
+                continue
+            launch_run_in_background(
+                run_id, provider_name=provider_name, model=model, api_key=api_key
+            )
+            relaunched += 1
+        if relaunched:
+            logger.info("orchestration restart recovery: relaunched %d stranded run(s)", relaunched)
+    except Exception:  # noqa: BLE001 - startup must never be blocked by recovery failing
+        logger.exception("orchestration restart recovery failed")
+    return relaunched

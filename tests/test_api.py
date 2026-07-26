@@ -77,44 +77,80 @@ def _write_minimal_project_files(root: Path) -> None:
         requirements.write_text("aiogram\n", encoding="utf-8")
 
 
-def _fake_run_product_pipeline(
-    calls: list, *, extra_text: str = "", requested_service=None, requested_secret=None
-):
-    """Builds a fake run_product_pipeline() (backend/src/services/agent/product_pipeline.py,
-    chat.py's only turn-producer now) that skips real LLM/tool calls entirely - a single
-    TextDelta+AgentDone, none of the pipeline's own brief/UX/visual/preview/review stages.
+@pytest.fixture
+def orchestration_stub(monkeypatch, tmp_path, db):
+    """chat.py's only turn-producer is now the persistent orchestration engine, so these
+    stream tests fake the engine's ONE executor seam (`_build_executor`, the same seam
+    test_orchestration_engine_e2e.py uses) instead of a pipeline coroutine. Everything after
+    the run - verify/commit/deploy-gate/deploy-wait in _orchestration_event_source - stays real,
+    which is what these tests are actually about.
 
-    It writes the minimal required workspace files (see _write_minimal_project_files) so the
-    router's ensure_required_files check passes and these tests exercise the real verify/deploy
-    pipeline rather than dead-ending at "agent did not produce required files".
+    Returns a `install(...)` callable; `install(...).calls` records each executed task.
     """
-    from src.services.agent.events import AgentDone, TextDelta
+    from tests.conftest import TestingSessionLocal
 
-    async def _fake(
-        *,
-        project=None,
-        provider_name,
-        model,
-        api_key,
-        workspace,
-        system_prompt,
-        history,
-        user_message,
-        images=None,
-    ):
-        calls.append({"history": history, "user_message": user_message, "provider": provider_name})
-        if requested_service:
-            workspace.requested_services.append(requested_service)
-        if requested_secret:
-            workspace.requested_secrets.append(requested_secret)
-        _write_minimal_project_files(workspace.root)
-        yield TextDelta(text="Готово: ")
-        yield TextDelta(text=user_message[:20])
-        if extra_text:
-            yield TextDelta(text=extra_text)
-        yield AgentDone(reason="stop")
+    from src.api.routers import chat as chat_router
+    from src.core.config import settings
+    from src.services import project_git
+    from src.services import workspace as workspace_module
+    from src.services.orchestration import engine as orchestration_engine
+    from src.services.orchestration.executors import AgentExecutionResult
+    from src.services.orchestration.schemas import TaskResult
 
-    return _fake
+    monkeypatch.setattr(settings, "generated_projects_dir", str(tmp_path))
+
+    # The engine runs on its own SessionLocal (a separate connection), which would not see this
+    # test's uncommitted transaction - point both it and chat.py's own reference at this test's
+    # connection. Same rationale as test_chat_orchestration.py's identical fixture.
+    def _session_factory():
+        return TestingSessionLocal(bind=db.get_bind())
+
+    monkeypatch.setattr(chat_router, "SessionLocal", _session_factory)
+    monkeypatch.setattr(orchestration_engine, "SessionLocal", _session_factory)
+
+    def _dir(project_id):
+        # engine.py imports services.workspace.project_dir AS project_workspace_dir, so the
+        # engine and chat.py's own post-run checks MUST resolve the same directory - only the
+        # git init the engine's first transaction needs is added here.
+        root = workspace_module.project_dir(project_id)
+        project_git.init_repo_if_needed(root)
+        return root
+
+    monkeypatch.setattr(orchestration_engine, "project_workspace_dir", _dir)
+
+    class _Stub:
+        def __init__(self, requested_service=None, requested_secret=None):
+            self.calls: list = []
+            self._service = requested_service
+            self._secret = requested_secret
+
+        async def execute(self, contract, context, cancellation):
+            self.calls.append(
+                {
+                    "task_goal": contract.task_goal,
+                    "project_goal": contract.project_goal,
+                    "user_message": contract.project_goal,
+                }
+            )
+            _write_minimal_project_files(context.workspace_root)
+            return AgentExecutionResult(
+                task_result=TaskResult(
+                    status="completed",
+                    summary="Готово",
+                    requested_services=[self._service] if self._service else [],
+                    requested_secrets=[self._secret] if self._secret else [],
+                ),
+                build_result={"ok": True, "log_tail": "ok"},
+            )
+
+    def _install(*, requested_service=None, requested_secret=None) -> _Stub:
+        stub = _Stub(requested_service=requested_service, requested_secret=requested_secret)
+        monkeypatch.setattr(
+            orchestration_engine, "_build_executor", lambda kind, *, db, mcp_repo: stub
+        )
+        return stub
+
+    return _install
 
 
 def test_health(client):
@@ -712,20 +748,21 @@ def test_project_stop_cancels_active_deployments(client, db, monkeypatch):
     assert deployment.status == "cancelled"
 
 
-def test_stream_prompt_generates_artifact_and_queues_deployment(client, monkeypatch, tmp_path):
+def test_stream_prompt_generates_artifact_and_queues_deployment(
+    client, monkeypatch, orchestration_stub
+):
     from src.api.routers import chat as chat_router
     from src.core.config import settings
 
-    monkeypatch.setattr(settings, "generated_projects_dir", str(tmp_path))
     monkeypatch.setattr(settings, "openai_api_key", "test-key")
-    calls: list = []
+    stub = orchestration_stub()
+    calls = stub.calls
     deployments = []
 
     def fake_create_deployment(db, project):
         deployments.append(project.id)
         return _fake_live_deployment(db, project)
 
-    monkeypatch.setattr(chat_router, "run_product_pipeline", _fake_run_product_pipeline(calls))
     monkeypatch.setattr(chat_router, "create_deployment_for_project", fake_create_deployment)
 
     headers = auth_tokens(client, "stream@airuntime.dev")
@@ -768,26 +805,19 @@ def test_stream_prompt_generates_artifact_and_queues_deployment(client, monkeypa
     assert updated["status"] == "live"
 
 
-def test_request_service_tool_creates_project_service_row(client, monkeypatch, tmp_path, db):
+def test_request_service_tool_creates_project_service_row(
+    client, monkeypatch, db, orchestration_stub
+):
     from src.api.routers import chat as chat_router
     from src.core.config import settings
     from src.db.models.project_service import ProjectService
-    from src.services.agent.tools import ServiceRequest
 
-    monkeypatch.setattr(settings, "generated_projects_dir", str(tmp_path))
     monkeypatch.setattr(settings, "openai_api_key", "test-key")
-    calls: list = []
 
     def fake_create_deployment(db, project):
         return _fake_live_deployment(db, project)
 
-    monkeypatch.setattr(
-        chat_router,
-        "run_product_pipeline",
-        _fake_run_product_pipeline(
-            calls, requested_service=ServiceRequest(kind="postgres", reason="нужна БД")
-        ),
-    )
+    orchestration_stub(requested_service="postgres")
     monkeypatch.setattr(chat_router, "create_deployment_for_project", fake_create_deployment)
 
     headers = auth_tokens(client, "request-service@airuntime.dev")
@@ -816,31 +846,22 @@ def test_request_service_tool_creates_project_service_row(client, monkeypatch, t
     assert row.kind == "postgres"
 
 
-def test_requesting_service_credential_as_secret_is_suppressed(client, monkeypatch, tmp_path, db):
+def test_requesting_service_credential_as_secret_is_suppressed(
+    client, monkeypatch, db, orchestration_stub
+):
     """Regression test: the agent sometimes calls request_service for a database AND also
     request_secret for its password (e.g. POSTGRES_PASSWORD) - the platform already generates
     and wires up that credential automatically, so the user must never be asked to fill it in."""
     from src.api.routers import chat as chat_router
     from src.core.config import settings
     from src.db.models.secret import Secret
-    from src.services.agent.tools import ServiceRequest
 
-    monkeypatch.setattr(settings, "generated_projects_dir", str(tmp_path))
     monkeypatch.setattr(settings, "openai_api_key", "test-key")
-    calls: list = []
 
     def fake_create_deployment(db, project):
         return _fake_live_deployment(db, project)
 
-    monkeypatch.setattr(
-        chat_router,
-        "run_product_pipeline",
-        _fake_run_product_pipeline(
-            calls,
-            requested_service=ServiceRequest(kind="postgres", reason="нужна БД"),
-            requested_secret=("POSTGRES_PASSWORD", "Пароль к базе данных PostgreSQL"),
-        ),
-    )
+    orchestration_stub(requested_service="postgres", requested_secret="POSTGRES_PASSWORD")
     monkeypatch.setattr(chat_router, "create_deployment_for_project", fake_create_deployment)
 
     headers = auth_tokens(client, "service-credential@airuntime.dev")
@@ -868,18 +889,19 @@ def test_requesting_service_credential_as_secret_is_suppressed(client, monkeypat
     assert secret is None
 
 
-def test_stream_accepts_files_already_linked_to_user_message(client, monkeypatch, tmp_path):
+def test_stream_accepts_files_already_linked_to_user_message(
+    client, monkeypatch, db, orchestration_stub
+):
     from src.api.routers import chat as chat_router
     from src.core.config import settings
 
-    monkeypatch.setattr(settings, "generated_projects_dir", str(tmp_path))
     monkeypatch.setattr(settings, "openai_api_key", "test-key")
-    calls: list = []
+    stub = orchestration_stub()
+    calls = stub.calls
 
     def fake_create_deployment(db, project):
         return _fake_live_deployment(db, project)
 
-    monkeypatch.setattr(chat_router, "run_product_pipeline", _fake_run_product_pipeline(calls))
     monkeypatch.setattr(chat_router, "create_deployment_for_project", fake_create_deployment)
 
     headers = auth_tokens(client, "stream-file@airuntime.dev")
@@ -913,18 +935,29 @@ def test_stream_accepts_files_already_linked_to_user_message(client, monkeypatch
 
     assert response.status_code == 200
     assert "data: [DONE]" in response.text
-    assert "context" in response.text
     assert calls
-    assert "Attachment: brief.txt" in calls[0]["user_message"]
-    assert "hero must say hello from attachment" in calls[0]["user_message"]
+
+    # The attachment context is composed into the turn's request text before the engine is
+    # handed it, and the engine persists that verbatim as OrchestrationRun.original_request -
+    # so that row is where "the agent actually received the attachment" is now observable.
+    from src.db.models.orchestration_run import OrchestrationRun
+
+    db.expire_all()
+    run = (
+        db.query(OrchestrationRun)
+        .filter(OrchestrationRun.project_id == uuid.UUID(project["id"]))
+        .one()
+    )
+    assert "Attachment: brief.txt" in run.original_request
+    assert "hero must say hello from attachment" in run.original_request
 
 
-def test_stream_subdomain_from_prompt_sets_deploy_subdomain(client, monkeypatch, tmp_path):
+def test_stream_subdomain_from_prompt_sets_deploy_subdomain(
+    client, monkeypatch, orchestration_stub
+):
     from src.api.routers import chat as chat_router
-    from src.core.config import settings
 
-    monkeypatch.setattr(settings, "generated_projects_dir", str(tmp_path))
-    calls: list = []
+    orchestration_stub()
     deployments: list[str | None] = []
 
     def fake_create_deployment(db, project):
@@ -933,7 +966,6 @@ def test_stream_subdomain_from_prompt_sets_deploy_subdomain(client, monkeypatch,
             project.deployment_url = f"https://{project.deploy_subdomain}.airuntime.ru"
         return _fake_live_deployment(db, project)
 
-    monkeypatch.setattr(chat_router, "run_product_pipeline", _fake_run_product_pipeline(calls))
     monkeypatch.setattr(chat_router, "create_deployment_for_project", fake_create_deployment)
 
     headers = auth_tokens(client, "subdomain@airuntime.dev")
@@ -966,15 +998,14 @@ def test_stream_subdomain_from_prompt_sets_deploy_subdomain(client, monkeypatch,
     assert deployments == ["test"]
 
 
-def test_stream_prompt_reclassifies_project_before_generation(client, monkeypatch, tmp_path):
+def test_stream_prompt_reclassifies_project_before_generation(
+    client, monkeypatch, orchestration_stub
+):
     from src.api.routers import chat as chat_router
-    from src.core.config import settings
 
-    monkeypatch.setattr(settings, "generated_projects_dir", str(tmp_path))
-    calls: list = []
+    orchestration_stub()
     deployments = []
 
-    monkeypatch.setattr(chat_router, "run_product_pipeline", _fake_run_product_pipeline(calls))
     monkeypatch.setattr(chat_router, "commit_snapshot", lambda artifact_path, message: "abc123")
 
     def fake_create_deployment(db, project):
@@ -1009,15 +1040,15 @@ def test_stream_prompt_reclassifies_project_before_generation(client, monkeypatc
     assert updated["status"] == "needs_configuration"
 
 
-def test_project_combining_site_and_bot_signals_is_classified_mixed(client, monkeypatch, tmp_path):
+def test_project_combining_site_and_bot_signals_is_classified_mixed(
+    client, monkeypatch, orchestration_stub
+):
     from src.api.routers import chat as chat_router
     from src.core.config import settings
 
-    monkeypatch.setattr(settings, "generated_projects_dir", str(tmp_path))
     monkeypatch.setattr(settings, "openai_api_key", "test-key")
-    calls: list = []
+    orchestration_stub()
 
-    monkeypatch.setattr(chat_router, "run_product_pipeline", _fake_run_product_pipeline(calls))
     monkeypatch.setattr(chat_router, "commit_snapshot", lambda artifact_path, message: "abc123")
 
     headers = auth_tokens(client, "mixed-project@airuntime.dev")

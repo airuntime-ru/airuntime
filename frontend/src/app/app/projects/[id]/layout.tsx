@@ -119,6 +119,7 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
   const tabs = [
     { href: base, label: "Обзор" },
     { href: `${base}/chat`, label: "Чат" },
+    { href: `${base}/orchestration`, label: "Оркестрация" },
     { href: `${base}/deployments`, label: "Деплои" },
     { href: `${base}/versions`, label: "Файлы" },
     { href: `${base}/logs`, label: "Логи" },
