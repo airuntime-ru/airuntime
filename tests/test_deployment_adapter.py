@@ -68,9 +68,12 @@ class _FakeNetworks:
 
 
 class _FakeImage:
-    def __init__(self, image_id: str, tags: list[str]) -> None:
+    def __init__(
+        self, image_id: str, tags: list[str], labels: dict[str, str] | None = None
+    ) -> None:
         self.id = image_id
         self.tags = tags
+        self.attrs = {"Config": {"Labels": labels or {}}}
 
 
 class _FakeImages:
@@ -119,13 +122,13 @@ def test_deploy_uses_traefik_labels_without_host_ports(monkeypatch):
     )
 
 
-def test_deploy_maps_host_port_without_public_network(monkeypatch):
+def test_deploy_maps_host_port_and_returns_local_url_without_public_network(monkeypatch):
     client = _FakeDockerClient()
     monkeypatch.setattr(docker_adapter.docker, "from_env", lambda: client)
     monkeypatch.setattr(settings, "deployment_public_network", None)
     monkeypatch.setattr(settings, "deployment_expose_host_ports", True)
 
-    DockerDeploymentAdapter().deploy(
+    result = DockerDeploymentAdapter().deploy(
         DeployRequest(
             project_id="22222222-2222-4222-8222-222222222222",
             image_ref="airuntime-generated-site:latest",
@@ -136,6 +139,7 @@ def test_deploy_maps_host_port_without_public_network(monkeypatch):
     assert client.containers.run_kwargs["ports"] == {"80/tcp": 19962}
     assert client.containers.run_kwargs["network"] is None
     assert "traefik.enable" not in client.containers.run_kwargs["labels"]
+    assert result["url"] == "http://localhost:19962"
 
 
 def test_deploy_attaches_public_network_when_service_network_given(monkeypatch):
@@ -204,12 +208,28 @@ def test_remove_project_images_matches_by_id_fragment_across_type_prefixes(monke
 
     site_image = _FakeImage("img-site", [f"airuntime-generated-site-{id_fragment}:latest"])
     mixed_image = _FakeImage("img-mixed", [f"airuntime-generated-mixed-{id_fragment}:latest"])
+    scratch_image = _FakeImage("img-scratch", [f"airuntime-scratch-{id_fragment}:latest"])
+    labeled_image = _FakeImage(
+        "img-labeled", ["custom-test-name:latest"], {"airuntime.project_id": project_id}
+    )
     other_project_image = _FakeImage(
         "img-other", [f"airuntime-generated-site-{other_project_id[:12]}:latest"]
     )
     unrelated_image = _FakeImage("img-unrelated", ["nginx:alpine"])
-    client.images._images = [site_image, mixed_image, other_project_image, unrelated_image]
+    client.images._images = [
+        site_image,
+        mixed_image,
+        scratch_image,
+        labeled_image,
+        other_project_image,
+        unrelated_image,
+    ]
 
     DockerDeploymentAdapter().remove_project_images(project_id)
 
-    assert set(client.images.removed_ids) == {"img-site", "img-mixed"}
+    assert set(client.images.removed_ids) == {
+        "img-site",
+        "img-mixed",
+        "img-scratch",
+        "img-labeled",
+    }

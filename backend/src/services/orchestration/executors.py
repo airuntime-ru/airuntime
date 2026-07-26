@@ -123,6 +123,10 @@ class ScopedWorkspaceTools:
     def build_succeeded(self) -> bool | None:
         return self._inner.build_succeeded
 
+    @property
+    def last_build_result(self) -> dict | None:
+        return getattr(self._inner, "last_build_result", None)
+
     def _path_allowed(self, path: str) -> bool:
         if self._forbidden_paths == ["*"]:
             return False
@@ -304,9 +308,19 @@ class _BaseAgentTurnExecutor:
             else [],
             unresolved=[done.error] if done.error and status != "completed" else [],
         )
+        # Prefer the full worker payload when the agent called build_project; fall back to the
+        # bool flag alone so validation still sees a build_result rather than treating a mid-turn
+        # build as "never attempted".
+        build_result: dict | None = None
+        if workspace is not None:
+            if workspace.last_build_result is not None:
+                build_result = workspace.last_build_result
+            elif workspace.build_succeeded is not None:
+                build_result = {"ok": bool(workspace.build_succeeded)}
         return AgentExecutionResult(
             task_result=task_result,
             usage=done.usage,
+            build_result=build_result,
             error=done.error if status == "failed" else None,
         )
 

@@ -1,19 +1,12 @@
-"""Periodic sweep for locally-built Docker images that Codex creates on its own while
-self-testing a turn (e.g. `docker build -t some-name .` to smoke-test a build, `docker run
---rm ...` to try it - see agent/codex_runtime.py's bridge instructions, which grant it plain
-shell/Docker access). These are deliberately outside the platform's own build_project_image
-pipeline, so there's no naming convention to clean them up by, unlike the per-project
-`airuntime-generated-*` images (see docker_adapter.py's remove_project_images). Confirmed live
-2026-07-23: a single test session left `alfa-romeo-service`, `alpha-romeo-service`,
-`alfa-cabinet`, `beer-site` etc. sitting in `docker images` with nothing ever removing them.
+"""Periodic sweep for explicitly project-scoped scratch images created by Codex self-tests.
 
 Three independent checks, all required, so this can run unattended on a schedule without risking
 a platform-managed or currently-needed image:
 - Age gate: never touch anything created within the last _MIN_AGE_SECONDS, so this can't race a
   build that's still in progress.
-- Prefix allowlist: never touch anything tagged "airuntime-*" - covers every image this platform
-  builds itself (per-project deploys, backend/worker/frontend/codex/django-admin all share this
-  prefix per Compose's default `<project>-<service>` build naming).
+- Positive ownership allowlist: only touch `airuntime-scratch-*`. Unknown host images are never
+  AIRuntime's property; treating "not airuntime-*" as disposable previously deleted unrelated
+  local images on worker startup.
 - Reference check: never touch an image that any container (running OR stopped) still points at -
   covers every pulled base image (postgres, redis, traefik, minio, the request_service presets,
   ...), since Compose's `restart: unless-stopped` containers for those keep existing as container
@@ -30,7 +23,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _MIN_AGE_SECONDS = 2 * 3600
-_PROTECTED_PREFIX = "airuntime-"
+_SCRATCH_PREFIX = "airuntime-scratch-"
 
 
 def _parse_docker_created(value: Any) -> float | None:
@@ -52,7 +45,7 @@ def _parse_docker_created(value: Any) -> float | None:
 
 
 def sweep_unrecognized_images(client: Any) -> list[str]:
-    """Remove old, unreferenced, non-platform images. Returns the tag(s) of everything removed."""
+    """Remove old, unreferenced AIRuntime scratch images. Returns removed tag(s)."""
     removed: list[str] = []
     try:
         images = client.images.list()
@@ -72,7 +65,7 @@ def sweep_unrecognized_images(client: Any) -> list[str]:
         tags = getattr(image, "tags", None) or []
         if not tags:
             continue  # dangling - deploy.sh's `docker image prune` already handles these
-        if any(tag.startswith(_PROTECTED_PREFIX) for tag in tags):
+        if not any(tag.startswith(_SCRATCH_PREFIX) for tag in tags):
             continue
         if image.id in referenced_image_ids:
             continue

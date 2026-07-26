@@ -67,6 +67,7 @@ from src.services.orchestration.budget import (
 )
 from src.services.orchestration.cancellation import CancellationToken
 from src.services.orchestration.capability_provider import (
+    PLATFORM_CAPABILITY_BUILD_CHECK,
     McpCapabilityProvider,
     PlatformToolCapabilityProvider,
     SkillCapabilityProvider,
@@ -105,10 +106,12 @@ from src.services.orchestration.repository import (
 )
 from src.services.orchestration.role_policy import get_role_policy
 from src.services.orchestration.schemas import (
+    CapabilityContext,
     ContextItem,
     FailureClass,
     PlannedTask,
     SpecialistRole,
+    TaskContract,
     TaskEvidence,
     WriteScope,
 )
@@ -140,6 +143,43 @@ _RETRYABLE_DECISIONS = frozenset(
         FailureDecision.REPLACE_SKILL,
     }
 )
+
+
+async def _ensure_build_evidence(
+    *,
+    contract: TaskContract,
+    project_id: object,
+    existing: dict | None,
+) -> dict | None:
+    """Server-side build evidence for contracts that declared a build validation step.
+
+    Coding executors (Codex/HTTP) only populate build_result when the agent happened to call
+    build_project mid-turn. Without a fallback here, every Implementer/UI/BuildFixer task that
+    skipped that tool fails validation with "no build_result evidence is present" - the exact
+    loop that burns replan budget on otherwise-valid work. Mirrors evidence.run_static_checks:
+    declared validation levels must be collected by the server, not left as an agent courtesy.
+    """
+    if existing is not None:
+        return existing
+    if not any(step.kind == "build" for step in contract.validation_steps):
+        return None
+    result = await PlatformToolCapabilityProvider().invoke(
+        PLATFORM_CAPABILITY_BUILD_CHECK,
+        {},
+        CapabilityContext(
+            project_id=uuid.UUID(str(project_id)),
+            run_id=contract.run_id,
+            task_id=contract.task_id,
+            role=contract.role,
+        ),
+    )
+    if isinstance(result.output, dict) and result.output:
+        return result.output
+    return {
+        "ok": False,
+        "log": result.error or "build_check produced no output",
+        "log_tail": (result.error or "build_check produced no output")[-4000:],
+    }
 
 
 def _select_workspace_mode(
@@ -674,10 +714,15 @@ async def _run_one_task(
                 payload={"note": f"Подключаю сервисы: {', '.join(service_requests)}"},
             )
 
+        build_result = await _ensure_build_evidence(
+            contract=contract,
+            project_id=project.id,
+            existing=agent_result.build_result,
+        )
         outcome = git_txn.complete(
             handle,
             result=agent_result.task_result,
-            build_result=agent_result.build_result,
+            build_result=build_result,
             lint_result=agent_result.lint_result,
             test_result=agent_result.test_result,
             preview_result=agent_result.preview_result,

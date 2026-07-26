@@ -82,6 +82,16 @@ _CODEX_BRIDGE_INSTRUCTIONS = """\
 docker-compose.yml для маршрутизации и НЕ настраивай Traefik/прокси/домены - публичный URL и \
 Traefik-labels вешает платформа после хода. Для сайтов HTTP в контейнере должен слушать порт 80.
 
+Контракт файлов проекта обязателен: для сайта или mixed-проекта точка входа должна находиться
+в `public/index.html` (CSS/JS клади рядом в `public/`), для Telegram-бота — в `app.py`.
+Даже если собственный Dockerfile технически умеет отдать корневой `index.html`, платформа не
+считает такой сайт готовым без `public/index.html`.
+
+Для локальной Docker-проверки не создавай произвольно названные образы. Собирай временный образ
+только так: `docker build --label airuntime.managed=true --label
+airuntime.project_id="$AIRUNTIME_PROJECT_ID" -t "$AIRUNTIME_SCRATCH_IMAGE_PREFIX:latest" .`.
+Платформа удалит этот project-scoped образ вместе с проектом.
+
 Чтобы запросить секрет от пользователя (Telegram-токен, чужой API-ключ) - создай файл \
 .airuntime/requests/secret__<KEY>.json с содержимым {"key": "<KEY>", "reason": "..."}.
 
@@ -122,14 +132,15 @@ def _submit_run(
     timeout_seconds: int,
     job_id: str | None = None,
 ) -> str:
-    # A caller-supplied job_id (CodexAgentSession.correlation_id, set by executors.py to the
-    # orchestration AgentTask's own id) makes the eventual Docker container name (codex_worker.py
-    # names it after this same job_id) deterministically derivable from a task id alone - no
-    # separate run-id registry needed for cancellation.py's cancel_codex_run to find and stop the
-    # right container. Falls back to a fresh id for every non-orchestrated caller (unchanged).
-    run_id = job_id or uuid.uuid4().hex
+    # Every attempt needs its own event key/container identity. Reusing the orchestration task id
+    # here left the previous attempt's terminal marker and JSONL tail in Redis; the next retry
+    # consumed those stale events and could also collide with the still-removing container name.
+    # `job_id` remains the stable task correlation id used by cancellation, but `run_id` is always
+    # unique for this concrete attempt.
+    run_id = uuid.uuid4().hex
     job = {
         "job_id": run_id,
+        "correlation_id": job_id,
         "action": "codex_run",
         "project_id": project_id,
         "cwd": cwd,
@@ -469,7 +480,11 @@ class CodexAgentSession:
             system_prompt=self.system_prompt, history=history, user_message=user_message
         )
         project_id = self.workspace.project_id if self.workspace else None
-        cwd = f"{settings.generated_projects_dir}/{project_id}" if project_id else None
+        # The orchestration engine may hand us an isolated git worktree rather than the shared
+        # project checkout. Using only project_id here silently redirected Codex back to the main
+        # checkout, so evidence/rollback inspected a different directory from the one Codex
+        # edited. Pass the exact acquired workspace through to the worker.
+        cwd = str(self.workspace.root) if self.workspace else None
 
         image_paths: list[str] = []
         if images and self.workspace:

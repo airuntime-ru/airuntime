@@ -15,6 +15,7 @@ from src.api.dto.project import (
 from src.api.dto.project_logs import ProjectLogsResponse
 from src.api.dto.project_runtime import ProjectRuntimeLimitsResponse
 from src.db.models.chat import Chat
+from src.db.models.chat_file import ChatFile
 from src.db.models.project import Project
 from src.db.models.secret import Secret
 from src.db.models.user import User
@@ -37,6 +38,7 @@ from src.services.project_subdomain import (
     resolve_deploy_subdomain,
 )
 from src.services.secrets import TELEGRAM_BOT_TOKEN_KEY
+from src.services.storage import storage_service
 from src.services.system_settings import get_system_setting_number
 from src.services.workspace import project_dir
 
@@ -231,38 +233,66 @@ def delete_project(
     )
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    # Best-effort, not best-effort-and-silent: deletion must not get stuck on a Docker/worker
-    # hiccup (the user asked their data gone, a transient failure shouldn't trap them with an
-    # undeletable project) - but a failure here means containers/volumes/images for this project
-    # are about to become unrecoverable orphans the moment the row below is gone, so it has to be
-    # logged loudly enough to find and clean up by hand.
+    # A 200 response is a deletion guarantee, not "the database row disappeared while runtime
+    # resources may have been orphaned". Keep the row on any cleanup failure so the operation is
+    # safely retryable and operators still have the ownership metadata needed for recovery.
     cleanup_result = submit_control_job(action="cleanup", project_id=str(project.id))
     if not cleanup_result or not cleanup_result.get("ok"):
-        logger.warning(
-            "Docker cleanup did not confirm success for deleted project %s (result=%r) - "
-            "containers/volumes/images for this project may be orphaned; check `docker ps -a` / "
-            "`docker images` for name/label airuntime.project_id=%s",
+        logger.error(
+            "Refusing to delete project %s because runtime cleanup was not confirmed: %r",
             project.id,
             cleanup_result,
-            project.id,
         )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Не удалось подтвердить очистку контейнеров и Docker-ресурсов. Повторите удаление.",
+        )
+
+    object_keys = [
+        row.object_key for row in db.query(ChatFile).filter(ChatFile.project_id == project.id).all()
+    ]
+    try:
+        for object_key in object_keys:
+            storage_service.delete_object(object_key)
+    except Exception as storage_exc:  # noqa: BLE001 - preserve the DB row for a safe retry
+        logger.exception("Object storage cleanup failed for project %s", project.id)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Не удалось удалить загруженные файлы проекта. Повторите удаление.",
+        ) from storage_exc
+
     workspace_path = project_dir(project.id)
-    shutil.rmtree(workspace_path, ignore_errors=True)
+    try:
+        shutil.rmtree(workspace_path)
+    except FileNotFoundError:
+        pass
+    except OSError as workspace_exc:
+        logger.exception("Workspace cleanup failed for project %s", project.id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Не удалось удалить файлы проекта. Повторите удаление.",
+        ) from workspace_exc
     if workspace_path.exists():
-        logger.warning("Workspace directory still present after rmtree: %s", workspace_path)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Файлы проекта остались на диске после удаления. Повторите операцию.",
+        )
     # DNS cleanup must run while deploy_subdomain / resolved host are still available.
     # Best-effort: a Cloudflare outage must not leave the project undeletable.
     if project.type in ("website", "mixed"):
         subdomain = resolve_deploy_subdomain(project)
         try:
             delete_dns_for_website_deploy(subdomain)
-        except Exception as dns_exc:  # noqa: BLE001 - never block project deletion on DNS
-            logger.warning(
-                "Cloudflare DNS cleanup failed for deleted project %s (subdomain=%s): %s",
+        except Exception as dns_exc:  # noqa: BLE001 - keep row so DNS cleanup remains retryable
+            logger.exception(
+                "Cloudflare DNS cleanup failed for project %s (subdomain=%s)",
                 project.id,
                 subdomain,
-                dns_exc,
             )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Не удалось удалить DNS-запись проекта. Повторите удаление.",
+            ) from dns_exc
     db.delete(project)
     db.commit()
     return {"status": "deleted"}

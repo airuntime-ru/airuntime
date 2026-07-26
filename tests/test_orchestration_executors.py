@@ -58,6 +58,7 @@ class _FakeInnerWorkspace:
         self.requested_secrets: list[tuple[str, str]] = []
         self.requested_services: list = []
         self.build_succeeded = None
+        self.last_build_result = None
 
     def call(self, name: str, arguments: dict) -> ToolExecutionResult:
         self.calls.append((name, arguments))
@@ -256,11 +257,44 @@ class TestDriveNormalization:
         assert result.task_result.requested_services == ["postgres"]
 
     @pytest.mark.asyncio
+    async def test_build_result_lifted_from_workspace_last_build_result(self) -> None:
+        # Regression: contracts declare a required "build" validation step for Implementer, but
+        # coding executors used to drop the mid-turn build_project outcome - validation then
+        # failed with "no build_result evidence is present" and burned the replan budget.
+        inner = _FakeInnerWorkspace()
+        inner.build_succeeded = True
+        inner.last_build_result = {"ok": True, "log": "Build succeeded: tag", "log_tail": "ok"}
+        scoped = ScopedWorkspaceTools(inner, contract=_contract())
+
+        result = await _BaseAgentTurnExecutor()._drive(
+            _events(AgentDone(reason="stop")), workspace=scoped
+        )
+
+        assert result.build_result == {
+            "ok": True,
+            "log": "Build succeeded: tag",
+            "log_tail": "ok",
+        }
+
+    @pytest.mark.asyncio
+    async def test_build_result_falls_back_to_build_succeeded_flag(self) -> None:
+        inner = _FakeInnerWorkspace()
+        inner.build_succeeded = False
+        scoped = ScopedWorkspaceTools(inner, contract=_contract())
+
+        result = await _BaseAgentTurnExecutor()._drive(
+            _events(AgentDone(reason="stop")), workspace=scoped
+        )
+
+        assert result.build_result == {"ok": False}
+
+    @pytest.mark.asyncio
     async def test_no_workspace_passed_leaves_requested_lists_empty(self) -> None:
         executor = _BaseAgentTurnExecutor()
         result = await executor._drive(_events(AgentDone(reason="stop")))
         assert result.task_result.requested_secrets == []
         assert result.task_result.requested_services == []
+        assert result.build_result is None
 
 
 class _FakeCapabilityProvider:

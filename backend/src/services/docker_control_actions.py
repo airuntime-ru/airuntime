@@ -11,12 +11,16 @@ import logging
 from typing import Any
 
 from src.db.models.project import Project
-from src.db.models.project_service import ProjectService
 from src.db.session import SessionLocal
 from src.services.artifacts import _telegram_token, try_build_project_image
 from src.services.deployment.docker_adapter import DockerDeploymentAdapter, app_container_name
 from src.services.preview_runner import _preview_network_name, run_preview
-from src.services.project_services import build_connection_env, teardown_service_containers
+from src.services.project_services import (
+    build_connection_env,
+    network_name,
+    project_volumes_root,
+    teardown_service_containers,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -82,24 +86,90 @@ def _run_runtime_health_check(project_id: str) -> dict[str, Any]:
 
 
 def _cancel_codex_run(correlation_id: str) -> dict[str, Any]:
-    """Real `docker stop` for an in-flight Codex container, found by the deterministic name
-    codex_worker.py gives it (`airuntime-codex-{job_id}`, job_id == correlation_id ==
-    orchestration AgentTask.id - see codex_runtime.py's correlation_id). Not finding the
-    container is reported as ok=True (not an error): the run may have already finished
-    naturally between the cancel request being issued and this action executing, which is a
-    race any cancel-a-possibly-already-done-thing operation has to tolerate gracefully."""
+    """Stop every in-flight attempt belonging to one orchestration task."""
     client = DockerDeploymentAdapter().client
-    name = f"airuntime-codex-{correlation_id}"
+    matches = []
     try:
-        container = client.containers.get(name)
-    except Exception:  # noqa: BLE001 - docker.errors.NotFound is the expected case; any other
-        # lookup failure is equally "nothing to stop" from this action's point of view
-        return {"ok": True, "found": False}
-    try:
-        container.stop(timeout=5)
-    except Exception:  # noqa: BLE001 - already stopped/removed between get() and stop() is fine
-        pass
-    return {"ok": True, "found": True}
+        matches = client.containers.list(
+            all=True,
+            filters={"label": f"airuntime.codex_correlation_id={correlation_id}"},
+        )
+    except Exception:  # noqa: BLE001 - keep compatibility with a container from before labels
+        matches = []
+    if not matches:
+        try:
+            matches = [client.containers.get(f"airuntime-codex-{correlation_id}")]
+        except Exception:  # noqa: BLE001 - already finished/removed is a successful no-op
+            return {"ok": True, "found": False}
+    for container in matches:
+        try:
+            container.stop(timeout=5)
+        except Exception:  # noqa: BLE001 - a concurrent natural exit is fine
+            pass
+    return {"ok": True, "found": bool(matches)}
+
+
+def _cleanup_project_resources(project_id: str) -> dict[str, Any]:
+    """Delete and then verify every Docker/host-volume resource owned by a project."""
+    from pathlib import Path
+
+    adapter = DockerDeploymentAdapter()
+    client = adapter.client
+
+    adapter.stop_project(project_id)
+    # Always run sidecar teardown, even if a DB bookkeeping row was already lost: ownership
+    # labels and the deterministic volume root are enough to find the actual resources.
+    teardown_service_containers(client, project_id, remove_volumes=True)
+
+    # Codex/preview/app containers all carry the same ownership label. A project deleted while
+    # generation is still winding down must not leave the task container behind.
+    label_filter = {"label": f"airuntime.project_id={project_id}"}
+    for container in client.containers.list(all=True, filters=label_filter):
+        try:
+            if container.status == "running":
+                container.stop(timeout=10)
+        except Exception:  # noqa: BLE001 - force remove below is the authoritative step
+            pass
+        container.remove(force=True)
+
+    adapter.remove_project_images(project_id)
+
+    for name in (network_name(project_id), _preview_network_name(project_id)):
+        try:
+            client.networks.get(name).remove()
+        except Exception:  # noqa: BLE001 - verified below
+            pass
+
+    remaining_containers = [c.name for c in client.containers.list(all=True, filters=label_filter)]
+    id_fragment = project_id[:12]
+    remaining_images: list[str] = []
+    for image in client.images.list():
+        tags = getattr(image, "tags", None) or []
+        labels = ((getattr(image, "attrs", None) or {}).get("Config") or {}).get("Labels") or {}
+        if labels.get("airuntime.project_id") == project_id or any(
+            id_fragment in tag
+            and (tag.startswith("airuntime-generated-") or tag.startswith("airuntime-scratch-"))
+            for tag in tags
+        ):
+            remaining_images.extend(tags or [image.id])
+
+    remaining_networks: list[str] = []
+    for name in (network_name(project_id), _preview_network_name(project_id)):
+        try:
+            client.networks.get(name)
+            remaining_networks.append(name)
+        except Exception:
+            pass
+
+    volume_root = Path(project_volumes_root(project_id))
+    remaining = {
+        "containers": remaining_containers,
+        "images": remaining_images,
+        "networks": remaining_networks,
+        "volume_root": str(volume_root) if volume_root.exists() else None,
+    }
+    ok = not any(remaining.values())
+    return {"ok": ok, "remaining": remaining}
 
 
 def run_control_action(
@@ -118,29 +188,7 @@ def run_control_action(
             DockerDeploymentAdapter().stop_project(str(project_id))
             return {"ok": True}
         if action == "cleanup" and project_id:
-            adapter = DockerDeploymentAdapter()
-            adapter.stop_project(str(project_id))
-            adapter.remove_project_images(str(project_id))
-            db = SessionLocal()
-            try:
-                has_services = (
-                    db.query(ProjectService).filter(ProjectService.project_id == project_id).first()
-                    is not None
-                )
-            finally:
-                db.close()
-            if has_services:
-                teardown_service_containers(adapter.client, str(project_id), remove_volumes=True)
-            # Best-effort: an internal=True network with no containers left on it is cheap and
-            # harmless to leave behind, but cleaning it up keeps `docker network ls` honest.
-            # Broad except deliberately (not just NotFound/DockerException): this must never
-            # turn a successful stop+image-removal+teardown into a reported failure just
-            # because the preview network step itself hiccupped.
-            try:
-                adapter.client.networks.get(_preview_network_name(str(project_id))).remove()
-            except Exception:  # noqa: BLE001 - see comment above
-                pass
-            return {"ok": True}
+            return _cleanup_project_resources(str(project_id))
         if action == "logs":
             container_id = extra.get("container_id")
             tail = int(extra.get("tail", 400) or 400)

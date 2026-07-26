@@ -95,6 +95,17 @@ class _FakeCancelContainers:
             raise NotFound(f"no such container: {name}")
         return self._existing[name]
 
+    def list(self, all: bool = False, filters: dict | None = None) -> list[_FakeCancelContainer]:
+        label = (filters or {}).get("label", "")
+        if not label.startswith("airuntime.codex_correlation_id="):
+            return []
+        correlation_id = label.split("=", 1)[1]
+        return [
+            container
+            for name, container in self._existing.items()
+            if name.startswith(f"attempt:{correlation_id}:")
+        ]
+
 
 class _FakeCancelDockerClient:
     def __init__(self, existing: dict[str, _FakeCancelContainer]) -> None:
@@ -105,8 +116,8 @@ class TestCancelCodexRunControlAction:
     def test_stops_the_matching_container(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from src.services import docker_control_actions
 
-        container = _FakeCancelContainer("airuntime-codex-task-xyz")
-        fake_client = _FakeCancelDockerClient({"airuntime-codex-task-xyz": container})
+        container = _FakeCancelContainer("airuntime-codex-unique-attempt")
+        fake_client = _FakeCancelDockerClient({"attempt:task-xyz:1": container})
         monkeypatch.setattr(
             docker_control_actions.DockerDeploymentAdapter,
             "client",
@@ -118,6 +129,28 @@ class TestCancelCodexRunControlAction:
         )
         assert result == {"ok": True, "found": True}
         assert container.stopped is True
+
+    def test_stops_all_overlapping_attempts(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from src.services import docker_control_actions
+
+        first = _FakeCancelContainer("airuntime-codex-attempt-1")
+        second = _FakeCancelContainer("airuntime-codex-attempt-2")
+        fake_client = _FakeCancelDockerClient(
+            {"attempt:task-xyz:1": first, "attempt:task-xyz:2": second}
+        )
+        monkeypatch.setattr(
+            docker_control_actions.DockerDeploymentAdapter,
+            "client",
+            property(lambda self: fake_client),
+        )
+
+        result = docker_control_actions.run_control_action(
+            action="cancel_codex_run", project_id="p1", extra={"correlation_id": "task-xyz"}
+        )
+
+        assert result == {"ok": True, "found": True}
+        assert first.stopped is True
+        assert second.stopped is True
 
     def test_missing_container_is_not_an_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from src.services import docker_control_actions

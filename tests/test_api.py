@@ -254,7 +254,7 @@ def test_delete_project_cleans_cloudflare_dns(client, monkeypatch):
     assert client.get(f"/api/v1/projects/{project['id']}", headers=headers).status_code == 404
 
 
-def test_delete_project_continues_when_dns_cleanup_fails(client, monkeypatch):
+def test_delete_project_keeps_row_when_dns_cleanup_fails(client, monkeypatch):
     from src.api.routers import projects as projects_router
     from src.services.cloudflare_dns import CloudflareDnsError
 
@@ -282,8 +282,29 @@ def test_delete_project_continues_when_dns_cleanup_fails(client, monkeypatch):
 
     response = client.delete(f"/api/v1/projects/{project['id']}", headers=headers)
 
-    assert response.status_code == 200
-    assert response.json() == {"status": "deleted"}
+    assert response.status_code == 502
+    assert client.get(f"/api/v1/projects/{project['id']}", headers=headers).status_code == 200
+
+
+def test_delete_project_keeps_row_when_docker_cleanup_fails(client, monkeypatch):
+    from src.api.routers import projects as projects_router
+
+    headers = auth_tokens(client, "docker-cleanup-fail@airuntime.dev")
+    project = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={"type": "website", "name": "Cleanup Fail", "description": ""},
+    ).json()
+    monkeypatch.setattr(
+        projects_router,
+        "submit_control_job",
+        lambda **kwargs: {"ok": False, "remaining": {"containers": ["stale"]}},
+    )
+
+    response = client.delete(f"/api/v1/projects/{project['id']}", headers=headers)
+
+    assert response.status_code == 503
+    assert client.get(f"/api/v1/projects/{project['id']}", headers=headers).status_code == 200
 
 
 def test_delete_bot_project_skips_dns_cleanup(client, monkeypatch):

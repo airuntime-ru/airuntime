@@ -125,9 +125,14 @@ class DockerDeploymentAdapter:
             return
         for image in images:
             tags = getattr(image, "tags", None) or []
-            if not any(
-                tag.startswith("airuntime-generated-") and id_fragment in tag for tag in tags
-            ):
+            labels = ((getattr(image, "attrs", None) or {}).get("Config") or {}).get("Labels") or {}
+            tagged_for_project = any(
+                (tag.startswith("airuntime-generated-") or tag.startswith("airuntime-scratch-"))
+                and id_fragment in tag
+                for tag in tags
+            )
+            labeled_for_project = labels.get("airuntime.project_id") == str(project_id)
+            if not tagged_for_project and not labeled_for_project:
                 continue
             try:
                 self._client.images.remove(image=image.id, force=True)
@@ -137,12 +142,19 @@ class DockerDeploymentAdapter:
     def deploy(self, request: DeployRequest) -> dict:
         container_name = app_container_name(request.project_id)
         host_port = self._allocate_port(request.project_id)
-        deploy_url = settings.build_project_url(request.subdomain)
         service_name = re.sub(r"[^a-z0-9-]", "-", container_name.lower()).strip("-")
         public_network = (
             settings.deployment_public_network
             if request.expose_http and settings.deployment_public_network
             else None
+        )
+        # Local/dev deployments expose a host port and have no Traefik/DNS route. Returning the
+        # production-looking subdomain there gives the chat a dead link even though the runtime
+        # is healthy. In public-network mode the canonical HTTPS host remains correct.
+        deploy_url = (
+            f"http://localhost:{host_port}"
+            if request.expose_http and settings.deployment_expose_host_ports and not public_network
+            else settings.build_project_url(request.subdomain)
         )
 
         for existing in self._iter_app_containers(request.project_id):

@@ -287,7 +287,11 @@ class WorkspaceTools:
         # which builds via `docker build` directly rather than this tool). True/False once a
         # build_project call has returned - product_pipeline.py uses this to skip preview/
         # review after an explicit failed build instead of re-deriving build state itself.
+        # Orchestration's coding executors also lift this (and last_build_result) into
+        # AgentExecutionResult.build_result so validation.py's required "build" step has
+        # real evidence when the agent already ran build_project mid-turn.
         self.build_succeeded: bool | None = None
+        self.last_build_result: dict | None = None
 
     def call(self, name: str, arguments: dict[str, Any]) -> ToolExecutionResult:
         try:
@@ -433,6 +437,11 @@ class WorkspaceTools:
             )
         log = result.get("log", "")
         arch_hint = self._thin_bot_architecture_hint()
+        self.last_build_result = {
+            "ok": bool(result.get("ok")),
+            "log": log,
+            "log_tail": (log or "")[-4000:],
+        }
         if result.get("ok"):
             self.build_succeeded = True
             content = log + arch_hint if arch_hint else log

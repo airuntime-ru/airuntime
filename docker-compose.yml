@@ -121,6 +121,10 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      # Per-turn Codex containers get Docker through the restricted proxy below. The worker
+      # itself still needs the host socket to create deployments and those isolated turns.
+      CODEX_DOCKER_HOST: ${CODEX_DOCKER_HOST:-tcp://docker-socket-proxy:2375}
+      CODEX_NETWORK: ${CODEX_NETWORK:-airuntime_default}
       DEPLOYMENT_DEFAULT_IMAGE: nginx:alpine
       S3_ENDPOINT_URL: http://minio:9000
       S3_PUBLIC_ENDPOINT_URL: http://localhost:9000
@@ -146,6 +150,8 @@ services:
         condition: service_started
       minio:
         condition: service_started
+      docker-socket-proxy:
+        condition: service_started
 
   # Build source only, as of the per-turn isolation rework (see codex_worker.py) - the worker
   # launches a fresh, single-purpose container from this image per Codex turn instead of `docker
@@ -160,9 +166,8 @@ services:
     profiles: ["build-only"]
 
   # Narrows the per-turn Codex container's Docker access from the raw host socket down to a
-  # vetted API subset - opt in by setting CODEX_DOCKER_HOST=tcp://docker-socket-proxy:2375 (see
-  # config.py's codex_docker_host). Until that's set, Codex containers fall back to the raw
-  # socket, same trust level as before this service existed.
+  # vetted API subset. The worker defaults CODEX_DOCKER_HOST to this service; explicitly set
+  # CODEX_DOCKER_HOST="" only for an intentional legacy fallback.
   docker-socket-proxy:
     image: tecnativa/docker-socket-proxy:latest
     logging: *default-logging

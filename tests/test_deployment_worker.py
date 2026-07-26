@@ -18,13 +18,28 @@ class _FakeAdapter:
     def __init__(self, stop_calls: list[str], image_calls: list[str] | None = None) -> None:
         self._stop_calls = stop_calls
         self._image_calls = image_calls if image_calls is not None else []
-        self.client = object()
+        self.client = _FakeDockerClient()
 
     def stop_project(self, project_id: str) -> None:
         self._stop_calls.append(project_id)
 
     def remove_project_images(self, project_id: str) -> None:
         self._image_calls.append(project_id)
+
+
+class _EmptyCollection:
+    def list(self, *args, **kwargs):
+        return []
+
+    def get(self, name):
+        raise RuntimeError(f"{name} not found")
+
+
+class _FakeDockerClient:
+    def __init__(self) -> None:
+        self.containers = _EmptyCollection()
+        self.images = _EmptyCollection()
+        self.networks = _EmptyCollection()
 
 
 class _FakeQuery:
@@ -106,10 +121,20 @@ def test_process_control_job_cleanup_tears_down_services(monkeypatch):
     assert stop_calls == ["p1"]
     assert image_calls == ["p1"]
     assert teardown_calls == [("p1", True)]
-    assert results == [{"ok": True}]
+    assert results == [
+        {
+            "ok": True,
+            "remaining": {
+                "containers": [],
+                "images": [],
+                "networks": [],
+                "volume_root": None,
+            },
+        }
+    ]
 
 
-def test_process_control_job_cleanup_skips_teardown_without_services(monkeypatch):
+def test_process_control_job_cleanup_tears_down_even_without_service_rows(monkeypatch):
     stop_calls: list[str] = []
     image_calls: list[str] = []
     teardown_calls: list[tuple] = []
@@ -138,8 +163,18 @@ def test_process_control_job_cleanup_skips_teardown_without_services(monkeypatch
 
     assert stop_calls == ["p1"]
     assert image_calls == ["p1"]
-    assert teardown_calls == []
-    assert results == [{"ok": True}]
+    assert teardown_calls == [("p1", True)]
+    assert results == [
+        {
+            "ok": True,
+            "remaining": {
+                "containers": [],
+                "images": [],
+                "networks": [],
+                "volume_root": None,
+            },
+        }
+    ]
 
 
 def test_process_control_job_build_check_returns_build_result(monkeypatch):

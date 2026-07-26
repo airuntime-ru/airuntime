@@ -68,9 +68,8 @@ def _events_key(run_id: str) -> str:
     return f"{_EVENTS_KEY_PREFIX}{run_id}"
 
 
-def _resolve_project_mount(client: docker.DockerClient, project_id: str) -> str | None:
-    """Real host path of this project's own subtree inside the shared projects volume, so a
-    fresh container can bind-mount just that one directory instead of the whole shared tree.
+def _resolve_workspace_mount(client: docker.DockerClient, workspace_cwd: str) -> str | None:
+    """Resolve the exact acquired workspace (shared checkout or isolated git worktree).
 
     Uses the volume's own `Mountpoint` (a long-standing, stable part of the Docker volume
     inspect API - not the newer, version-gated volume-subpath mount feature, which would need
@@ -85,16 +84,19 @@ def _resolve_project_mount(client: docker.DockerClient, project_id: str) -> str 
         mountpoint = volume.attrs.get("Mountpoint")
         if not mountpoint:
             return None
-        # PurePosixPath, not Path: this always runs against a Linux Docker daemon (the worker
-        # container, or a Linux/Docker Desktop dev host) regardless of what OS the interpreter
-        # itself happens to be on - using the platform Path here silently produced backslash
-        # paths (and a broken bind-mount source) when this was exercised on Windows.
-        return str(PurePosixPath(mountpoint) / project_id)
-    except (NotFound, APIError, DockerException, KeyError) as exc:
+        volume_root = PurePosixPath(settings.generated_projects_dir)
+        relative = PurePosixPath(workspace_cwd).relative_to(volume_root)
+        if not relative.parts:
+            return None
+        # PurePosixPath, not Path: this always targets the Linux Docker daemon, including from
+        # Docker Desktop on a Windows development host.
+        return str(PurePosixPath(mountpoint) / relative)
+    except (NotFound, APIError, DockerException, KeyError, ValueError) as exc:
         logger.warning(
-            "Could not resolve per-project mount for volume %r (%s) - falling back to full "
+            "Could not resolve workspace %r in volume %r (%s) - falling back to full "
             "shared-volume access for this run. Check GENERATED_PROJECTS_VOLUME_NAME / "
             "`docker volume ls` on this host.",
+            workspace_cwd,
             settings.generated_projects_volume_name,
             exc,
         )
@@ -156,8 +158,11 @@ def _login_and_exec_command(argv: list[str]) -> list[str]:
     return ["sh", "-c", script]
 
 
-def _container_env(api_key: str) -> dict[str, str]:
+def _container_env(api_key: str, project_id: str | None) -> dict[str, str]:
     env = {"OPENAI_API_KEY": api_key}
+    if project_id:
+        env["AIRUNTIME_PROJECT_ID"] = project_id
+        env["AIRUNTIME_SCRATCH_IMAGE_PREFIX"] = f"airuntime-scratch-{project_id[:12]}"
     if settings.codex_docker_host:
         env["DOCKER_HOST"] = settings.codex_docker_host
     return env
@@ -201,16 +206,12 @@ def iter_codex_events(job: dict) -> Iterator[dict]:
             }
             return
 
-        # cwd follows agent/codex_runtime.py's own `f"{generated_projects_dir}/{project_id}"`
-        # construction (both _run_inline and _run_via_queue build it that way) - the project id
-        # is just its last path segment, recovered here rather than widening the job dict, since
-        # both call sites already agree on this exact shape.
         old_cwd = job.get("cwd")
-        project_id = PurePosixPath(old_cwd).name if old_cwd else None
-        project_host_path = _resolve_project_mount(client, project_id) if project_id else None
+        project_id = str(job.get("project_id") or "") or None
+        workspace_host_path = _resolve_workspace_mount(client, str(old_cwd)) if old_cwd else None
 
-        volumes = _container_volumes(project_host_path)
-        if old_cwd and project_host_path:
+        volumes = _container_volumes(workspace_host_path)
+        if old_cwd and workspace_host_path:
             # Scoped mount resolved - remap --cd and any --image paths onto it.
             effective_cwd = _WORKSPACE_MOUNT
             effective_images = [
@@ -262,7 +263,17 @@ def iter_codex_events(job: dict) -> Iterator[dict]:
                 # turns have no meaningful job_id, so they still fall back to a fresh random
                 # name (unchanged behavior - nothing can or needs to cancel those).
                 name=f"airuntime-codex-{job.get('job_id') or uuid.uuid4().hex[:12]}",
-                environment=_container_env(api_key),
+                labels={
+                    "airuntime.managed": "true",
+                    "airuntime.role": "codex",
+                    **({"airuntime.project_id": project_id} if project_id else {}),
+                    **(
+                        {"airuntime.codex_correlation_id": str(job["correlation_id"])}
+                        if job.get("correlation_id")
+                        else {}
+                    ),
+                },
+                environment=_container_env(api_key, project_id),
                 volumes=volumes,
                 network=settings.codex_network,
                 mem_limit=settings.codex_memory_limit,

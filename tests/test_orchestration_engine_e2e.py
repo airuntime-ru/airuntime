@@ -985,3 +985,155 @@ class TestParallelWaveExecution:
         assert tasks["review_b"].status == "completed"
         assert tasks["review_a"].workspace_mode == "parallel_read_only"
         assert tasks["review_b"].workspace_mode == "parallel_read_only"
+
+
+class TestEnsureBuildEvidence:
+    @pytest.mark.asyncio
+    async def test_returns_existing_without_invoking_build_check(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from src.services.orchestration.schemas import (
+            ProjectStateSummary,
+            TaskBudget,
+            TaskContract,
+            ValidationStep,
+        )
+
+        calls: list[str] = []
+
+        async def _boom(*_a, **_k):
+            calls.append("invoked")
+            raise AssertionError("build_check must not run when evidence already exists")
+
+        monkeypatch.setattr(engine.PlatformToolCapabilityProvider, "invoke", _boom)
+        contract = TaskContract(
+            task_id=uuid.uuid4(),
+            run_id=uuid.uuid4(),
+            role=SpecialistRole.IMPLEMENTER,
+            project_goal="g",
+            user_value="v",
+            task_goal="t",
+            reason="r",
+            current_state=ProjectStateSummary(project_type="website", project_name="p"),
+            budget=TaskBudget(),
+            validation_steps=[
+                ValidationStep(kind="build", description="must build", required=True)
+            ],
+        )
+        existing = {"ok": True, "log": "already built"}
+        result = await engine._ensure_build_evidence(
+            contract=contract, project_id=uuid.uuid4(), existing=existing
+        )
+        assert result is existing
+        assert calls == []
+
+    @pytest.mark.asyncio
+    async def test_skips_when_build_not_declared(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from src.services.orchestration.schemas import (
+            ProjectStateSummary,
+            TaskBudget,
+            TaskContract,
+        )
+
+        async def _boom(*_a, **_k):
+            raise AssertionError("must not invoke build_check")
+
+        monkeypatch.setattr(engine.PlatformToolCapabilityProvider, "invoke", _boom)
+        contract = TaskContract(
+            task_id=uuid.uuid4(),
+            run_id=uuid.uuid4(),
+            role=SpecialistRole.QA_REVIEWER,
+            project_goal="g",
+            user_value="v",
+            task_goal="t",
+            reason="r",
+            current_state=ProjectStateSummary(project_type="website", project_name="p"),
+            budget=TaskBudget(),
+            validation_steps=[],
+        )
+        assert (
+            await engine._ensure_build_evidence(
+                contract=contract, project_id=uuid.uuid4(), existing=None
+            )
+            is None
+        )
+
+    @pytest.mark.asyncio
+    async def test_invokes_build_check_when_declared_and_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from src.services.orchestration.schemas import (
+            CapabilityResult,
+            ProjectStateSummary,
+            TaskBudget,
+            TaskContract,
+            ValidationStep,
+        )
+
+        async def _fake_invoke(self, capability_id, arguments, context):
+            assert capability_id == engine.PLATFORM_CAPABILITY_BUILD_CHECK
+            return CapabilityResult(status="completed", output={"ok": True, "log": "built"})
+
+        monkeypatch.setattr(engine.PlatformToolCapabilityProvider, "invoke", _fake_invoke)
+        contract = TaskContract(
+            task_id=uuid.uuid4(),
+            run_id=uuid.uuid4(),
+            role=SpecialistRole.IMPLEMENTER,
+            project_goal="g",
+            user_value="v",
+            task_goal="t",
+            reason="r",
+            current_state=ProjectStateSummary(project_type="website", project_name="p"),
+            budget=TaskBudget(),
+            validation_steps=[
+                ValidationStep(kind="build", description="must build", required=True)
+            ],
+        )
+        result = await engine._ensure_build_evidence(
+            contract=contract, project_id=uuid.uuid4(), existing=None
+        )
+        assert result == {"ok": True, "log": "built"}
+
+    @pytest.mark.asyncio
+    async def test_run_auto_collects_build_when_executor_omits_it(
+        self, db: Session, db_factory, project: Project, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The bug from production screenshots: Implementer tasks require build validation, but
+        # coding executors returned build_result=None -> "no build_result evidence" -> replan
+        # loop. Server must collect build evidence itself.
+        from src.services.orchestration.schemas import CapabilityResult
+
+        run = _make_run(db, project, original_request="Сделай лендинг для кофейни")
+        db.commit()
+        fake = _FakeExecutor(
+            script=[
+                AgentExecutionResult(
+                    task_result=TaskResult(
+                        status="completed",
+                        summary="landing ready",
+                        claimed_changed_files=["output.txt"],
+                    ),
+                    build_result=None,
+                )
+            ]
+        )
+        _install_fake_executor(monkeypatch, fake)
+
+        async def _fake_invoke(self, capability_id, arguments, context):
+            return CapabilityResult(status="completed", output={"ok": True, "log": "auto build"})
+
+        monkeypatch.setattr(engine.PlatformToolCapabilityProvider, "invoke", _fake_invoke)
+
+        await engine.run_orchestration(
+            run.id, db_factory=db_factory, provider_name="openai", model="m", api_key="k"
+        )
+
+        db.expire_all()
+        refreshed = OrchestrationRunRepository(db).get(run.id)
+        assert refreshed.status == "completed"
+        task = AgentTaskRepository(db).list_by_run(run.id)[0]
+        assert task.status == "completed"
+        assert "build_result" in (task.evidence_json or "")
+        assert '"ok": true' in (task.evidence_json or "").lower() or '"ok":true' in (
+            task.evidence_json or ""
+        ).lower()
