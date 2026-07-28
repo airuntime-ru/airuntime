@@ -10,7 +10,7 @@ from src.db.models.credit_topup import CreditTopUp
 from src.db.models.plan import Plan
 from src.db.models.user import User
 from src.db.session import get_db
-from src.services.billing import list_ledger, request_topup, switch_plan
+from src.services.billing import list_ledger, request_topup, switch_plan, usage_credits_to_rub
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -49,12 +49,25 @@ def _topup_response(invoice: CreditTopUp) -> dict:
 
 
 def _ledger_response(entry: CreditLedgerEntry) -> dict:
+    cost_rub = float(usage_credits_to_rub(entry.amount)) if entry.reason == "chat_message" else None
     return {
         "id": str(entry.id),
         "amount": entry.amount,
         "reason": entry.reason,
         "project_id": str(entry.project_id) if entry.project_id else None,
         "project_name": entry.project_name,
+        "provider": entry.provider,
+        "model": entry.model,
+        "input_tokens": entry.input_tokens,
+        "cached_input_tokens": entry.cached_input_tokens,
+        "cache_write_input_tokens": entry.cache_write_input_tokens,
+        "output_tokens": entry.output_tokens,
+        "provider_cost_usd": (
+            entry.provider_cost_usd_micros / 1_000_000
+            if entry.provider_cost_usd_micros is not None
+            else None
+        ),
+        "cost_rub": cost_rub,
         "created_at": entry.created_at,
     }
 

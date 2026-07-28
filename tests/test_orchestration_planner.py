@@ -96,6 +96,73 @@ class TestBuildSingleTaskPlan:
         assert plan.tasks[0].role == SpecialistRole.IMPLEMENTER
         assert planner.validate_plan_structure(plan, max_tasks=10) == []
 
+    def test_website_quality_fallback_adds_preview_and_independent_qa(self) -> None:
+        plan = planner.build_single_task_plan(
+            "Сделай лендинг кофейни", reason="test", website_quality=True
+        )
+
+        assert plan.complexity == "compound"
+        assert [task.role for task in plan.tasks] == [
+            SpecialistRole.IMPLEMENTER,
+            SpecialistRole.QA_REVIEWER,
+        ]
+        assert any(
+            criterion.verification_method == "preview"
+            for criterion in plan.tasks[0].acceptance_criteria
+        )
+        assert plan.tasks[1].dependencies == ["main"]
+        assert plan.tasks[1].suggested_skills == ["visual_preview_review"]
+
+    def test_bot_fallback_adds_independent_product_qa(self) -> None:
+        plan = planner.build_single_task_plan(
+            "Добавь команду /help",
+            reason="test",
+            project_type="telegram_bot",
+        )
+
+        assert plan.complexity == "compound"
+        assert [task.role for task in plan.tasks] == [
+            SpecialistRole.IMPLEMENTER,
+            SpecialistRole.QA_REVIEWER,
+        ]
+        assert plan.tasks[1].dependencies == ["main"]
+        assert plan.tasks[1].suggested_skills == ["product_quality_review"]
+
+
+class TestPlannerOutputNormalization:
+    def test_missing_acceptance_id_gets_stable_generated_id(self) -> None:
+        raw = {
+            "description": "The landing page builds",
+            "verification_method": "build",
+        }
+        first = AcceptanceCriterion.model_validate(raw)
+        second = AcceptanceCriterion.model_validate(raw)
+
+        assert first.id.startswith("criterion_")
+        assert first.id == second.id
+
+    @pytest.mark.parametrize("alias", ["parallel", "sequential"])
+    def test_scheduling_alias_is_normalized_to_either(self, alias: str) -> None:
+        task = PlannedTask.model_validate(
+            {
+                "local_id": "landing",
+                "title": "Landing",
+                "role": "implementer",
+                "goal": "Build it",
+                "reason": "Requested",
+                "execution_preference": alias,
+                "acceptance_criteria": [
+                    {
+                        "description": "Build succeeds",
+                        "verification_method": "build",
+                    }
+                ],
+            }
+        )
+
+        assert task.execution_preference.value == "either"
+        assert task.acceptance_criteria[0].id
+
 
 @pytest.mark.asyncio
 class TestGeneratePlan:
@@ -113,6 +180,89 @@ class TestGeneratePlan:
         )
         assert result.source == "heuristic_simple"
         assert len(result.plan.tasks) == 1
+
+    async def test_short_website_request_keeps_quality_planning(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        good_plan = ExecutionPlan(
+            goal="coffee landing",
+            complexity="simple",
+            tasks=[_task("landing")],
+        )
+        calls = []
+
+        async def _fake_complete(**kwargs):  # noqa: ANN003
+            calls.append(kwargs)
+            return good_plan
+
+        monkeypatch.setattr(planner, "complete_structured", _fake_complete)
+        result = await planner.generate_plan(
+            user_message="Сделай лендинг кофейни",
+            project_context_summary="Project: Coffee (website)",
+            provider_name="openai",
+            model="gpt-5.6-sol",
+            api_key="k",
+        )
+
+        assert len(calls) == 1
+        assert result.source == "llm"
+        assert len(result.plan.tasks) == 2
+        assert result.plan.tasks[-1].role == SpecialistRole.QA_REVIEWER
+        assert "visual_preview_review" in result.plan.tasks[-1].suggested_skills
+
+    async def test_short_bot_followup_keeps_quality_planning(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = []
+
+        async def _fake_complete(**kwargs):  # noqa: ANN003
+            calls.append(kwargs)
+            return ExecutionPlan(
+                goal="help command",
+                complexity="simple",
+                tasks=[_task("help_command")],
+            )
+
+        monkeypatch.setattr(planner, "complete_structured", _fake_complete)
+        result = await planner.generate_plan(
+            user_message="Добавь команду /help",
+            project_context_summary="Project: Support (telegram_bot)",
+            provider_name="openai",
+            model="gpt-5.6-sol",
+            api_key="k",
+        )
+
+        assert len(calls) == 1
+        assert result.source == "llm"
+        assert result.plan.tasks[-1].suggested_skills == ["product_quality_review"]
+        assert result.plan.tasks[-1].dependencies == ["help_command"]
+
+    async def test_mixed_product_gets_visual_and_functional_review(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def _fake_complete(**kwargs):  # noqa: ANN003
+            return ExecutionPlan(
+                goal="site and bot",
+                complexity="simple",
+                tasks=[_task("implementation")],
+            )
+
+        monkeypatch.setattr(planner, "complete_structured", _fake_complete)
+        result = await planner.generate_plan(
+            user_message="Сделай сайт и Telegram-бот для записи",
+            project_context_summary="Project: Booking (mixed)",
+            provider_name="openai",
+            model="gpt-5.6-sol",
+            api_key="k",
+        )
+
+        qa_skills = [
+            task.suggested_skills
+            for task in result.plan.tasks
+            if task.role == SpecialistRole.QA_REVIEWER
+        ]
+        assert ["visual_preview_review"] in qa_skills
+        assert ["product_quality_review"] in qa_skills
 
     async def test_valid_llm_plan_is_used_as_is(self, monkeypatch: pytest.MonkeyPatch) -> None:
         good_plan = ExecutionPlan(

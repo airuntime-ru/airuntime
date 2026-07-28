@@ -28,6 +28,37 @@ class ProjectGitError(RuntimeError):
     pass
 
 
+_PLATFORM_GIT_EXCLUDES = (
+    # Runtime evidence is intentionally kept beside the checkout so the next independent QA
+    # task can read it, but it is platform-owned output rather than user-authored project code.
+    ".airuntime/preview/",
+)
+
+
+def _ensure_platform_git_excludes(project_dir: Path) -> None:
+    # In a linked worktree `.git` is a text file, not a directory. Ask Git for the canonical
+    # repository metadata path so this works for both the main checkout and isolated worktrees.
+    resolved = _run_git(
+        cwd=project_dir, args=["rev-parse", "--git-path", "info/exclude"], check=True
+    ).stdout.strip()
+    exclude_path = Path(resolved)
+    if not exclude_path.is_absolute():
+        exclude_path = project_dir / exclude_path
+    exclude_path.parent.mkdir(parents=True, exist_ok=True)
+    existing = (
+        exclude_path.read_text(encoding="utf-8", errors="replace")
+        if exclude_path.exists()
+        else ""
+    )
+    existing_lines = {line.strip() for line in existing.splitlines()}
+    missing = [pattern for pattern in _PLATFORM_GIT_EXCLUDES if pattern not in existing_lines]
+    if not missing:
+        return
+    separator = "" if not existing or existing.endswith("\n") else "\n"
+    with exclude_path.open("a", encoding="utf-8") as handle:
+        handle.write(separator + "\n".join(missing) + "\n")
+
+
 def _require_git() -> str:
     git_bin = shutil.which("git")
     if not git_bin:
@@ -88,6 +119,7 @@ def _run_git_bytes(
 def init_repo_if_needed(project_dir: Path) -> None:
     project_dir.mkdir(parents=True, exist_ok=True)
     if (project_dir / ".git").exists():
+        _ensure_platform_git_excludes(project_dir)
         return
 
     _ = _require_git()
@@ -104,6 +136,7 @@ def init_repo_if_needed(project_dir: Path) -> None:
         args=["config", "user.name", "AIRuntime"],
         check=True,
     )
+    _ensure_platform_git_excludes(project_dir)
 
 
 def _redis() -> Redis | None:

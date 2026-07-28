@@ -22,11 +22,16 @@ class _FakeContainer:
         self.id = f"{name}-id"
         self.removed = False
         self.wait_error: Exception | None = None
+        self.exit_code = 0
+        self.log_output = b""
 
     def wait(self, timeout: int | None = None) -> dict:
         if self.wait_error is not None:
             raise self.wait_error
-        return {"StatusCode": 0}
+        return {"StatusCode": self.exit_code}
+
+    def logs(self, **kwargs) -> bytes:
+        return self.log_output
 
     def remove(self, force: bool = False) -> None:
         self.removed = True
@@ -202,6 +207,30 @@ def test_run_preview_missing_result_file_is_a_clean_failure(monkeypatch, tmp_pat
     result = preview_runner.run_preview(project)
     assert result["status"] == "failed"
     assert "without producing a result" in result["fatal_errors"][0]
+
+
+def test_run_preview_missing_result_includes_bounded_runner_diagnostics(monkeypatch, tmp_path):
+    project = _project("website")
+    tag = _image_tag_for(project)
+    client = _FakeClient(tmp_path, known_image_tags={tag})
+    monkeypatch.setattr(preview_runner.docker, "from_env", lambda: client)
+    monkeypatch.setattr(settings, "generated_projects_dir", str(tmp_path))
+
+    original_run = client.containers.run
+
+    def run_with_failure(image, **kwargs):
+        container = original_run(image, **kwargs)
+        if image == settings.preview_image:
+            container.exit_code = 1
+            container.log_output = b"ModuleNotFoundError: No module named 'playwright'"
+        return container
+
+    client.containers.run = run_with_failure
+
+    result = preview_runner.run_preview(project)
+
+    assert "exit code 1" in result["fatal_errors"][0]
+    assert "ModuleNotFoundError" in result["fatal_errors"][0]
 
 
 def test_run_preview_never_raises_on_docker_exception(monkeypatch):

@@ -1,5 +1,6 @@
 import logging
 import shutil
+import time
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -16,6 +17,7 @@ from src.api.dto.project_logs import ProjectLogsResponse
 from src.api.dto.project_runtime import ProjectRuntimeLimitsResponse
 from src.db.models.chat import Chat
 from src.db.models.chat_file import ChatFile
+from src.db.models.orchestration_run import OrchestrationRun
 from src.db.models.project import Project
 from src.db.models.secret import Secret
 from src.db.models.user import User
@@ -23,6 +25,9 @@ from src.db.session import get_db
 from src.services.cloudflare_dns import delete_dns_for_website_deploy
 from src.services.deployment_check import check_and_repair_deployment
 from src.services.docker_control_queue import submit_control_job
+from src.services.orchestration import engine as orchestration_engine
+from src.services.orchestration.repository import OrchestrationRunRepository
+from src.services.orchestration.status import is_run_terminal
 from src.services.project_intent import infer_project_type, reconcile_type_with_workspace
 from src.services.project_logs import read_project_logs
 from src.services.project_runtime import (
@@ -233,6 +238,24 @@ def delete_project(
     )
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    # Stop orchestration before touching runtime/files. Otherwise a task that finishes just
+    # after the first cleanup can rebuild the image and recreate the workspace behind us.
+    active_runs = [
+        run
+        for run in db.query(OrchestrationRun)
+        .filter(OrchestrationRun.project_id == project.id)
+        .all()
+        if not is_run_terminal(run.status)
+    ]
+    run_repo = OrchestrationRunRepository(db)
+    for run in active_runs:
+        run_repo.request_cancel(run)
+        token = orchestration_engine.get_cancellation_token(run.id)
+        if token is not None:
+            token.cancel("project deletion requested")
+    if active_runs:
+        db.commit()
+
     # A 200 response is a deletion guarantee, not "the database row disappeared while runtime
     # resources may have been orphaned". Keep the row on any cleanup failure so the operation is
     # safely retryable and operators still have the ownership metadata needed for recovery.
@@ -247,6 +270,41 @@ def delete_project(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Не удалось подтвердить очистку контейнеров и Docker-ресурсов. Повторите удаление.",
         )
+
+    if active_runs:
+        active_ids = [run.id for run in active_runs]
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            db.expire_all()
+            still_running = [
+                run
+                for run in db.query(OrchestrationRun)
+                .filter(OrchestrationRun.id.in_(active_ids))
+                .all()
+                if not is_run_terminal(run.status)
+            ]
+            if not still_running:
+                break
+            time.sleep(0.1)
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Оркестратор ещё завершает активную задачу. Повторите удаление через несколько секунд.",
+            )
+
+        # The task may have produced a final image between cancellation and its terminal DB
+        # transition. A second idempotent cleanup closes that race before files/rows disappear.
+        cleanup_result = submit_control_job(action="cleanup", project_id=str(project.id))
+        if not cleanup_result or not cleanup_result.get("ok"):
+            logger.error(
+                "Refusing to delete project %s because post-cancel cleanup was not confirmed: %r",
+                project.id,
+                cleanup_result,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Не удалось подтвердить финальную очистку Docker-ресурсов. Повторите удаление.",
+            )
 
     object_keys = [
         row.object_key for row in db.query(ChatFile).filter(ChatFile.project_id == project.id).all()

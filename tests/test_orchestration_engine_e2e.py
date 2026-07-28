@@ -4,9 +4,10 @@ real git-initialized tmp_path workspace. Only two seams are faked:
     session - this is the same seam executors.py itself is unit-tested through, so faking it
     here tests the ENGINE's own orchestration logic (routing/contract/evidence/validation/
     failure-policy/budget/events), not a duplicate of executors.py's own test suite.
-  - `engine.generate_plan` / `engine.generate_replan` are only faked for multi-task/replan
-    scenarios; single-task scenarios use a short `original_request` (<160 chars) so
-    planner.generate_plan() takes its real, LLM-free heuristic_simple path unmodified.
+  - `engine.generate_plan` / `engine.generate_replan` are faked at the planner boundary. Planner
+    invariants (including author/reviewer separation for product work) have their own focused
+    tests; these tests exercise the engine with a stable graph and override it where a
+    multi-task/replan shape is specifically under test.
 
 Everything else - repositories, status transitions, GitTransactionManager, WorkspaceIsolation
 Manager, evidence collection, validation, failure_policy, budget, events_bus - runs for real.
@@ -81,6 +82,41 @@ def workspace_root(tmp_path):
 @pytest.fixture(autouse=True)
 def _patch_workspace_dir(monkeypatch: pytest.MonkeyPatch, workspace_root):
     monkeypatch.setattr(engine, "project_workspace_dir", lambda project_id: workspace_root)
+
+
+@pytest.fixture(autouse=True)
+def _stable_default_plan(monkeypatch: pytest.MonkeyPatch):
+    """Keep engine tests independent from live planner/model calls and planner policy changes."""
+    from src.services.orchestration.planner import PlanGenerationResult
+
+    async def _generate_plan(**kwargs):  # noqa: ANN003
+        return PlanGenerationResult(
+            plan=ExecutionPlan(
+                goal=kwargs["user_message"],
+                complexity="simple",
+                tasks=[
+                    PlannedTask(
+                        local_id="main",
+                        title="Main task",
+                        role=SpecialistRole.IMPLEMENTER,
+                        goal=kwargs["user_message"],
+                        reason="stable engine e2e plan",
+                        write_scope="full_workspace",
+                        acceptance_criteria=[
+                            AcceptanceCriterion(
+                                id="main_build",
+                                description="build succeeds",
+                                verification_method="build",
+                            )
+                        ],
+                    )
+                ],
+                estimated_budget=ExecutionBudget(),
+            ),
+            source="heuristic_simple",
+        )
+
+    monkeypatch.setattr(engine, "generate_plan", _generate_plan)
 
 
 @pytest.fixture()
@@ -1093,6 +1129,67 @@ class TestEnsureBuildEvidence:
             contract=contract, project_id=uuid.uuid4(), existing=None
         )
         assert result == {"ok": True, "log": "built"}
+
+
+class TestEnsurePreviewAndRuntimeEvidence:
+    @pytest.mark.asyncio
+    async def test_collects_preview_and_derives_predeploy_runtime(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from src.services.orchestration.schemas import (
+            CapabilityResult,
+            ProjectStateSummary,
+            TaskBudget,
+            TaskContract,
+            ValidationStep,
+        )
+
+        async def _fake_invoke(self, capability_id, arguments, context):
+            assert capability_id == engine.PLATFORM_CAPABILITY_PREVIEW_CHECK
+            assert arguments == {"paths": ["/"]}
+            return CapabilityResult(
+                status="completed",
+                output={
+                    "status": "passed",
+                    "pages": [{"url": "http://preview/"}],
+                    "fatal_errors": [],
+                    "warnings": [],
+                },
+            )
+
+        monkeypatch.setattr(engine.PlatformToolCapabilityProvider, "invoke", _fake_invoke)
+        contract = TaskContract(
+            task_id=uuid.uuid4(),
+            run_id=uuid.uuid4(),
+            role=SpecialistRole.IMPLEMENTER,
+            project_goal="g",
+            user_value="v",
+            task_goal="t",
+            reason="r",
+            current_state=ProjectStateSummary(project_type="website", project_name="p"),
+            budget=TaskBudget(),
+            validation_steps=[
+                ValidationStep(kind="preview", description="preview", required=True),
+                ValidationStep(kind="runtime", description="runtime", required=True),
+            ],
+        )
+
+        preview, runtime = await engine._ensure_preview_and_runtime_evidence(
+            contract=contract,
+            project_id=uuid.uuid4(),
+            build_result={"ok": True},
+            preview_existing=None,
+            runtime_existing=None,
+        )
+
+        assert preview is not None and preview["status"] == "passed"
+        assert runtime == {
+            "ok": True,
+            "source": "isolated_preview",
+            "preview_status": "passed",
+            "pages_checked": 1,
+            "fatal_errors": [],
+        }
 
     @pytest.mark.asyncio
     async def test_run_auto_collects_build_when_executor_omits_it(

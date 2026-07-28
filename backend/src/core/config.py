@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -23,16 +25,22 @@ class Settings(BaseSettings):
     app_encryption_key: str | None = None
 
     default_user_credits: int = 1_000_000_000
+    # Billing conversion used to turn the provider's USD token price into platform credits.
+    # One ruble equals 100 credits (the same ratio used by top-ups); the FX rate is explicit so
+    # operators can update it without a code deploy while historical ledger amounts stay fixed.
+    billing_credits_per_rub: int = 100
+    billing_usd_to_rub: int = 100
     provider_name: str = "openai"
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
     gemini_api_key: str | None = None
     openrouter_api_key: str | None = None
-    # Mid-tier+ coding defaults (never weaker than gpt-5.4-mini on OpenAI).
-    default_model_openai: str = "gpt-5.4-mini"
+    # Quality-first coding defaults. Cost/latency are deliberately secondary for the primary
+    # OpenAI path; gpt-5.6-sol is the current frontier model for complex coding work.
+    default_model_openai: str = "gpt-5.6-sol"
     default_model_anthropic: str = "claude-sonnet-5"
     default_model_gemini: str = "gemini-2.5-pro"
-    default_model_openrouter: str = "openai/gpt-5.4-mini"
+    default_model_openrouter: str = "openai/gpt-5.6-sol"
 
     app_domain: str = "airuntime.ru"
     frontend_url: str = "http://localhost:3000"
@@ -60,7 +68,10 @@ class Settings(BaseSettings):
     # A real coding turn (write/fix a multi-file project, rebuild until it passes) can
     # legitimately run long - give it room to work without getting cut off mid-task.
     codex_turn_timeout_seconds: int = 1800
-    codex_simple_timeout_seconds: int = 45
+    # Planning/review calls also use the frontier model at maximum reasoning effort. A 45-second
+    # timeout made that quality setting self-defeating on harder prompts, so allow five minutes.
+    codex_simple_timeout_seconds: int = 300
+    codex_reasoning_effort: Literal["none", "low", "medium", "high", "xhigh", "max"] = "max"
     codex_memory_limit: str = "2g"
     codex_cpu_limit: str = "2.0"
     # Docker network the per-turn Codex container joins - needed so it can resolve
@@ -90,7 +101,7 @@ class Settings(BaseSettings):
     # infrastructure to gate.
 
     orchestration_run_lease_ttl_seconds: int = 180
-    orchestration_task_default_timeout_seconds: int = 900
+    orchestration_task_default_timeout_seconds: int = 1800
     # Safety ceiling on how many nodes one plan graph may contain - mirrors the old
     # orchestrator.py's _MAX_SUBTASKS=4 in spirit but larger, since this plans a real DAG
     # (independent read-only + isolated-write parallelism) rather than N sequential text
@@ -199,15 +210,15 @@ settings = Settings()
 settings.validate_production()
 
 # OpenAI auto-select floor (product / API slug).
-OPENAI_MODEL_FLOOR = "gpt-5.4-mini"
+OPENAI_MODEL_FLOOR = "gpt-5.6-sol"
 
 # Ranked allowlists for auto-select when admin has no preferred_models list.
-# Newest / strongest coding-capable models first; keep cost/latency reasonable
-# (Sonnet over Opus, mini over full frontier as the practical default band).
+# Newest / strongest coding-capable models first. This is intentionally quality-first.
 CURATED_TOP_MODELS: dict[str, list[str]] = {
     "openai": [
-        "gpt-5.4-mini",
-        "gpt-5.4",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
     ],
     "anthropic": [
         "claude-sonnet-5",
@@ -219,8 +230,9 @@ CURATED_TOP_MODELS: dict[str, list[str]] = {
         "gemini-3.5-flash",
     ],
     "openrouter": [
-        "openai/gpt-5.4-mini",
-        "openai/gpt-5.4",
+        "openai/gpt-5.6-sol",
+        "openai/gpt-5.6-terra",
+        "openai/gpt-5.6-luna",
         "anthropic/claude-sonnet-5",
         "google/gemini-2.5-pro",
     ],

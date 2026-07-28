@@ -1,11 +1,9 @@
 """BudgetEngine (spec section 18): credits/tokens/wall-time/attempt/build/deploy/mcp/skill/
 context/output budgets, checked by engine.py before each operation.
 
-Wired to REAL credits via billing.record_usage (charge_credits_for_run below), not the flat
-char-count heuristic chat.py's non-orchestrated path still uses on its own turns
-(chat.py:1273's `usage_cost = max(100, len(...))`) - an orchestrated run's cost is the sum of
-real per-task provider usage when reported, falling back to that same heuristic only when a
-task's AgentDone genuinely carried no usage payload (better than silently charging nothing).
+Wired to REAL credits via billing.record_usage (charge_credits_for_run below). Known models use
+their input/cache-write/cache-read/output prices from model_pricing.py; the old flat token/char
+heuristic remains only as a fallback when an adapter genuinely reports no priceable usage.
 
 `BudgetTracker` itself is pure in-memory, per-run state (mirrors LoopDetector's own shape) -
 engine.py owns one instance per run and calls `charge_credits_for_run` at natural checkpoints
@@ -23,13 +21,24 @@ from sqlalchemy.orm import Session
 
 from src.db.models.user import User
 from src.services import billing
+from src.services.model_pricing import ModelUsageCost, estimate_model_usage_cost
 from src.services.orchestration.context_engine import clip_text
 
 _CREDITS_PER_1000_TOKENS = 10
 _APPROACHING_RATIO = 0.8
 
 
-def estimate_task_cost(*, usage: dict | None, summary_text: str) -> int:
+def estimate_task_cost(
+    *,
+    usage: dict | None,
+    summary_text: str,
+    provider_name: str | None = None,
+    model: str | None = None,
+) -> int:
+    if provider_name and model:
+        priced = estimate_model_usage_cost(provider=provider_name, model=model, usage=usage)
+        if priced is not None:
+            return priced.credits
     if usage:
         total = usage.get("total_tokens")
         if not isinstance(total, int):
@@ -53,13 +62,29 @@ def charge_credits_for_run(
     project_id: uuid.UUID | str,
     amount: int,
     project_name: str | None = None,
+    provider_name: str | None = None,
+    model: str | None = None,
+    usage_cost: ModelUsageCost | None = None,
 ) -> None:
     """Thin pass-through to billing.record_usage - kept here (not called directly by engine.py)
     so every orchestration credit charge goes through one named entry point that's easy to grep
     for and easy to unit test independent of the engine's own control flow."""
     if amount <= 0:
         return
-    billing.record_usage(db, user, project_id=project_id, amount=amount, project_name=project_name)
+    billing.record_usage(
+        db,
+        user,
+        project_id=project_id,
+        amount=amount,
+        project_name=project_name,
+        provider=provider_name,
+        model=model,
+        input_tokens=usage_cost.input_tokens if usage_cost else None,
+        cached_input_tokens=usage_cost.cached_input_tokens if usage_cost else None,
+        cache_write_input_tokens=usage_cost.cache_write_input_tokens if usage_cost else None,
+        output_tokens=usage_cost.output_tokens if usage_cost else None,
+        provider_cost_usd_micros=usage_cost.provider_cost_usd_micros if usage_cost else None,
+    )
 
 
 class BudgetStatus(StrEnum):

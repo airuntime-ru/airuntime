@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import uuid
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
@@ -25,8 +26,6 @@ from src.services.email_templates import (
 BILLING_PERIOD_DAYS = 30
 LOW_CREDITS_THRESHOLD_RATIO = 0.1
 PERIOD_ENDING_WARNING_DAYS = 3
-RUB_PER_1000_CREDITS = 10
-
 LedgerDirection = str  # "all" | "credit" | "debit"
 
 
@@ -83,6 +82,13 @@ def record_usage(
     project_id: uuid.UUID,
     amount: int,
     project_name: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    input_tokens: int | None = None,
+    cached_input_tokens: int | None = None,
+    cache_write_input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    provider_cost_usd_micros: int | None = None,
 ) -> None:
     """Deduct credits for a chat turn and log it. `amount` is the positive cost - the balance
     change and ledger entry are both negative.
@@ -95,13 +101,21 @@ def record_usage(
         project_name = project.name if project else None
     user.credits_balance = max(0, user.credits_balance - amount)
     db.add(user)
-    record_ledger_entry(
-        db,
-        user,
-        amount=-amount,
-        reason="chat_message",
-        project_id=project_id,
-        project_name=project_name,
+    db.add(
+        CreditLedgerEntry(
+            user_id=user.id,
+            project_id=project_id,
+            project_name=project_name,
+            amount=-amount,
+            reason="chat_message",
+            provider=provider,
+            model=model,
+            input_tokens=input_tokens,
+            cached_input_tokens=cached_input_tokens,
+            cache_write_input_tokens=cache_write_input_tokens,
+            output_tokens=output_tokens,
+            provider_cost_usd_micros=provider_cost_usd_micros,
+        )
     )
 
 
@@ -153,7 +167,12 @@ def list_ledger(
 
 
 def credits_to_rub(credits: int) -> int:
-    return max(1, math.ceil(credits * RUB_PER_1000_CREDITS / 1000))
+    return max(1, math.ceil(credits / settings.billing_credits_per_rub))
+
+
+def usage_credits_to_rub(credits: int) -> Decimal:
+    """Exact display value for usage; unlike invoice pricing it is never rounded up to 1 ₽."""
+    return Decimal(abs(credits)) / Decimal(settings.billing_credits_per_rub)
 
 
 def request_topup(db: Session, user: User, credits: int) -> CreditTopUp:

@@ -24,6 +24,7 @@ from typing import Protocol
 
 from sqlalchemy.orm import Session
 
+from src.core.config import settings
 from src.services import project_git
 from src.services.docker_control_queue import submit_control_job
 from src.services.orchestration.evidence import scan_for_secret_leaks
@@ -51,6 +52,7 @@ class CapabilityProvider(Protocol):
 # --------------------------------------------------------------------------------------------
 
 PLATFORM_CAPABILITY_BUILD_CHECK = "platform.build_check"
+PLATFORM_CAPABILITY_PREVIEW_CHECK = "platform.preview_check"
 PLATFORM_CAPABILITY_GIT_DIFF_STAT = "platform.git_diff_stat"
 PLATFORM_CAPABILITY_SECRET_SCAN = "platform.secret_scan"
 
@@ -61,6 +63,21 @@ _PLATFORM_DEFINITIONS: dict[str, CapabilityDefinition] = {
         description="Run a Docker build via the worker RPC without deploying (agent/tools.py's build_project, invoked directly).",
         input_schema={},
         output_schema={"ok": "bool", "log_tail": "string"},
+        risk_level=RiskLevel.LOW,
+        side_effects=False,
+        source="platform",
+    ),
+    PLATFORM_CAPABILITY_PREVIEW_CHECK: CapabilityDefinition(
+        id=PLATFORM_CAPABILITY_PREVIEW_CHECK,
+        title="Preview check",
+        description="Boot the generated image in an isolated preview network and inspect it with a real browser.",
+        input_schema={"paths": "list[string]"},
+        output_schema={
+            "status": "passed|issues_found|failed",
+            "pages": "list[object]",
+            "fatal_errors": "list[string]",
+            "warnings": "list[string]",
+        },
         risk_level=RiskLevel.LOW,
         side_effects=False,
         source="platform",
@@ -100,6 +117,8 @@ class PlatformToolCapabilityProvider:
     ) -> CapabilityResult:
         if capability_id == PLATFORM_CAPABILITY_BUILD_CHECK:
             return await self._build_check(context)
+        if capability_id == PLATFORM_CAPABILITY_PREVIEW_CHECK:
+            return await self._preview_check(context, arguments)
         if capability_id == PLATFORM_CAPABILITY_GIT_DIFF_STAT:
             return self._git_diff_stat(context, arguments)
         if capability_id == PLATFORM_CAPABILITY_SECRET_SCAN:
@@ -122,6 +141,43 @@ class PlatformToolCapabilityProvider:
                 status="failed", error="build_check RPC timed out or worker unreachable"
             )
         return CapabilityResult(status="completed" if result.get("ok") else "failed", output=result)
+
+    async def _preview_check(
+        self, context: CapabilityContext, arguments: dict
+    ) -> CapabilityResult:
+        import asyncio
+
+        paths = arguments.get("paths")
+        if not isinstance(paths, list):
+            paths = ["/"]
+        result = await asyncio.to_thread(
+            submit_control_job,
+            action="preview",
+            project_id=str(context.project_id),
+            timeout_seconds=max(30, int(settings.preview_timeout_seconds) + 30),
+            extra={"paths": paths},
+        )
+        if result is None:
+            error = "preview RPC timed out or worker unreachable"
+            return CapabilityResult(
+                status="failed",
+                output={
+                    "status": "failed",
+                    "pages": [],
+                    "fatal_errors": [error],
+                    "warnings": [],
+                },
+                error=error,
+            )
+        preview_status = str(result.get("status") or "failed")
+        return CapabilityResult(
+            status="completed" if preview_status == "passed" else "failed",
+            output=result,
+            error=None
+            if preview_status == "passed"
+            else "; ".join(str(item) for item in (result.get("fatal_errors") or []))
+            or f"preview status={preview_status}",
+        )
 
     def _git_diff_stat(self, context: CapabilityContext, arguments: dict) -> CapabilityResult:
         workspace_root = Path(arguments.get("workspace_root", ""))

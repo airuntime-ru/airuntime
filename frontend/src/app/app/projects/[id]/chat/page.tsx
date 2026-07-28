@@ -32,6 +32,7 @@ import {
   type ChatFileType,
   type ChatType,
   type MessageType,
+  type ModelOptionType,
   type ProvidersType,
 } from "@/lib/api";
 import {
@@ -55,10 +56,13 @@ type QueuedMessage = {
   id: string;
   text: string;
   attachments: ChatFileType[];
+  provider: string;
+  model: string;
 };
 
 const PINNED_KEY = "airuntime_pinned_chats";
 const PROVIDER_KEY = "airuntime_selected_provider";
+const MODEL_KEY = "airuntime_selected_model";
 
 const PROVIDER_LABELS: Record<string, string> = {
   openai: "OpenAI",
@@ -91,6 +95,26 @@ function writeSelectedProvider(value: string) {
   else localStorage.removeItem(PROVIDER_KEY);
 }
 
+function readSelectedModel(): string {
+  if (typeof window === "undefined") return "";
+  return localStorage.getItem(MODEL_KEY) ?? "";
+}
+
+function writeSelectedModel(value: string) {
+  if (typeof window === "undefined") return;
+  if (value) localStorage.setItem(MODEL_KEY, value);
+  else localStorage.removeItem(MODEL_KEY);
+}
+
+function modelPriceLabel(model: ModelOptionType, creditsPerRub = 100): string {
+  if (model.input_credits_per_million === null || model.output_credits_per_million === null) {
+    return "Стоимость зависит от провайдера";
+  }
+  const inputRub = model.input_credits_per_million / creditsPerRub;
+  const outputRub = model.output_credits_per_million / creditsPerRub;
+  return `${inputRub.toLocaleString("ru-RU")} ₽ вход · ${outputRub.toLocaleString("ru-RU")} ₽ выход / 1 млн токенов`;
+}
+
 export default function ProjectChatPage() {
   const params = useParams<{ id: string }>();
   const searchParams = useSearchParams();
@@ -115,6 +139,7 @@ export default function ProjectChatPage() {
   const [toolActivity, setToolActivity] = useState<ToolActivityItem[]>([]);
   const [providers, setProviders] = useState<ProvidersType | null>(null);
   const [selectedProvider, setSelectedProvider] = useState<string>(() => readSelectedProvider());
+  const [selectedModel, setSelectedModel] = useState<string>(() => readSelectedModel());
   const [providerMenuOpen, setProviderMenuOpen] = useState(false);
   const [stickToBottom, setStickToBottom] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -162,9 +187,29 @@ export default function ProjectChatPage() {
 
   useEffect(() => {
     getProviders()
-      .then(setProviders)
+      .then((data) => {
+        setProviders(data);
+        if (selectedProvider && !data.configured?.[selectedProvider]) {
+          setSelectedProvider("");
+          writeSelectedProvider("");
+          setSelectedModel("");
+          writeSelectedModel("");
+          return;
+        }
+        const configuredModels = data.models?.[selectedProvider] ?? [];
+        if (
+          selectedProvider &&
+          (!selectedModel || !configuredModels.some((model) => model.id === selectedModel))
+        ) {
+          const fallback = configuredModels[0]?.id ?? data.defaults?.[selectedProvider] ?? "";
+          if (fallback) {
+            setSelectedModel(fallback);
+            writeSelectedModel(fallback);
+          }
+        }
+      })
       .catch(() => setProviders(null));
-  }, []);
+  }, [selectedModel, selectedProvider]);
 
   useEffect(() => {
     if (!providerMenuOpen) return undefined;
@@ -305,7 +350,12 @@ export default function ProjectChatPage() {
     abortChatStream(projectId, chatId);
   };
 
-  const runTurn = async (userMessage: string, attachments: ChatFileType[]) => {
+  const runTurn = async (
+    userMessage: string,
+    attachments: ChatFileType[],
+    provider = selectedProvider,
+    model = selectedModel
+  ) => {
     if ((!userMessage.trim() && attachments.length === 0) || !projectId || !chatId) return;
     setChatError("");
     setStickToBottom(true);
@@ -324,7 +374,8 @@ export default function ProjectChatPage() {
       createMessage: () => createMessage(projectId, chatId, userMessage, attachments.map((f) => f.id)),
       streamRequest: (signal) =>
         streamChat(projectId, chatId, userMessage, attachments.map((f) => f.id), {
-          provider: selectedProvider || undefined,
+          provider: provider || undefined,
+          model: model || undefined,
           signal,
         }),
     });
@@ -371,7 +422,7 @@ export default function ProjectChatPage() {
     const [next, ...rest] = queue;
     const timer = window.setTimeout(() => {
       setQueue(rest);
-      void runTurn(next.text, next.attachments);
+      void runTurn(next.text, next.attachments, next.provider, next.model);
     }, 0);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -385,7 +436,16 @@ export default function ProjectChatPage() {
     setInput("");
     setPendingFiles([]);
     if (loading) {
-      setQueue((prev) => [...prev, { id: crypto.randomUUID(), text: userMessage, attachments }]);
+      setQueue((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          text: userMessage,
+          attachments,
+          provider: selectedProvider,
+          model: selectedModel,
+        },
+      ]);
       return;
     }
     await runTurn(userMessage, attachments);
@@ -401,12 +461,19 @@ export default function ProjectChatPage() {
       if (item) {
         setInput(item.text);
         setPendingFiles(item.attachments);
+        setSelectedProvider(item.provider);
+        writeSelectedProvider(item.provider);
+        setSelectedModel(item.model);
+        writeSelectedModel(item.model);
       }
       return prev.filter((row) => row.id !== id);
     });
   };
 
   const canSend = Boolean(chatId) && (input.trim().length > 0 || pendingFiles.length > 0);
+  const selectedModelOption = providers?.models?.[selectedProvider]?.find(
+    (option) => option.id === selectedModel
+  );
   const currentTitle = filteredChats.find((chat) => chat.id === chatId)?.title ?? "Диалог";
   const streamingMessage = messages[messages.length - 1];
   const liveStreamChars =
@@ -579,7 +646,7 @@ export default function ProjectChatPage() {
             <form
               onSubmit={(event) => void onSubmit(event)}
               className={cn(
-                "overflow-hidden rounded-[var(--ar-radius-md)] border border-black/12 bg-white transition-colors focus-within:border-[var(--ar-sky)]/40",
+                "relative z-30 overflow-visible rounded-[var(--ar-radius-md)] border border-black/12 bg-white transition-colors focus-within:border-[var(--ar-sky)]/40",
                 pendingFiles.length > 0 && "rounded-t-none border-t-0"
               )}
             >
@@ -620,22 +687,24 @@ export default function ProjectChatPage() {
                   <button
                     type="button"
                     onClick={() => setProviderMenuOpen((prev) => !prev)}
-                    className="inline-flex min-h-10 max-w-[12rem] items-center gap-1 truncate rounded-[0.5rem] border border-black/10 bg-[#fafafa] px-2.5 text-xs font-medium text-[var(--ar-mist)] hover:bg-black/5"
+                    className="inline-flex min-h-10 max-w-[14rem] items-center gap-1 truncate rounded-[0.5rem] border border-black/10 bg-[#fafafa] px-2.5 text-xs font-medium text-[var(--ar-mist)] hover:bg-black/5"
                   >
-                    {selectedProvider
-                      ? (PROVIDER_LABELS[selectedProvider] ?? selectedProvider)
+                    {selectedProvider && selectedModel
+                      ? (selectedModelOption?.label ?? selectedModel)
                       : providers?.auto_model
                         ? `Авто · ${providers.auto_model}`
                         : "Авто"}
                     <ChevronDown size={12} className="opacity-50" aria-hidden />
                   </button>
                   {providerMenuOpen ? (
-                    <div className="absolute bottom-full left-0 mb-2 w-56 overflow-hidden rounded-[var(--ar-radius-md)] border border-black/10 bg-white py-1 shadow-lg">
+                    <div className="absolute bottom-full left-0 z-20 mb-2 max-h-[28rem] w-[22rem] overflow-y-auto rounded-[var(--ar-radius-md)] border border-black/10 bg-white py-1 shadow-lg">
                       <button
                         type="button"
                         onClick={() => {
                           setSelectedProvider("");
                           writeSelectedProvider("");
+                          setSelectedModel("");
+                          writeSelectedModel("");
                           setProviderMenuOpen(false);
                         }}
                         className={cn(
@@ -643,27 +712,56 @@ export default function ProjectChatPage() {
                           !selectedProvider && "font-medium text-[var(--ar-black)]"
                         )}
                       >
-                        <span>Авто</span>
+                        <span>Авто · лучшее качество</span>
+                        <span className="text-xs font-normal text-[var(--ar-stone)]">
+                          Сейчас: {providers?.auto_model ?? "модель выбирается сервером"}
+                        </span>
                       </button>
                       {(providers?.supported ?? []).map((name) => {
                         const configured = providers?.configured?.[name];
+                        const models = providers?.models?.[name] ?? [];
                         return (
-                          <button
+                          <div
                             key={name}
-                            type="button"
-                            disabled={!configured}
-                            onClick={() => {
-                              setSelectedProvider(name);
-                              writeSelectedProvider(name);
-                              setProviderMenuOpen(false);
-                            }}
-                            className={cn(
-                              "flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-40",
-                              selectedProvider === name && "font-medium text-[var(--ar-black)]"
-                            )}
+                            className={cn("border-t border-black/5 py-1", !configured && "opacity-40")}
                           >
-                            <span>{PROVIDER_LABELS[name] ?? name}</span>
-                          </button>
+                            <p className="px-3 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ar-stone)]">
+                              {PROVIDER_LABELS[name] ?? name}
+                              {!configured ? " · не подключён" : ""}
+                            </p>
+                            {models.map((model) => (
+                              <button
+                                key={`${name}:${model.id}`}
+                                type="button"
+                                disabled={!configured}
+                                onClick={() => {
+                                  setSelectedProvider(name);
+                                  writeSelectedProvider(name);
+                                  setSelectedModel(model.id);
+                                  writeSelectedModel(model.id);
+                                  setProviderMenuOpen(false);
+                                }}
+                                className={cn(
+                                  "flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-black/5 disabled:cursor-not-allowed",
+                                  selectedProvider === name &&
+                                    selectedModel === model.id &&
+                                    "bg-black/[0.035]"
+                                )}
+                              >
+                                <span className="text-sm font-medium text-[var(--ar-black)]">
+                                  {model.label}
+                                </span>
+                                {model.description ? (
+                                  <span className="text-xs text-[var(--ar-mist)]">
+                                    {model.description}
+                                  </span>
+                                ) : null}
+                                <span className="text-[10px] text-[var(--ar-stone)]">
+                                  {modelPriceLabel(model, providers?.credits_per_rub)}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
                         );
                       })}
                     </div>

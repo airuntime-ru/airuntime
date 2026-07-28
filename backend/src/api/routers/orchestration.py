@@ -122,9 +122,12 @@ async def create_run(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    provider_name, model = resolve_provider_and_model(
-        provider_override=payload.provider, model_override=payload.model
-    )
+    try:
+        provider_name, model = resolve_provider_and_model(
+            provider_override=payload.provider, model_override=payload.model
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     api_key = (
         resolve_api_key_for_provider(provider_name)
         or getattr(settings, f"{provider_name}_api_key", None)

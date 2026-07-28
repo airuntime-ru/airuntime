@@ -76,6 +76,13 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      DEFAULT_MODEL_OPENAI: ${DEFAULT_MODEL_OPENAI:-gpt-5.6-sol}
+      DEFAULT_MODEL_OPENROUTER: ${DEFAULT_MODEL_OPENROUTER:-openai/gpt-5.6-sol}
+      BILLING_CREDITS_PER_RUB: ${BILLING_CREDITS_PER_RUB:-100}
+      BILLING_USD_TO_RUB: ${BILLING_USD_TO_RUB:-100}
+      CODEX_REASONING_EFFORT: ${CODEX_REASONING_EFFORT:-max}
+      CODEX_SIMPLE_TIMEOUT_SECONDS: ${CODEX_SIMPLE_TIMEOUT_SECONDS:-300}
+      ORCHESTRATION_TASK_DEFAULT_TIMEOUT_SECONDS: ${ORCHESTRATION_TASK_DEFAULT_TIMEOUT_SECONDS:-1800}
       # Every agent/orchestration capability (specialist roles, skills, MCP, worktree
       # isolation, replanning, preview/design review) always runs - there are no on/off
       # switches for them any more. Run `docker compose build preview` once so the preview
@@ -121,6 +128,13 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      DEFAULT_MODEL_OPENAI: ${DEFAULT_MODEL_OPENAI:-gpt-5.6-sol}
+      DEFAULT_MODEL_OPENROUTER: ${DEFAULT_MODEL_OPENROUTER:-openai/gpt-5.6-sol}
+      BILLING_CREDITS_PER_RUB: ${BILLING_CREDITS_PER_RUB:-100}
+      BILLING_USD_TO_RUB: ${BILLING_USD_TO_RUB:-100}
+      CODEX_REASONING_EFFORT: ${CODEX_REASONING_EFFORT:-max}
+      CODEX_SIMPLE_TIMEOUT_SECONDS: ${CODEX_SIMPLE_TIMEOUT_SECONDS:-300}
+      ORCHESTRATION_TASK_DEFAULT_TIMEOUT_SECONDS: ${ORCHESTRATION_TASK_DEFAULT_TIMEOUT_SECONDS:-1800}
       # Per-turn Codex containers get Docker through the restricted proxy below. The worker
       # itself still needs the host socket to create deployments and those isolated turns.
       CODEX_DOCKER_HOST: ${CODEX_DOCKER_HOST:-tcp://docker-socket-proxy:2375}

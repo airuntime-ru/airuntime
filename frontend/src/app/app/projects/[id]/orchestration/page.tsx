@@ -199,9 +199,20 @@ function RunDetailView({
         </div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--ar-stone)]">
           <span>
-            Потрачено кредитов: {detail.credits_used}
+            Потрачено: {detail.credits_used.toLocaleString("ru-RU")} кредитов ·{" "}
+            {detail.cost_rub.toLocaleString("ru-RU", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}{" "}
+            ₽
             {detail.credit_budget ? ` из ${detail.credit_budget}` : ""}
           </span>
+          {detail.model ? (
+            <span>
+              Модель: {detail.model}
+              {detail.provider ? ` · ${detail.provider}` : ""}
+            </span>
+          ) : null}
           {detail.error_code === "budget_exceeded" ? (
             <span className="text-amber-700">
               Бюджет исчерпан — пополните баланс и нажмите «Продолжить»

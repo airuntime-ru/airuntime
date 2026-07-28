@@ -1,5 +1,8 @@
 from pathlib import Path
 
+import pytest
+
+from src.services.agent import codex_runtime
 from src.services.agent.codex_runtime import _map_event, _relativize
 from src.services.agent.events import TextDelta, ToolCallRequested, ToolCallResult
 
@@ -110,3 +113,32 @@ def test_agent_message_completed_yields_text_delta():
     }
     events = _map_event(payload)
     assert events == [TextDelta(text="Привет")]
+
+
+@pytest.mark.asyncio
+async def test_idle_timeout_stops_the_attempt_container(monkeypatch) -> None:
+    class _Redis:
+        def blpop(self, key, timeout):  # noqa: ANN001, ARG002
+            return None
+
+    stopped = []
+
+    async def _fake_cancel(**kwargs):  # noqa: ANN003
+        stopped.append(kwargs)
+        return True
+
+    monkeypatch.setattr(codex_runtime, "_redis", lambda: _Redis())
+    monkeypatch.setattr(codex_runtime, "_MAX_IDLE_SECONDS", -1)
+    monkeypatch.setattr(codex_runtime, "cancel_codex_run", _fake_cancel)
+
+    events = [
+        event
+        async for event in codex_runtime._stream_events(
+            "attempt-id",
+            timeout_seconds=60,
+            project_id="project-id",
+        )
+    ]
+
+    assert stopped == [{"project_id": "project-id", "correlation_id": "attempt-id"}]
+    assert events[0]["type"] == "infra_error"

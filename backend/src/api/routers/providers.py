@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from src.api.dependencies.auth import get_current_user
 from src.core.config import CURATED_TOP_MODELS, settings
 from src.db.models.user import User
+from src.services.model_pricing import public_model_options
 from src.services.provider.factory import resolve_provider_and_model
 from src.services.system_settings import resolve_api_key_for_provider
 
@@ -18,6 +19,8 @@ class ProviderConfigResponse(BaseModel):
     auto_model: str
     defaults: dict[str, str]
     top_models: dict[str, list[str]]
+    models: dict[str, list[dict]]
+    credits_per_rub: int
 
 
 @router.get("", response_model=ProviderConfigResponse)
@@ -45,4 +48,9 @@ def list_providers(_: User = Depends(get_current_user)) -> ProviderConfigRespons
             "openrouter": settings.default_model_openrouter,
         },
         top_models=dict(CURATED_TOP_MODELS),
+        models={
+            provider: public_model_options(provider)
+            for provider in ("openai", "anthropic", "gemini", "openrouter")
+        },
+        credits_per_rub=settings.billing_credits_per_rub,
     )

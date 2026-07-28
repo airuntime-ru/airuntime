@@ -2,10 +2,10 @@
 time. capability_router.py / capability_provider.py import `registry` from here, never build
 their own skill list - this is the single source of truth for "which skills exist".
 
-All 18 skills named in spec section 10:
+All built-in skills named in spec section 10 plus the independent product-quality gate:
   provision_postgres, provision_mysql, provision_redis, provision_mongodb, provision_rabbitmq,
   provision_custom_service, telegram_bot_setup, database_migrations, visual_preview_review,
-  accessibility_review, build_repair, deploy_repair, secret_slot_setup,
+  accessibility_review, product_quality_review, build_repair, deploy_repair, secret_slot_setup,
   dependency_health_check, project_structure_review, runtime_health_check,
   release_checkpoint, rollback_release.
 """
@@ -22,6 +22,7 @@ from src.services.orchestration.skills.preview_review import (
     AccessibilityReviewSkill,
     VisualPreviewReviewSkill,
 )
+from src.services.orchestration.skills.product_review import ProductQualityReviewSkill
 from src.services.orchestration.skills.provisioning import build_provisioning_skills
 from src.services.orchestration.skills.release import ReleaseCheckpointSkill, RollbackReleaseSkill
 from src.services.orchestration.skills.repair import BuildRepairSkill, DeployRepairSkill
@@ -39,6 +40,7 @@ def build_default_registry() -> SkillRegistry:
         DatabaseMigrationsSkill(),
         VisualPreviewReviewSkill(),
         AccessibilityReviewSkill(),
+        ProductQualityReviewSkill(),
         BuildRepairSkill(),
         DeployRepairSkill(),
         SecretSlotSetupSkill(),

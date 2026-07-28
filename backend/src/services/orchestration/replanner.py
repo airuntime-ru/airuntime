@@ -14,7 +14,9 @@ divergent copy of information the database already holds authoritatively.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from src.db.models.agent_task import AgentTask
 from src.services.orchestration.failure_policy import FailureEvaluation
@@ -95,6 +97,7 @@ async def generate_replan(
     model: str,
     api_key: str,
     max_tasks: int,
+    usage_sink: Callable[[dict[str, Any]], None] | None = None,
 ) -> PlanGenerationResult:
     user_message = build_replan_user_message(
         original_request=original_request,
@@ -110,4 +113,5 @@ async def generate_replan(
         model=model,
         api_key=api_key,
         max_tasks=max_tasks,
+        usage_sink=usage_sink,
     )

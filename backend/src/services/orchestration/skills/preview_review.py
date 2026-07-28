@@ -13,9 +13,13 @@ completeness check leans on.
 
 from __future__ import annotations
 
+import base64
+from pathlib import Path
+
 from src.services.agent.pipeline_llm import complete_structured
 from src.services.agent.pipeline_models import PreviewResult, ReviewResult
 from src.services.docker_control_queue import submit_control_job
+from src.services.file_context import MAX_IMAGE_BYTES, ImageAttachment
 from src.services.orchestration.schemas import (
     RetryPolicy,
     RiskLevel,
@@ -24,18 +28,30 @@ from src.services.orchestration.schemas import (
     SpecialistRole,
 )
 from src.services.orchestration.skills.base import SkillContext
-from src.services.orchestration.skills.common import BaseSkill
+from src.services.orchestration.skills.common import BaseSkill, aggregate_usage
 
-_REVIEW_SYSTEM_PROMPT = """Ты - независимый ревьюер качества продукта на платформе AIRuntime.
-Тебе НЕ показывают код или рассуждения агента, который делал сайт - только бриф (цель и
-критерии приёмки) и результат автоматической проверки в браузере (текст и заголовки страницы,
-консольные ошибки, битые ссылки/картинки, переполнения). Оцени, стал ли запрос пользователя
-реальным работающим продуктом."""
+_REVIEW_SYSTEM_PROMPT = """Ты - независимый арт-директор и ревьюер качества продукта на
+платформе AIRuntime. Тебе НЕ показывают код или рассуждения агента, который делал сайт:
+только бриф, машинные данные браузера и реальные скриншоты desktop/mobile.
+
+Проверяй строго, как работу коммерческой дизайн-студии:
+- первый экран за 3 секунды объясняет конкретную ценность и имеет один доминирующий CTA;
+- арт-дирекшн специфичен для продукта, а не generic SaaS/шаблон из карточек;
+- типографика имеет выразительную display/body-пару, ясную иерархию и читаемые длины строк;
+- палитра, изображения/графика, сетка, радиусы и отступы образуют одну систему;
+- секции различаются композицией и ритмом, есть воздух и осмысленная асимметрия;
+- весь копирайт предметный, без lorem, метатекста о создании сайта и пустых обещаний;
+- mobile 390px не является ужатым desktop: CTA доступен, ничего не обрезано и не переполнено;
+- нет битых изображений, 4xx/5xx, console errors и горизонтального скролла.
+
+Не ставь pass из вежливости. Generic, визуально бедный или недоказанный результат = revise.
+Ставь высокие баллы только когда это подтверждается скриншотами обоих viewport."""
 
 _ACCESSIBILITY_SYSTEM_PROMPT = """Ты - независимый ревьюер доступности (accessibility) на
 платформе AIRuntime. Тебе НЕ показывают код - только результат автоматической проверки в
-браузере. Сфокусируйся на: контрасте, семантической разметке, alt-тексте изображений,
-доступности с клавиатуры, aria-атрибутах. Не оценивай общий дизайн вне доступности."""
+браузере и реальные скриншоты desktop/mobile. Сфокусируйся на: контрасте, семантической
+разметке, alt-тексте изображений, доступности с клавиатуры, aria-атрибутах, размере touch
+targets и отсутствии обрезания на мобильном. Не оценивай общий дизайн вне доступности."""
 
 _INFRA_FAILURE_MARKERS = (
     "worker may be unavailable",
@@ -61,15 +77,87 @@ def _deterministic_gate(preview: PreviewResult) -> ReviewResult | None:
         )
     if any(page.broken_images for page in preview.pages):
         return ReviewResult(verdict="revise", major_issues=["broken images detected in preview"])
+    deterministic_issues: list[str] = []
+    if any(page.console_errors for page in preview.pages):
+        deterministic_issues.append("browser console errors detected")
+    if any(page.network_errors for page in preview.pages):
+        deterministic_issues.append("4xx/5xx or failed network requests detected")
+    if any(page.overflow_elements for page in preview.pages):
+        deterministic_issues.append("horizontal overflow detected")
+    if deterministic_issues:
+        return ReviewResult(verdict="revise", major_issues=deterministic_issues)
     return None
+
+
+def _load_screenshots(
+    preview: PreviewResult, *, workspace_root: str
+) -> tuple[list[ImageAttachment], Path | None]:
+    """Load only preview-owned PNGs and return their common run directory.
+
+    That directory, rather than the project checkout, is mounted for an OpenAI/Codex visual
+    review. The reviewer can inspect screenshots but cannot read the implementation it judges.
+    """
+    root = Path(workspace_root).resolve()
+    images: list[ImageAttachment] = []
+    screenshot_dir: Path | None = None
+    for page in preview.pages:
+        if not page.screenshot_ref:
+            continue
+        candidate = (root / page.screenshot_ref).resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            continue
+        if candidate.suffix.lower() != ".png" or not candidate.is_file():
+            continue
+        if candidate.stat().st_size > MAX_IMAGE_BYTES:
+            continue
+        if screenshot_dir is None:
+            screenshot_dir = candidate.parent
+        elif candidate.parent != screenshot_dir:
+            continue
+        images.append(
+            ImageAttachment(
+                filename=candidate.name,
+                content_type="image/png",
+                data_base64=base64.b64encode(candidate.read_bytes()).decode("ascii"),
+            )
+        )
+    return images, screenshot_dir
+
+
+def _apply_score_gate(
+    review: ReviewResult, *, floors: dict[str, int]
+) -> ReviewResult:
+    failed = [
+        f"{field}={getattr(review.score, field)} (minimum {minimum})"
+        for field, minimum in floors.items()
+        if getattr(review.score, field) < minimum
+    ]
+    hard_issues = bool(review.critical_issues or review.major_issues)
+    if not failed and not hard_issues and review.verdict == "pass":
+        return review
+    additions = [f"quality threshold not met: {item}" for item in failed]
+    return review.model_copy(
+        update={
+            "verdict": "blocked" if review.verdict == "blocked" else "revise",
+            "major_issues": [*review.major_issues, *additions],
+            "recommended_fixes": [
+                *review.recommended_fixes,
+                *[f"Raise {item.split('=')[0]} above the review threshold" for item in failed],
+            ],
+        }
+    )
 
 
 class _PreviewReviewSkillBase(BaseSkill):
     _system_prompt: str
+    _score_floors: dict[str, int] = {}
 
     async def execute(self, context: SkillContext) -> SkillResult:
         targets = context.arguments.get("targets") or [
-            {"path": "/", "viewport": {"width": 1440, "height": 900}}
+            {"path": "/", "viewport": {"width": 1440, "height": 900}},
+            {"path": "/", "viewport": {"width": 390, "height": 844}},
         ]
         raw = await self._run_preview(context, targets)
         if raw is None:
@@ -92,9 +180,20 @@ class _PreviewReviewSkillBase(BaseSkill):
             )
 
         gated = _deterministic_gate(preview)
+        images, screenshot_dir = _load_screenshots(
+            preview, workspace_root=context.workspace_root
+        )
         brief_text = context.arguments.get("brief_text", "")
-        user_text = f"Бриф (цель и критерии приёмки):\n{brief_text}\n\nРезультат автоматической проверки в браузере:\n{preview.model_dump_json(indent=2)}"
+        user_text = (
+            f"Бриф (цель и критерии приёмки):\n{brief_text}\n\n"
+            "Результат автоматической проверки в браузере:\n"
+            f"{preview.model_dump_json(indent=2)}\n\n"
+            f"К ответу приложено скриншотов: {len(images)}. Сопоставь имя каждого PNG с "
+            "screenshot_ref и viewport в JSON. Если скриншотов нет или одного из двух "
+            "viewport не хватает, не считай визуальное качество доказанным."
+        )
 
+        usage_records: list[dict] = []
         review = await complete_structured(
             provider_name=context.arguments["provider_name"],
             model=context.arguments["model"],
@@ -103,6 +202,10 @@ class _PreviewReviewSkillBase(BaseSkill):
             user_text=user_text,
             response_model=ReviewResult,
             timeout_seconds=90,
+            images=images,
+            codex_workspace_root=screenshot_dir,
+            codex_project_id=context.project_id,
+            usage_sink=usage_records.append,
         )
         if review is None:
             review = gated or ReviewResult(
@@ -118,12 +221,17 @@ class _PreviewReviewSkillBase(BaseSkill):
                     "verdict": "blocked" if gated.verdict == "blocked" else review.verdict,
                 }
             )
+        review = _apply_score_gate(review, floors=self._score_floors)
 
         needs_fix = review.verdict in ("revise", "blocked") or bool(review.critical_issues)
         return SkillResult(
             status="partial" if needs_fix else "completed",
             summary=f"review verdict={review.verdict}",
-            output={"preview": preview.model_dump(), "review": review.model_dump()},
+            output={
+                "preview": preview.model_dump(),
+                "review": review.model_dump(),
+                "usage": aggregate_usage(usage_records),
+            },
         )
 
     async def _run_preview(self, context: SkillContext, targets: list[dict]) -> dict | None:
@@ -140,6 +248,15 @@ class _PreviewReviewSkillBase(BaseSkill):
 
 class VisualPreviewReviewSkill(_PreviewReviewSkillBase):
     _system_prompt = _REVIEW_SYSTEM_PROMPT
+    _score_floors = {
+        "product_completeness": 80,
+        "visual_hierarchy": 82,
+        "originality": 75,
+        "content_quality": 80,
+        "responsive_quality": 80,
+        "accessibility": 75,
+        "functional_honesty": 85,
+    }
     definition = SkillDefinition(
         id="visual_preview_review",
         version="1.0",
@@ -163,6 +280,11 @@ class VisualPreviewReviewSkill(_PreviewReviewSkillBase):
 
 class AccessibilityReviewSkill(_PreviewReviewSkillBase):
     _system_prompt = _ACCESSIBILITY_SYSTEM_PROMPT
+    _score_floors = {
+        "responsive_quality": 80,
+        "accessibility": 85,
+        "functional_honesty": 80,
+    }
     definition = SkillDefinition(
         id="accessibility_review",
         version="1.0",

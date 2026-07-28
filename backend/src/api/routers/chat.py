@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import json
 import logging
 import re
@@ -547,7 +547,15 @@ async def _orchestration_event_source(
             spent = payload.get("credits_used")
             limit = payload.get("credit_budget")
             if spent is not None:
-                label = f"Потрачено кредитов: {spent}" + (f" из {limit}" if limit else "")
+                cost_rub = payload.get("cost_rub")
+                model_name = payload.get("model")
+                label = f"Потрачено: {spent} кредитов"
+                if isinstance(cost_rub, int | float):
+                    label += f" ({cost_rub:.2f} ₽)"
+                if model_name:
+                    label += f" · {model_name}"
+                if limit:
+                    label += f" из {limit}"
                 # Only escalate to a visible warning when the run is genuinely near the ceiling -
                 # a loud running total on every task would just be noise otherwise.
                 if payload.get("status") == "approaching":
@@ -654,8 +662,7 @@ async def _orchestration_event_source(
                 db.add(project)
                 db.commit()
                 token_help_url = (
-                    f"{settings.resolved_frontend_url}/help/telegram-token"
-                    f"?projectId={project.id}"
+                    f"{settings.resolved_frontend_url}/help/telegram-token?projectId={project.id}"
                 )
                 token_note = (
                     "Код бота готов, но запуск остановлен: добавьте секрет TELEGRAM_BOT_TOKEN "
@@ -940,10 +947,13 @@ async def _stream_events(
     # keep the useful tail of oversized log pastes instead of 400/422 rejecting the turn.
     safe_message = prepare_agent_user_message(user_agent_message)
 
-    provider_name, model = resolve_provider_and_model(
-        provider_override=provider_override,
-        model_override=model_override,
-    )
+    try:
+        provider_name, model = resolve_provider_and_model(
+            provider_override=provider_override,
+            model_override=model_override,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     api_key = (
         resolve_api_key_for_provider(provider_name)
         or getattr(settings, f"{provider_name}_api_key", None)

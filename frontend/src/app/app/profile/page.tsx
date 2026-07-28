@@ -61,10 +61,18 @@ function ledgerTitle(entry: CreditLedgerEntryType): string {
 
 function ledgerSubtitle(entry: CreditLedgerEntryType): string {
   const reason = LEDGER_REASON_LABEL[entry.reason] ?? entry.reason;
+  const model = entry.model ? ` · ${entry.model}` : "";
   if (entry.project_name && entry.reason === "chat_message") {
-    return `${reason} · ${formatDateTime(entry.created_at)}`;
+    return `${reason}${model} · ${formatDateTime(entry.created_at)}`;
   }
   return formatDateTime(entry.created_at);
+}
+
+function formatRub(value: number): string {
+  return value.toLocaleString("ru-RU", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 // "до N проектов": genitive case throughout, so only the "N=1" form differs ("до 1 проекта" vs "до 5 проектов").
@@ -323,8 +331,15 @@ export default function ProfilePage() {
                     <span
                       className={`shrink-0 font-semibold tabular-nums ${entry.amount >= 0 ? "text-emerald-600" : "text-[var(--ar-black)]"}`}
                     >
-                      {entry.amount >= 0 ? "+" : ""}
-                      {entry.amount.toLocaleString()}
+                      <span>
+                        {entry.amount >= 0 ? "+" : ""}
+                        {entry.amount.toLocaleString()} кредитов
+                      </span>
+                      {entry.cost_rub !== null ? (
+                        <span className="ml-1.5 text-xs font-normal text-[var(--ar-stone)]">
+                          · {formatRub(entry.cost_rub)} ₽
+                        </span>
+                      ) : null}
                     </span>
                   </div>
                 ))}

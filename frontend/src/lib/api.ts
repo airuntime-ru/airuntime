@@ -88,6 +88,20 @@ export type ProvidersType = {
   auto_model?: string;
   defaults?: Record<string, string>;
   top_models?: Record<string, string[]>;
+  models?: Record<string, ModelOptionType[]>;
+  credits_per_rub?: number;
+};
+
+export type ModelOptionType = {
+  id: string;
+  label: string;
+  description: string;
+  tier: "quality" | "balanced" | "economy" | "other";
+  input_usd_per_million: number | null;
+  cached_input_usd_per_million: number | null;
+  output_usd_per_million: number | null;
+  input_credits_per_million: number | null;
+  output_credits_per_million: number | null;
 };
 
 export type ProjectRuntimeLimitsType = {
@@ -602,6 +616,14 @@ export type CreditLedgerEntryType = {
   reason: "chat_message" | "topup" | "period_renewal" | "plan_change";
   project_id: string | null;
   project_name: string | null;
+  provider: string | null;
+  model: string | null;
+  input_tokens: number | null;
+  cached_input_tokens: number | null;
+  cache_write_input_tokens: number | null;
+  output_tokens: number | null;
+  provider_cost_usd: number | null;
+  cost_rub: number | null;
   created_at: string;
 };
 
@@ -631,7 +653,10 @@ export type OrchestrationRunType = {
   original_request: string | null;
   complexity: string | null;
   plan_version: number;
+  provider: string | null;
+  model: string | null;
   credits_used: number;
+  cost_rub: number;
   credit_budget: number | null;
   cancel_requested: boolean;
   error_code: string | null;

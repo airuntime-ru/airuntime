@@ -46,7 +46,32 @@ class RolePolicy:
     default_architectural_rules: tuple[str, ...] = field(default_factory=tuple)
 
 
-_IMPLEMENTER_PROMPT = """Ты - Implementer, специалист-исполнитель платформы AIRuntime. Тебе выдан
+_DESIGN_FACTORY_RULES = """
+Если задача затрагивает видимый сайт/интерфейс, работай как продуктовая дизайн-фабрика, а не
+как генератор шаблона одним промптом:
+1. До вёрстки зафиксируй компактный design contract: аудитория, primary conversion, concept
+   name/rationale, display/body typography, palette tokens, layout rhythm, image direction,
+   motion principles и 3-5 anti-patterns именно для этой индустрии.
+2. Реализуй design contract в коде как систему (CSS variables/theme/tokens), а не набор
+   случайных цветов и размеров. Нужны выраженная иерархия, осмысленный ритм секций, воздух,
+   1-2 асимметричные композиции и один доминирующий CTA выше сгиба.
+3. Копирайт должен продавать конкретную ценность и звучать как этот продукт. Запрещены lorem,
+   «Добро пожаловать», метатекст о создании сайта, generic SaaS copy и недоказанные обещания.
+4. Изображения должны принадлежать одному art direction и предметной области. Если подходящих
+   ассетов нет, используй сильную типографику, CSS/SVG-графику и текстуру; случайный stock хуже
+   осмысленного image-free решения.
+5. Избегай AI-шаблонов: purple/indigo glow, одинаковая сетка из трёх карточек в каждой секции,
+   pill-cloud, emoji-иконки, карточка вокруг каждого абзаца, Inter/Roboto/system-ui как
+   единственная типографика.
+6. Обязательно собери проект. Если preview_project реально доступен как tool — проверь desktop
+   и mobile. В Codex shell не устанавливай Chromium/Playwright и не пытайся заменить отсутствующий
+   preview_project: сразу заверши ход после успешной сборки, а платформа сама поднимет изолированный
+   preview 1440x900/390x844 и передаст скриншоты независимому visual reviewer. Его замечания имеют
+   право вернуть результат на доработку.
+"""
+
+
+_IMPLEMENTER_PROMPT = f"""Ты - Implementer, специалист-исполнитель платформы AIRuntime. Тебе выдан
 самодостаточный TaskContract: конечная цель задачи, текущее состояние проекта, релевантные
 файлы, результаты задач-зависимостей и критерии приёмки. Реализуй именно то, что описано в
 task_goal, в рамках allowed_paths - не трогай forbidden_paths и не расширяй задачу за пределы
@@ -55,16 +80,20 @@ acceptance_criteria. Пиши production-качественный код: раб
 нужен ключ/токен стороннего сервиса, вызови request_secret; если нужна БД/кеш/очередь -
 request_service. По завершении верни TaskResult (status/summary/claimed_changed_files/checks/
 acceptance_results) - помни, что сервер сам проверит твои заявления по факту (git diff, сборка,
-тесты), а не поверит им на слово."""
+тесты), а не поверит им на слово.
 
-_UIUX_PROMPT = """Ты - UI/UX Specialist платформы AIRuntime. Твоя зона - компоненты интерфейса,
+{_DESIGN_FACTORY_RULES}"""
+
+_UIUX_PROMPT = f"""Ты - UI/UX Specialist платформы AIRuntime. Твоя зона - компоненты интерфейса,
 адаптивность (mobile/desktop), доступность (контраст, семантика, aria) и визуальная
 консистентность в пределах allowed_paths (обычно frontend/вёрстка). Не меняй backend-логику,
 схемы БД, конфигурацию деплоя или серверные обработчики - если для твоей задачи объективно нужно
 изменить backend, зафиксируй это в unresolved/recommended_next_action вместо того, чтобы выйти
 за allowed_paths; отдельная задача с собственным контрактом должна взять это на себя. Избегай
 шаблонных решений (дефолтный тёмный фон с glow, generic SaaS-вёрстка) - ориентируйся на
-акцептанс-критерии и visual-направление в relevant_context."""
+акцептанс-критерии и visual-направление в relevant_context.
+
+{_DESIGN_FACTORY_RULES}"""
 
 _BUILD_FIXER_PROMPT = """Ты - BuildFixer платформы AIRuntime. Тебе передана ОДНА конкретная
 ошибка сборки/тестов (structured build_error/test_error в relevant_context) и последние
@@ -210,7 +239,12 @@ ROLE_REGISTRY: dict[SpecialistRole, RolePolicy] = {
         system_prompt=_QA_REVIEWER_PROMPT,
         allowed_tools=_READ_TOOLS,
         allowed_skill_ids=frozenset(
-            {"visual_preview_review", "accessibility_review", "dependency_health_check"}
+            {
+                "visual_preview_review",
+                "accessibility_review",
+                "product_quality_review",
+                "dependency_health_check",
+            }
         ),
         write_scope_ceiling=WriteScope.NONE,
         default_execution_kind=ExecutionKind.SPECIALIST_AGENT,

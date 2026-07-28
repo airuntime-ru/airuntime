@@ -23,6 +23,7 @@ import json
 import logging
 import uuid
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 import docker
 from docker.errors import APIError, DockerException, ImageNotFound, NotFound
@@ -153,6 +154,23 @@ def _empty_result(fatal_error: str) -> dict:
     return {"status": "failed", "pages": [], "fatal_errors": [fatal_error], "warnings": []}
 
 
+def _container_failure_details(container: Any, wait_result: Any) -> str:
+    """Return a short, safe diagnostic when the runner exits without its result contract."""
+    status_code = wait_result.get("StatusCode") if isinstance(wait_result, dict) else None
+    try:
+        raw_logs = container.logs(stdout=True, stderr=True, tail=40)
+    except DockerException:
+        raw_logs = b""
+    if isinstance(raw_logs, bytes):
+        logs = raw_logs.decode("utf-8", errors="replace")
+    else:
+        logs = str(raw_logs or "")
+    # Runner logs contain only browser/runtime diagnostics, but keep the API error bounded.
+    logs = " ".join(logs.split())[-1500:]
+    suffix = f" (exit code {status_code})" if status_code is not None else ""
+    return f"{suffix}: {logs}" if logs else suffix
+
+
 def run_preview(
     project: Project,
     *,
@@ -242,7 +260,7 @@ def run_preview(
         )
 
         try:
-            runner_container.wait(timeout=effective_timeout)
+            wait_result = runner_container.wait(timeout=effective_timeout)
         except Exception as exc:  # noqa: BLE001 - docker-py's wait-timeout exception type
             # varies by version/transport; any failure to observe completion in time is
             # treated the same way: stop waiting, report a timeout, clean up below.
@@ -253,7 +271,10 @@ def run_preview(
 
         result_path = worker_local_dir / "result.json"
         if not result_path.exists():
-            return _empty_result("Preview container exited without producing a result")
+            details = _container_failure_details(runner_container, wait_result)
+            return _empty_result(
+                f"Preview container exited without producing a result{details}"
+            )
         try:
             data = json.loads(result_path.read_text(encoding="utf-8"))
             # run_preview.py only knows the bare filename it wrote (page_x.png) - rewrite to a

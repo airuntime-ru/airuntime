@@ -39,7 +39,20 @@ def test_record_usage_snapshots_project_name(db: Session):
     user = _user(db)
     project = _project(db, user, name="My Shop")
 
-    record_usage(db, user, project_id=project.id, amount=250, project_name=project.name)
+    record_usage(
+        db,
+        user,
+        project_id=project.id,
+        amount=250,
+        project_name=project.name,
+        provider="openai",
+        model="gpt-5.6-terra",
+        input_tokens=1_000,
+        cached_input_tokens=100,
+        cache_write_input_tokens=200,
+        output_tokens=50,
+        provider_cost_usd_micros=2_500,
+    )
     db.commit()
 
     entry = db.query(CreditLedgerEntry).one()
@@ -47,6 +60,10 @@ def test_record_usage_snapshots_project_name(db: Session):
     assert entry.reason == "chat_message"
     assert entry.project_id == project.id
     assert entry.project_name == "My Shop"
+    assert entry.provider == "openai"
+    assert entry.model == "gpt-5.6-terra"
+    assert entry.input_tokens == 1_000
+    assert entry.provider_cost_usd_micros == 2_500
     assert user.credits_balance == 9_750
 
 
@@ -123,6 +140,7 @@ def test_billing_usage_api_pagination_and_project_name(client, db: Session):
     assert body["items"][0]["project_name"] == "API Project"
     assert body["items"][0]["amount"] < 0
     assert "project_id" in body["items"][0]
+    assert body["items"][0]["cost_rub"] == abs(body["items"][0]["amount"]) / 100
 
     credits = client.get("/api/v1/billing/usage?direction=credit", headers=headers)
     assert credits.status_code == 200

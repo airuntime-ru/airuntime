@@ -54,6 +54,7 @@ def test_default_registry_has_every_skill_supporting_at_least_one_role_and_type(
     for skill in default_registry.all_skills():
         assert skill.definition.supported_roles, skill.definition.id
         assert skill.definition.supported_project_types, skill.definition.id
+    assert "product_quality_review" in default_registry.all_ids()
 
 
 class TestDatabaseMigrationsSkill:

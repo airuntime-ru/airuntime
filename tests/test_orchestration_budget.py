@@ -35,6 +35,24 @@ class TestEstimateTaskCost:
     def test_empty_usage_dict_falls_back_too(self) -> None:
         assert budget.estimate_task_cost(usage={}, summary_text="x" * 150) == 150
 
+    def test_uses_selected_model_price_when_detailed_usage_is_available(self) -> None:
+        usage = {"input_tokens": 1_000, "output_tokens": 100}
+        sol = budget.estimate_task_cost(
+            usage=usage,
+            summary_text="",
+            provider_name="openai",
+            model="gpt-5.6-sol",
+        )
+        luna = budget.estimate_task_cost(
+            usage=usage,
+            summary_text="",
+            provider_name="openai",
+            model="gpt-5.6-luna",
+        )
+
+        assert sol == 80
+        assert luna == 16
+
 
 class TestBudgetTrackerCheck:
     def test_ok_when_nothing_configured(self) -> None:

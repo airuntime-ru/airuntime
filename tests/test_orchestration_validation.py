@@ -196,6 +196,38 @@ class TestRunValidation:
         result = v.run_validation(contract=contract, result=None, evidence=evidence)
         assert result.accepted is False
 
+    def test_write_task_without_observed_changes_is_rejected(self) -> None:
+        contract = _contract(
+            allowed_paths=["public/"],
+            validation_steps=[
+                ValidationStep(kind="build", description="must build", required=True)
+            ],
+        )
+        evidence = _evidence(build_result={"ok": True})
+
+        result = v.run_validation(contract=contract, result=None, evidence=evidence)
+
+        assert result.accepted is False
+        assert any(
+            finding.step == "changes"
+            and not finding.passed
+            and "no file changes" in finding.message
+            for finding in result.findings
+        )
+
+    def test_read_only_task_without_changes_can_still_pass(self) -> None:
+        contract = _contract(
+            role=SpecialistRole.QA_REVIEWER,
+            allowed_paths=[],
+            forbidden_paths=["*"],
+            validation_steps=[],
+        )
+
+        result = v.run_validation(contract=contract, result=None, evidence=_evidence())
+
+        assert result.accepted is True
+        assert all(finding.step != "changes" for finding in result.findings)
+
     def test_required_build_step_missing_evidence_blocks_acceptance(self) -> None:
         contract = _contract(
             validation_steps=[ValidationStep(kind="build", description="must build", required=True)]

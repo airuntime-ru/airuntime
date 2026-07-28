@@ -470,6 +470,21 @@ class SkillExecutor:
             role=contract.role,
         )
         started = time.monotonic()
+        criteria_text = "\n".join(
+            f"- [{criterion.id}] {criterion.description}"
+            for criterion in contract.acceptance_criteria
+        )
+        dependency_text = "\n".join(
+            f"- [{item.local_id}] {item.title}: {item.summary}"
+            for item in contract.dependency_results
+        )
+        review_brief = (
+            f"Цель проекта: {contract.project_goal}\n"
+            f"Ценность для пользователя: {contract.user_value}\n"
+            f"Задача review: {contract.task_goal}\n"
+            f"Критерии приёмки:\n{criteria_text or '- (не заданы)'}\n"
+            f"Результаты реализации:\n{dependency_text or '- (нет)'}"
+        )
         try:
             result = await _await_or_cancel(
                 self._provider.invoke(
@@ -480,7 +495,7 @@ class SkillExecutor:
                         "provider_name": context.provider_name,
                         "model": context.model,
                         "api_key": context.api_key,
-                        "brief_text": contract.task_goal,
+                        "brief_text": review_brief,
                     },
                     cap_context,
                 ),
@@ -493,16 +508,32 @@ class SkillExecutor:
                 error=cancellation.reason or "cancelled",
             )
         status = "completed" if result.status == "completed" else "partial"
+        output = result.output if isinstance(result.output, dict) else {}
+        review = output.get("review") if isinstance(output.get("review"), dict) else {}
+        review_issues = [
+            *review.get("critical_issues", []),
+            *review.get("major_issues", []),
+            *review.get("recommended_fixes", []),
+        ]
+        review_issues = [str(item) for item in review_issues if str(item).strip()]
+        review_verdict = review.get("verdict")
+        summary = f"skill {skill_id}: {result.status}"
+        if review_verdict:
+            summary += f"; review={review_verdict}"
+        if review_issues:
+            summary += "; " + " | ".join(review_issues[:5])
+        usage = output.get("usage") if isinstance(output.get("usage"), dict) else {}
+        usage = {**usage, "duration_seconds": time.monotonic() - started}
         return AgentExecutionResult(
-            task_result=TaskResult(status=status, summary=f"skill {skill_id}: {result.status}"),
-            usage={"duration_seconds": time.monotonic() - started},
-            build_result=result.output.get("build_result")
-            if isinstance(result.output, dict)
-            else None,
-            preview_result=result.output.get("preview")
-            if isinstance(result.output, dict)
-            else None,
-            runtime_health_result=result.output if skill_id == "runtime_health_check" else None,
+            task_result=TaskResult(
+                status=status,
+                summary=summary,
+                unresolved=review_issues[:10] if status != "completed" else [],
+            ),
+            usage=usage,
+            build_result=output.get("build_result"),
+            preview_result=output.get("preview"),
+            runtime_health_result=output if skill_id == "runtime_health_check" else None,
             error=result.error,
         )
 

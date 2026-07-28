@@ -103,6 +103,14 @@ def _resolve_workspace_mount(client: docker.DockerClient, workspace_cwd: str) ->
         return None
 
 
+def _remove_failed_start_container(client: docker.DockerClient, container_name: str) -> None:
+    """Remove the container Docker may leave behind when ``containers.run`` fails to start it."""
+    try:
+        client.containers.get(container_name).remove(force=True)
+    except DockerException:
+        pass
+
+
 def _build_argv(job: dict, *, model: str, remapped_cwd: str | None) -> list[str]:
     # NOTE: flag names (--skip-git-repo-check, --dangerously-bypass-approvals-and-sandbox,
     # --cd, --image) match the Codex CLI docs at the time this was written. `exec` has no TTY
@@ -118,6 +126,8 @@ def _build_argv(job: dict, *, model: str, remapped_cwd: str | None) -> list[str]
         "--dangerously-bypass-approvals-and-sandbox",
         "--model",
         model,
+        "-c",
+        f'model_reasoning_effort="{settings.codex_reasoning_effort}"',
     ]
     if remapped_cwd:
         argv += ["--cd", remapped_cwd]
@@ -158,21 +168,29 @@ def _login_and_exec_command(argv: list[str]) -> list[str]:
     return ["sh", "-c", script]
 
 
-def _container_env(api_key: str, project_id: str | None) -> dict[str, str]:
+def _container_env(
+    api_key: str, project_id: str | None, *, allow_docker: bool = True
+) -> dict[str, str]:
     env = {"OPENAI_API_KEY": api_key}
     if project_id:
         env["AIRUNTIME_PROJECT_ID"] = project_id
         env["AIRUNTIME_SCRATCH_IMAGE_PREFIX"] = f"airuntime-scratch-{project_id[:12]}"
-    if settings.codex_docker_host:
+    if allow_docker and settings.codex_docker_host:
         env["DOCKER_HOST"] = settings.codex_docker_host
+        # BuildKit's session/upgrade endpoints are intentionally not exposed by the narrowed
+        # Docker socket proxy. The classic builder uses the allowed build API and avoids
+        # repeated "no active session / context deadline exceeded" failures.
+        env["DOCKER_BUILDKIT"] = "0"
     return env
 
 
-def _container_volumes(project_host_path: str | None) -> dict[str, dict[str, str]]:
+def _container_volumes(
+    project_host_path: str | None, *, allow_docker: bool = True
+) -> dict[str, dict[str, str]]:
     volumes: dict[str, dict[str, str]] = {}
     if project_host_path:
         volumes[project_host_path] = {"bind": _WORKSPACE_MOUNT, "mode": "rw"}
-    if not settings.codex_docker_host:
+    if allow_docker and not settings.codex_docker_host:
         # No proxy configured - fall back to the raw host socket (the pre-isolation trust level)
         # so Codex can still build/run project images. Deliberately opt-in-to-narrow rather than
         # opt-in-to-broad: safer default is "at least as isolated as before", not "silently open".
@@ -210,7 +228,8 @@ def iter_codex_events(job: dict) -> Iterator[dict]:
         project_id = str(job.get("project_id") or "") or None
         workspace_host_path = _resolve_workspace_mount(client, str(old_cwd)) if old_cwd else None
 
-        volumes = _container_volumes(workspace_host_path)
+        allow_docker = bool(job.get("allow_docker", True))
+        volumes = _container_volumes(workspace_host_path, allow_docker=allow_docker)
         if old_cwd and workspace_host_path:
             # Scoped mount resolved - remap --cd and any --image paths onto it.
             effective_cwd = _WORKSPACE_MOUNT
@@ -250,6 +269,7 @@ def iter_codex_events(job: dict) -> Iterator[dict]:
         )
         command = _login_and_exec_command(argv)
 
+        container_name = f"airuntime-codex-{job.get('job_id') or uuid.uuid4().hex[:12]}"
         try:
             container = client.containers.run(
                 settings.codex_image,
@@ -262,7 +282,7 @@ def iter_codex_events(job: dict) -> Iterator[dict]:
                 # codex_simple_complete's one-shot planning/review calls and non-orchestrated
                 # turns have no meaningful job_id, so they still fall back to a fresh random
                 # name (unchanged behavior - nothing can or needs to cancel those).
-                name=f"airuntime-codex-{job.get('job_id') or uuid.uuid4().hex[:12]}",
+                name=container_name,
                 labels={
                     "airuntime.managed": "true",
                     "airuntime.role": "codex",
@@ -273,7 +293,7 @@ def iter_codex_events(job: dict) -> Iterator[dict]:
                         else {}
                     ),
                 },
-                environment=_container_env(api_key, project_id),
+                environment=_container_env(api_key, project_id, allow_docker=allow_docker),
                 volumes=volumes,
                 network=settings.codex_network,
                 mem_limit=settings.codex_memory_limit,
@@ -281,6 +301,10 @@ def iter_codex_events(job: dict) -> Iterator[dict]:
                 working_dir=effective_cwd,
             )
         except DockerException as exc:
+            # Docker creates the container before attaching its network. A missing network (or
+            # another start-stage failure) can therefore raise from `run()` while leaving an
+            # unreachable container in `Created`; no object was returned for the outer finally.
+            _remove_failed_start_container(client, container_name)
             yield {"type": "infra_error", "message": f"Could not start Codex container: {exc}"}
             return
 

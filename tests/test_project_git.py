@@ -8,6 +8,7 @@ import pytest
 from src.core.config import settings
 from src.services.project_git import (
     archive_version_stream,
+    changed_files_by_status,
     commit_snapshot,
     init_repo_if_needed,
     list_version_tree,
@@ -55,6 +56,28 @@ def test_list_versions_on_repo_with_no_commits_returns_empty_not_raises(project_
     # exiting 128 ("does not have any commits yet") must read as "no history", not an error.
     init_repo_if_needed(project_dir)
     assert list_versions(project_dir, limit=10) == []
+
+
+def test_platform_preview_artifacts_are_not_committed_or_reported_as_project_changes(project_dir):
+    init_repo_if_needed(project_dir)
+    preview_dir = project_dir / ".airuntime" / "preview" / "run-1"
+    preview_dir.mkdir(parents=True)
+    (preview_dir / "home_1440x900.png").write_bytes(b"png")
+    (preview_dir / "result.json").write_text('{"status":"passed"}', encoding="utf-8")
+    (project_dir / "public").mkdir()
+    _write(project_dir, "public/index.html", "<h1>Hello</h1>\n")
+
+    status = changed_files_by_status(project_dir, base_sha=None, head=None)
+    assert status["added"] == ["public/index.html"]
+
+    commit_hash = commit_snapshot(project_dir, message="site")
+    assert commit_hash is not None
+    names = {
+        entry.name
+        for entry in list_version_tree(project_dir, commit_hash=commit_hash, rel_path="")
+    }
+    assert names == {"public"}
+    assert (preview_dir / "result.json").exists()
 
 
 def test_git_archive_contains_files(project_dir):

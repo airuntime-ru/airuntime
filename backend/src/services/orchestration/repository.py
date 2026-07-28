@@ -19,6 +19,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import ObjectDeletedError
 
 from src.db.models.agent_task import AgentTask
 from src.db.models.mcp_server import McpServer
@@ -356,10 +357,15 @@ class WorkspaceLeaseRepository:
         return lease
 
     def release(self, lease: WorkspaceLease) -> WorkspaceLease:
-        if lease.released_at is None:
-            lease.released_at = datetime.now(UTC)
-            self.db.add(lease)
-            self.db.flush()
+        try:
+            if lease.released_at is None:
+                lease.released_at = datetime.now(UTC)
+                self.db.add(lease)
+                self.db.flush()
+        except ObjectDeletedError:
+            # Project deletion cascades workspace_leases. A concurrent task unwinding after
+            # cancellation must treat the already-deleted lease as successfully released.
+            return lease
         return lease
 
     def get_active_shared(self, project_id: uuid.UUID | str) -> WorkspaceLease | None:

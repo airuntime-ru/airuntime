@@ -395,7 +395,8 @@ class TestSkillExecutor:
         assert arguments["provider_name"] == "openai"
         assert arguments["model"] == "gpt-5.4-mini"
         assert arguments["api_key"] == "k123"
-        assert arguments["brief_text"] == contract.task_goal
+        assert contract.task_goal in arguments["brief_text"]
+        assert contract.project_goal in arguments["brief_text"]
 
     @pytest.mark.asyncio
     async def test_non_completed_status_maps_to_partial_not_failed(self) -> None:
@@ -409,6 +410,31 @@ class TestSkillExecutor:
 
         assert result.task_result.status == "partial"
         assert result.error == "degraded"
+
+    @pytest.mark.asyncio
+    async def test_visual_review_findings_are_preserved_for_replanning(self) -> None:
+        provider = _FakeCapabilityProvider(
+            CapabilityResult(
+                status="failed",
+                error="review verdict=revise",
+                output={
+                    "review": {
+                        "verdict": "revise",
+                        "critical_issues": [],
+                        "major_issues": ["generic hero", "mobile CTA below fold"],
+                        "recommended_fixes": ["rework composition"],
+                    }
+                },
+            )
+        )
+        executor = SkillExecutor(provider)
+        contract = _contract(allowed_skills=["visual_preview_review"])
+
+        result = await executor.execute(contract, _task_context(), cancellation=None)
+
+        assert result.task_result.status == "partial"
+        assert "generic hero" in result.task_result.summary
+        assert "mobile CTA below fold" in result.task_result.unresolved
 
     @pytest.mark.asyncio
     async def test_runtime_health_result_only_for_that_specific_skill(self) -> None:

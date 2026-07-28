@@ -15,6 +15,7 @@
 FROM mcr.microsoft.com/playwright/python:v1.48.0-noble
 
 WORKDIR /app
+RUN pip install --no-cache-dir "playwright==1.48.0"
 COPY deployment/preview/run_preview.py ./run_preview.py
 
 # No fixed CMD args - preview_runner.py always passes explicit env vars (PREVIEW_TARGET_HOST/

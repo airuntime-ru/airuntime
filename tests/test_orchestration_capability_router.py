@@ -13,6 +13,7 @@ from src.services.orchestration import capability_provider
 from src.services.orchestration.capability_provider import (
     PLATFORM_CAPABILITY_BUILD_CHECK,
     PLATFORM_CAPABILITY_GIT_DIFF_STAT,
+    PLATFORM_CAPABILITY_PREVIEW_CHECK,
     PLATFORM_CAPABILITY_SECRET_SCAN,
     PlatformToolCapabilityProvider,
 )
@@ -135,6 +136,32 @@ class TestPlatformToolCapabilityProvider:
         provider = PlatformToolCapabilityProvider()
         result = await provider.invoke(PLATFORM_CAPABILITY_BUILD_CHECK, {}, _ctx())
         assert result.status == "failed"
+
+    @pytest.mark.asyncio
+    async def test_preview_check_collects_real_browser_result(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[dict] = []
+
+        def _preview(**kwargs):  # noqa: ANN003, ANN202
+            calls.append(kwargs)
+            return {
+                "status": "passed",
+                "pages": [{"url": "http://preview/"}],
+                "fatal_errors": [],
+                "warnings": [],
+            }
+
+        monkeypatch.setattr(capability_provider, "submit_control_job", _preview)
+        provider = PlatformToolCapabilityProvider()
+        result = await provider.invoke(
+            PLATFORM_CAPABILITY_PREVIEW_CHECK, {"paths": ["/"]}, _ctx()
+        )
+
+        assert result.status == "completed"
+        assert result.output["status"] == "passed"
+        assert calls[0]["action"] == "preview"
+        assert calls[0]["extra"] == {"paths": ["/"]}
 
     @pytest.mark.asyncio
     async def test_unknown_capability_id_fails_cleanly(self) -> None:

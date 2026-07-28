@@ -43,7 +43,7 @@ import json
 import logging
 import time
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -81,6 +81,9 @@ _CODEX_BRIDGE_INSTRUCTIONS = """\
 локальной проверки внутри своей работы; НЕ публикуй прод через `docker run -p`, НЕ пиши \
 docker-compose.yml для маршрутизации и НЕ настраивай Traefik/прокси/домены - публичный URL и \
 Traefik-labels вешает платформа после хода. Для сайтов HTTP в контейнере должен слушать порт 80.
+Не устанавливай Chromium/Playwright и не делай браузерные скриншоты из этого Codex-контейнера:
+после твоего хода платформа сама запустит изолированный desktop/mobile preview и независимый
+visual review. Твоя локальная проверка заканчивается успешной сборкой и проверкой entrypoint.
 
 Контракт файлов проекта обязателен: для сайта или mixed-проекта точка входа должна находиться
 в `public/index.html` (CSS/JS клади рядом в `public/`), для Telegram-бота — в `app.py`.
@@ -131,6 +134,7 @@ def _submit_run(
     image_paths: list[str],
     timeout_seconds: int,
     job_id: str | None = None,
+    allow_docker: bool = True,
 ) -> str:
     # Every attempt needs its own event key/container identity. Reusing the orchestration task id
     # here left the previous attempt's terminal marker and JSONL tail in Redis; the next retry
@@ -148,6 +152,7 @@ def _submit_run(
         "prompt": prompt,
         "image_paths": image_paths,
         "timeout_seconds": timeout_seconds,
+        "allow_docker": allow_docker,
     }
     _redis().rpush(QUEUE_KEY, json.dumps(job))
     return run_id
@@ -187,6 +192,8 @@ async def _stream_events(
         now = time.monotonic()
         if now > deadline:
             logger.warning("Codex run %s timed out after %ds", run_id, timeout_seconds)
+            if project_id is not None:
+                await cancel_codex_run(project_id=project_id, correlation_id=run_id)
             yield {"type": "infra_error", "message": "Codex run timed out"}
             return
         popped = await asyncio.to_thread(r.blpop, key, _REDIS_POLL_SECONDS)
@@ -197,6 +204,8 @@ async def _stream_events(
                     run_id,
                     _MAX_IDLE_SECONDS,
                 )
+                if project_id is not None:
+                    await cancel_codex_run(project_id=project_id, correlation_id=run_id)
                 yield {
                     "type": "infra_error",
                     "message": "Codex produced no output for a while (worker/container may be down)",
@@ -434,6 +443,7 @@ class CodexAgentSession:
         workspace: WorkspaceTools | None,
         system_prompt: str,
         correlation_id: str | None = None,
+        allow_docker: bool = True,
     ) -> None:
         self.model = model
         self.workspace = workspace
@@ -444,6 +454,7 @@ class CodexAgentSession:
         # separate registry. None (every pre-existing, non-orchestrated caller) keeps the old
         # behavior of a fresh random id per call - those callers have no cancellation support.
         self.correlation_id = correlation_id
+        self.allow_docker = allow_docker
 
     def _handle_terminal(self, payload: dict[str, Any]) -> AgentDone | None:
         # Bare {"type": "error", "message": ...} events (straight from codex's own JSONL
@@ -535,6 +546,7 @@ class CodexAgentSession:
             "model": self.model,
             "prompt": prompt,
             "image_paths": image_paths,
+            "allow_docker": self.allow_docker,
         }
         saw_event = False
         seen_text = [False]
@@ -577,6 +589,7 @@ class CodexAgentSession:
             prompt=prompt,
             image_paths=image_paths,
             timeout_seconds=settings.codex_turn_timeout_seconds,
+            allow_docker=self.allow_docker,
         )
 
         saw_event = False
@@ -612,24 +625,35 @@ async def codex_simple_complete(
     user_text: str,
     model: str,
     timeout_seconds: int | None = None,
+    usage_sink: Callable[[dict[str, Any]], None] | None = None,
+    images: list[ImageAttachment] | None = None,
+    workspace_root: str | Path | None = None,
+    project_id: str | None = None,
 ) -> str:
     """One-shot text completion via Codex for the lightweight non-coding call sites (chat title/
     summary in chat_context.py, moderation classification in moderation.py) - no project
-    workspace, no file/Docker access needed. Only ever called from the backend API process (see
-    call sites), so this always takes the queued path - never in_worker_inline_docker(). Fails
-    open (returns "") on any error or timeout, matching the previous HTTP-provider behavior at
-    these call sites."""
+    workspace, no file/Docker access needed. A visual-review caller may provide a workspace
+    containing only generated screenshots plus image attachments; that narrow directory is
+    mounted read/write solely so Codex can receive ``--image`` paths. Docker access stays
+    disabled for every simple completion, including visual review. Only ever called from the
+    backend API process (see call sites), so this always takes the queued path - never in
+    worker_inline_docker(). Fails open (returns "") on any error or timeout, matching the
+    previous HTTP-provider behavior at these call sites."""
     effective_timeout = timeout_seconds or settings.codex_simple_timeout_seconds
+    root = Path(workspace_root).resolve() if workspace_root is not None else None
+    image_paths = _write_temp_images(root, images or []) if root is not None and images else []
     try:
         run_id = _submit_run(
-            project_id=None,
-            cwd=None,
+            project_id=project_id if root is not None else None,
+            cwd=str(root) if root is not None else None,
             model=model,
             prompt=f"{system_prompt.strip()}\n\n--- Текст ---\n{user_text}",
-            image_paths=[],
+            image_paths=image_paths,
             timeout_seconds=effective_timeout,
+            allow_docker=False,
         )
     except Exception:  # noqa: BLE001 - Redis being down must never break chat/moderation
+        _cleanup_paths(image_paths)
         return ""
 
     text_parts: list[str] = []
@@ -639,10 +663,15 @@ async def codex_simple_complete(
             if kind in ("turn.failed", "infra_error"):
                 return ""
             if kind == "turn.completed":
+                usage = payload.get("usage")
+                if usage_sink is not None and isinstance(usage, dict):
+                    usage_sink(usage)
                 break
             for event in _map_event(payload):
                 if isinstance(event, TextDelta):
                     text_parts.append(event.text)
     except Exception:  # noqa: BLE001
         return ""
+    finally:
+        _cleanup_paths(image_paths)
     return "".join(text_parts).strip()

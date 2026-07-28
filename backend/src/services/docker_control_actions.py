@@ -8,7 +8,10 @@ same single worker to pop its own control job.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
+
+from docker.errors import APIError, NotFound
 
 from src.db.models.project import Project
 from src.db.session import SessionLocal
@@ -23,6 +26,37 @@ from src.services.project_services import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _removal_already_in_progress(exc: APIError) -> bool:
+    status_code = getattr(getattr(exc, "response", None), "status_code", None)
+    explanation = str(getattr(exc, "explanation", "") or exc).lower()
+    return status_code == 409 and "removal" in explanation and "progress" in explanation
+
+
+def _remove_owned_containers(client: Any, label_filter: dict[str, str]) -> None:
+    """Converge when Docker reports an asynchronous removal already in progress."""
+    deadline = time.monotonic() + 5
+    while True:
+        containers = client.containers.list(all=True, filters=label_filter)
+        if not containers:
+            return
+        for container in containers:
+            try:
+                if container.status == "running":
+                    container.stop(timeout=10)
+            except Exception:  # noqa: BLE001 - force remove below is authoritative
+                pass
+            try:
+                container.remove(force=True)
+            except NotFound:
+                pass
+            except APIError as exc:
+                if not _removal_already_in_progress(exc):
+                    raise
+        if time.monotonic() >= deadline:
+            return
+        time.sleep(0.1)
 
 
 def _run_runtime_health_check(project_id: str) -> dict[str, Any]:
@@ -124,13 +158,7 @@ def _cleanup_project_resources(project_id: str) -> dict[str, Any]:
     # Codex/preview/app containers all carry the same ownership label. A project deleted while
     # generation is still winding down must not leave the task container behind.
     label_filter = {"label": f"airuntime.project_id={project_id}"}
-    for container in client.containers.list(all=True, filters=label_filter):
-        try:
-            if container.status == "running":
-                container.stop(timeout=10)
-        except Exception:  # noqa: BLE001 - force remove below is the authoritative step
-            pass
-        container.remove(force=True)
+    _remove_owned_containers(client, label_filter)
 
     adapter.remove_project_images(project_id)
 

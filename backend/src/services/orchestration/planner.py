@@ -22,8 +22,9 @@ plan asked for, never a superset.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 from src.core.config import settings
 from src.services.agent.pipeline_llm import complete_structured
@@ -48,6 +49,67 @@ PlanSource = Literal[
 # short request still gets a *real* single-task plan now, not just "don't decompose".
 _TRIVIAL_MESSAGE_CHARS = 160
 
+_VISUAL_WEBSITE_TERMS = (
+    "website",
+    "landing",
+    "site",
+    "frontend",
+    "homepage",
+    "dashboard",
+    "сайт",
+    "лендинг",
+    "страниц",
+    "интерфейс",
+    "дизайн",
+    "витрин",
+    "каталог",
+    "дашборд",
+    "кабинет",
+)
+_PRODUCT_ACTION_TERMS = (
+    "build",
+    "create",
+    "develop",
+    "implement",
+    "add",
+    "fix",
+    "создай",
+    "сделай",
+    "разработ",
+    "реализ",
+    "добав",
+    "исправ",
+    "передел",
+    "обнов",
+    "запусти",
+    "почин",
+    "настрой",
+    "перепиш",
+    "замени",
+    "удали",
+)
+_NONVISUAL_PRODUCT_TERMS = (
+    "api",
+    "backend",
+    "database",
+    "telegram",
+    "bot",
+    "webhook",
+    "auth",
+    "payment",
+    "бэк",
+    "база",
+    "бот",
+    "телеграм",
+    "вебхук",
+    "авторизац",
+    "регистрац",
+    "оплат",
+    "интеграц",
+    "парсер",
+    "очеред",
+)
+
 _PLANNING_SYSTEM_PROMPT_TEMPLATE = """Ты - планировщик платформы AIRuntime. По запросу
 пользователя и текущему состоянию проекта построй ExecutionPlan - ограниченный граф задач, а
 НЕ линейный список.
@@ -58,6 +120,9 @@ _PLANNING_SYSTEM_PROMPT_TEMPLATE = """Ты - планировщик платфо
 Правила:
 - Каждая задача (PlannedTask) должна иметь уникальный local_id (короткая ASCII-строка вроде
   "backend_api", "landing_page").
+- execution_preference is a capability-routing hint only. Use exactly deterministic_skill,
+  specialist_agent, or either. Never use parallel/sequential here; scheduling is derived from
+  dependencies and relevant_paths.
 - dependencies - список local_id других задач ЭТОГО плана, от которых зависит задача. Не
   создавай циклов.
 - Задачи без общих file-путей и с execution_preference, допускающим параллельность, можно
@@ -74,6 +139,29 @@ _PLANNING_SYSTEM_PROMPT_TEMPLATE = """Ты - планировщик платфо
   проекта, "large" для многомодульной работы (например сайт + отдельный Telegram-бот).
 - Каждая задача должна нести хотя бы один acceptance_criterion, проверяемый одним из методов:
   build, test, preview, runtime, manual, llm_review.
+- Every acceptance_criterion must have a non-empty unique ASCII id.
+- Для нового website/mixed-проекта обязательно включай в relevant_paths как минимум
+  "Dockerfile" и "public/index.html" (а также остальные нужные файлы). Платформа публикует
+  сайты из public/index.html и собирает каждый проект через Dockerfile; одного корневого
+  index.html недостаточно.
+- Для проверки ещё не задеплоенного сайта используй verification_method="preview": платформа
+  сама поднимет собранный образ во временной изолированной сети. verification_method="runtime"
+  оставляй только для задач, проверяющих уже существующий production-деплой.
+- Новый сайт, лендинг или заметная UI-переделка НЕ являются trivial-задачей, даже если запрос
+  короткий. План обязан включать: (1) реализацию с явным арт-дирекшном/дизайн-системой и
+  проверяемыми критериями для hero, типографики, контента и mobile; (2) зависимую read-only
+  задачу QAReviewer с suggested_skills=["visual_preview_review"], которая смотрит реальные
+  скриншоты 1440x900 и 390x844. QA нельзя объединять с автором реализации.
+- В acceptance criteria визуальной реализации фиксируй не "красиво", а наблюдаемые свойства:
+  специфичный для индустрии concept, display/body typography, палитра-токены, один главный CTA
+  выше сгиба, осмысленный контент, композиционный ритм секций, отсутствие generic card-grid,
+  корректный mobile и preview без ошибок.
+- Для Telegram-бота/backend/API/mixed после задач записи добавляй зависимую QAReviewer-задачу
+  с suggested_skills=["product_quality_review"]. Она независимо сверяет реальные файлы и
+  результаты build/test с acceptance criteria, сценариями, состояниями ошибок, архитектурой,
+  секретами и functional honesty. Автор реализации не может быть своим QA.
+- Mixed-проект требует ОБА контура, когда меняются обе поверхности: visual_preview_review для
+  сайта и product_quality_review для бота/backend/интеграции.
 """
 
 
@@ -101,9 +189,222 @@ def derive_complexity_from_task_count(task_count: int) -> Complexity:
     return "large"
 
 
-def build_single_task_plan(user_message: str, *, reason: str) -> ExecutionPlan:
+def _is_visual_website_request(user_message: str, project_context_summary: str) -> bool:
+    context = project_context_summary.lower()
+    is_website = "(website)" in context or "(mixed)" in context
+    message = user_message.lower()
+    return is_website and any(term in message for term in _VISUAL_WEBSITE_TERMS)
+
+
+def _project_type_from_context(project_context_summary: str) -> str | None:
+    context = project_context_summary.lower()
+    for project_type in ("telegram_bot", "website", "mixed"):
+        if f"({project_type})" in context:
+            return project_type
+    return None
+
+
+def _is_product_build_request(user_message: str, project_context_summary: str) -> bool:
+    if _project_type_from_context(project_context_summary) is None:
+        return False
+    message = user_message.lower()
+    has_action = any(term in message for term in _PRODUCT_ACTION_TERMS)
+    # The project context already identifies the product surface. Requiring the user to repeat
+    # "bot/site/backend" here made terse follow-ups such as "добавь /help" bypass planning and
+    # independent QA precisely when regressions are most likely.
+    return has_action
+
+
+def _preview_criterion(task: PlannedTask) -> AcceptanceCriterion:
+    existing_ids = {criterion.id for criterion in task.acceptance_criteria}
+    base = f"{task.local_id}_visual_preview"
+    criterion_id = base
+    suffix = 2
+    while criterion_id in existing_ids:
+        criterion_id = f"{base}_{suffix}"
+        suffix += 1
+    return AcceptanceCriterion(
+        id=criterion_id,
+        description=(
+            "Реальные desktop 1440x900 и mobile 390x844 preview подтверждают цельный "
+            "арт-дирекшн, ясную визуальную иерархию, один доминирующий CTA, предметный "
+            "контент и отсутствие ошибок, битых изображений и horizontal overflow"
+        ),
+        verification_method="preview",
+    )
+
+
+def ensure_website_quality_plan(
+    plan: ExecutionPlan, *, max_tasks: int
+) -> ExecutionPlan:
+    """Server-side quality invariant for visible website work.
+
+    The planner may suggest a good workflow, but production must not depend on it remembering
+    to separate author and judge. Add a real preview criterion to the last writing task and a
+    dependent visual-review task whenever the plan has room.
+    """
+    tasks = list(plan.tasks)
+    write_roles = {
+        SpecialistRole.IMPLEMENTER,
+        SpecialistRole.UI_UX_SPECIALIST,
+        SpecialistRole.INTEGRATION_AGENT,
+    }
+    write_tasks = [task for task in tasks if task.role in write_roles]
+    if not write_tasks:
+        return plan
+
+    implementation = write_tasks[-1]
+    if not any(c.verification_method == "preview" for c in implementation.acceptance_criteria):
+        updated = implementation.model_copy(
+            update={
+                "acceptance_criteria": [
+                    *implementation.acceptance_criteria,
+                    _preview_criterion(implementation),
+                ]
+            }
+        )
+        tasks[tasks.index(implementation)] = updated
+        implementation = updated
+
+    has_visual_qa = any(
+        task.role == SpecialistRole.QA_REVIEWER
+        and "visual_preview_review" in task.suggested_skills
+        for task in tasks
+    )
+    if has_visual_qa or len(tasks) >= max_tasks:
+        return plan.model_copy(
+            update={"tasks": tasks, "complexity": derive_complexity_from_task_count(len(tasks))}
+        )
+
+    local_id = "visual_qa"
+    suffix = 2
+    existing_ids = {task.local_id for task in tasks}
+    while local_id in existing_ids:
+        local_id = f"visual_qa_{suffix}"
+        suffix += 1
+    dependency_ids = [task.local_id for task in write_tasks]
+    tasks.append(
+        PlannedTask(
+            local_id=local_id,
+            title="Независимая визуальная приёмка desktop/mobile",
+            role=SpecialistRole.QA_REVIEWER,
+            goal=(
+                "Проверить готовый интерфейс по реальным скриншотам 1440x900 и 390x844 как "
+                "коммерческий арт-директор; вернуть FAIL/правки при шаблонности, слабой "
+                "иерархии, плохом контенте, переполнениях или браузерных ошибках"
+            ),
+            reason="Автор интерфейса не должен сам принимать собственный визуальный результат",
+            execution_preference="deterministic_skill",
+            dependencies=dependency_ids,
+            suggested_skills=["visual_preview_review"],
+            relevant_paths=[],
+            write_scope="none",
+            acceptance_criteria=[
+                AcceptanceCriterion(
+                    id=f"{local_id}_desktop_mobile",
+                    description=(
+                        "Независимый visual review видит оба viewport и подтверждает пороги "
+                        "visual hierarchy, originality, content, responsiveness и accessibility"
+                    ),
+                    verification_method="preview",
+                )
+            ],
+        )
+    )
+    return plan.model_copy(
+        update={"tasks": tasks, "complexity": derive_complexity_from_task_count(len(tasks))}
+    )
+
+
+def ensure_product_quality_plan(
+    plan: ExecutionPlan,
+    *,
+    max_tasks: int,
+    project_type: str,
+    visual_quality: bool,
+    user_message: str,
+) -> ExecutionPlan:
+    """Apply author/judge separation to every product surface.
+
+    Websites get screenshot-based art direction review. Bots, backends and integrations get a
+    redacted source/evidence review. Mixed or feature-rich website requests may receive both.
+    """
+    quality_plan = (
+        ensure_website_quality_plan(plan, max_tasks=max_tasks) if visual_quality else plan
+    )
+    tasks = list(quality_plan.tasks)
+    write_roles = {
+        SpecialistRole.IMPLEMENTER,
+        SpecialistRole.UI_UX_SPECIALIST,
+        SpecialistRole.INTEGRATION_AGENT,
+    }
+    write_tasks = [task for task in tasks if task.role in write_roles]
+    if not write_tasks:
+        return quality_plan
+
+    message = user_message.lower()
+    needs_product_review = (
+        project_type in ("telegram_bot", "mixed")
+        or not visual_quality
+        or any(term in message for term in _NONVISUAL_PRODUCT_TERMS)
+    )
+    has_product_qa = any(
+        task.role == SpecialistRole.QA_REVIEWER
+        and "product_quality_review" in task.suggested_skills
+        for task in tasks
+    )
+    if not needs_product_review or has_product_qa or len(tasks) >= max_tasks:
+        return quality_plan
+
+    local_id = "product_qa"
+    suffix = 2
+    existing_ids = {task.local_id for task in tasks}
+    while local_id in existing_ids:
+        local_id = f"product_qa_{suffix}"
+        suffix += 1
+    tasks.append(
+        PlannedTask(
+            local_id=local_id,
+            title="Независимая функциональная приёмка продукта",
+            role=SpecialistRole.QA_REVIEWER,
+            goal=(
+                "Независимо проверить реализацию по брифу и acceptance criteria: реальные "
+                "сценарии, архитектуру, валидацию, error states, секреты и отсутствие "
+                "TODO/stub/fake functionality"
+            ),
+            reason="Функциональную полноту и честность должен проверять не автор реализации",
+            execution_preference="deterministic_skill",
+            dependencies=[task.local_id for task in write_tasks],
+            suggested_skills=["product_quality_review"],
+            relevant_paths=[],
+            write_scope="none",
+            acceptance_criteria=[
+                AcceptanceCriterion(
+                    id=f"{local_id}_acceptance",
+                    description=(
+                        "Независимый product review подтверждает completeness, architecture, "
+                        "error handling и functional honesty без критических/major issues"
+                    ),
+                    verification_method="llm_review",
+                )
+            ],
+        )
+    )
+    return quality_plan.model_copy(
+        update={"tasks": tasks, "complexity": derive_complexity_from_task_count(len(tasks))}
+    )
+
+
+def build_single_task_plan(
+    user_message: str,
+    *,
+    reason: str,
+    website_quality: bool = False,
+    project_type: str | None = None,
+    max_tasks: int | None = None,
+) -> ExecutionPlan:
     goal = user_message.strip()[:2000] or "Выполнить запрос пользователя"
-    return ExecutionPlan(
+    plan = ExecutionPlan(
         goal=goal,
         complexity="simple",
         tasks=[
@@ -115,7 +416,7 @@ def build_single_task_plan(user_message: str, *, reason: str) -> ExecutionPlan:
                 reason=reason,
                 execution_preference="either",
                 dependencies=[],
-                relevant_paths=[],
+                relevant_paths=["Dockerfile", "public/index.html"] if website_quality else [],
                 write_scope="full_workspace",
                 # Without at least one criterion, contract_builder.score_task_contract() can
                 # never pass this task's contract (it hard-requires acceptance_criteria to be
@@ -127,7 +428,7 @@ def build_single_task_plan(user_message: str, *, reason: str) -> ExecutionPlan:
                         id="main_goal_met",
                         description=f"Запрос пользователя выполнен: {goal[:200]}",
                         verification_method="build",
-                    )
+                    ),
                 ],
             )
         ],
@@ -137,6 +438,23 @@ def build_single_task_plan(user_message: str, *, reason: str) -> ExecutionPlan:
             max_attempts_per_task=settings.orchestration_max_task_attempts
         ),
     )
+    if website_quality:
+        return ensure_product_quality_plan(
+            plan,
+            max_tasks=max_tasks or settings.orchestration_max_plan_tasks,
+            project_type=project_type or "website",
+            visual_quality=True,
+            user_message=user_message,
+        )
+    if project_type is not None:
+        return ensure_product_quality_plan(
+            plan,
+            max_tasks=max_tasks or settings.orchestration_max_plan_tasks,
+            project_type=project_type,
+            visual_quality=False,
+            user_message=user_message,
+        )
+    return plan
 
 
 def find_dependency_cycle(tasks: list[PlannedTask]) -> list[str] | None:
@@ -222,10 +540,18 @@ async def generate_plan(
     api_key: str,
     max_tasks: int | None = None,
     timeout_seconds: int = 90,
+    usage_sink: Callable[[dict[str, Any]], None] | None = None,
 ) -> PlanGenerationResult:
     max_tasks = max_tasks or settings.orchestration_max_plan_tasks
+    project_type = _project_type_from_context(project_context_summary)
+    website_quality = _is_visual_website_request(user_message, project_context_summary)
+    product_quality = _is_product_build_request(user_message, project_context_summary)
 
-    if len(user_message.strip()) < _TRIVIAL_MESSAGE_CHARS:
+    if (
+        len(user_message.strip()) < _TRIVIAL_MESSAGE_CHARS
+        and not website_quality
+        and not product_quality
+    ):
         return PlanGenerationResult(
             plan=build_single_task_plan(user_message, reason="short request - planning skipped"),
             source="heuristic_simple",
@@ -244,18 +570,36 @@ async def generate_plan(
         user_text=user_text,
         response_model=ExecutionPlan,
         timeout_seconds=timeout_seconds,
+        usage_sink=usage_sink,
     )
     if raw_plan is None:
         logger.info("planner: LLM call produced no usable plan, falling back to single-task plan")
         return PlanGenerationResult(
-            plan=build_single_task_plan(user_message, reason="planner call failed"),
+            plan=build_single_task_plan(
+                user_message,
+                reason="planner call failed",
+                website_quality=website_quality,
+                project_type=project_type if product_quality else None,
+                max_tasks=max_tasks,
+            ),
             source="fallback_llm_failed",
             errors=["planner_call_failed"],
         )
 
     errors = validate_plan_structure(raw_plan, max_tasks=max_tasks)
     if not errors:
-        return PlanGenerationResult(plan=raw_plan, source="llm")
+        quality_plan = (
+            ensure_product_quality_plan(
+                raw_plan,
+                max_tasks=max_tasks,
+                project_type=project_type,
+                visual_quality=website_quality,
+                user_message=user_message,
+            )
+            if project_type is not None
+            else raw_plan
+        )
+        return PlanGenerationResult(plan=quality_plan, source="llm")
 
     logger.info(
         "planner: LLM plan failed structural validation (%s), asking for one repair", errors
@@ -272,18 +616,36 @@ async def generate_plan(
         user_text=repair_text,
         response_model=ExecutionPlan,
         timeout_seconds=timeout_seconds,
+        usage_sink=usage_sink,
     )
     if repaired_plan is not None:
         repaired_errors = validate_plan_structure(repaired_plan, max_tasks=max_tasks)
         if not repaired_errors:
-            return PlanGenerationResult(plan=repaired_plan, source="llm_repaired")
+            quality_plan = (
+                ensure_product_quality_plan(
+                    repaired_plan,
+                    max_tasks=max_tasks,
+                    project_type=project_type,
+                    visual_quality=website_quality,
+                    user_message=user_message,
+                )
+                if project_type is not None
+                else repaired_plan
+            )
+            return PlanGenerationResult(plan=quality_plan, source="llm_repaired")
         errors = repaired_errors
 
     logger.warning(
         "planner: plan invalid even after repair (%s), falling back to single-task plan", errors
     )
     return PlanGenerationResult(
-        plan=build_single_task_plan(user_message, reason="plan validation failed twice"),
+        plan=build_single_task_plan(
+            user_message,
+            reason="plan validation failed twice",
+            website_quality=website_quality,
+            project_type=project_type if product_quality else None,
+            max_tasks=max_tasks,
+        ),
         source="fallback_invalid",
         errors=errors,
     )

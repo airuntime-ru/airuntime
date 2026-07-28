@@ -57,6 +57,7 @@ from src.db.models.project import Project
 from src.db.models.user import User
 from src.db.session import SessionLocal
 from src.services import project_git
+from src.services.model_pricing import estimate_model_usage_cost
 from src.services.orchestration import events_bus
 from src.services.orchestration.budget import (
     BudgetLimits,
@@ -68,6 +69,7 @@ from src.services.orchestration.budget import (
 from src.services.orchestration.cancellation import CancellationToken
 from src.services.orchestration.capability_provider import (
     PLATFORM_CAPABILITY_BUILD_CHECK,
+    PLATFORM_CAPABILITY_PREVIEW_CHECK,
     McpCapabilityProvider,
     PlatformToolCapabilityProvider,
     SkillCapabilityProvider,
@@ -180,6 +182,72 @@ async def _ensure_build_evidence(
         "log": result.error or "build_check produced no output",
         "log_tail": (result.error or "build_check produced no output")[-4000:],
     }
+
+
+async def _ensure_preview_and_runtime_evidence(
+    *,
+    contract: TaskContract,
+    project_id: object,
+    build_result: dict | None,
+    preview_existing: dict | None,
+    runtime_existing: dict | None,
+) -> tuple[dict | None, dict | None]:
+    """Collect declared browser/runtime evidence on the server after a successful build.
+
+    Codex runs with shell access, not AIRuntime's internal preview/runtime tools. Requiring the
+    model to manufacture these evidence payloads made valid changes fail validation and retry
+    until the credit budget was exhausted. A preview is the deterministic pre-deploy runtime
+    check: it boots the built image in an isolated network and drives it with Chromium.
+    """
+    step_kinds = {step.kind for step in contract.validation_steps}
+    needs_preview = "preview" in step_kinds and preview_existing is None
+    needs_runtime = "runtime" in step_kinds and runtime_existing is None
+    if not needs_preview and not needs_runtime:
+        return preview_existing, runtime_existing
+    if not build_result or not build_result.get("ok"):
+        return preview_existing, runtime_existing
+
+    collected_preview = preview_existing
+    if collected_preview is None:
+        result = await PlatformToolCapabilityProvider().invoke(
+            PLATFORM_CAPABILITY_PREVIEW_CHECK,
+            {"paths": ["/"]},
+            CapabilityContext(
+                project_id=uuid.UUID(str(project_id)),
+                run_id=contract.run_id,
+                task_id=contract.task_id,
+                role=contract.role,
+            ),
+        )
+        if isinstance(result.output, dict) and result.output:
+            collected_preview = result.output
+        else:
+            error = result.error or "preview_check produced no output"
+            collected_preview = {
+                "status": "failed",
+                "pages": [],
+                "fatal_errors": [error],
+                "warnings": [],
+            }
+
+    collected_runtime = runtime_existing
+    if needs_runtime:
+        preview_status = str(collected_preview.get("status") or "failed")
+        pages = collected_preview.get("pages")
+        collected_runtime = {
+            "ok": preview_status in {"passed", "issues_found"}
+            and isinstance(pages, list)
+            and bool(pages),
+            "source": "isolated_preview",
+            "preview_status": preview_status,
+            "pages_checked": len(pages) if isinstance(pages, list) else 0,
+            "fatal_errors": collected_preview.get("fatal_errors") or [],
+        }
+
+    return (
+        collected_preview if "preview" in step_kinds else preview_existing,
+        collected_runtime,
+    )
 
 
 def _select_workspace_mode(
@@ -438,6 +506,7 @@ async def _ensure_planned(
         plan_goal=None,
         task_summaries=[],
     )
+    planning_usage: list[dict] = []
     generation = await generate_plan(
         user_message=run.original_request or "",
         project_context_summary=context_summary,
@@ -445,7 +514,21 @@ async def _ensure_planned(
         model=model,
         api_key=api_key,
         max_tasks=settings.orchestration_max_plan_tasks,
+        usage_sink=planning_usage.append,
     )
+    user = db.query(User).filter(User.id == run.user_id).one_or_none()
+    for usage in planning_usage:
+        _record_run_usage_charge(
+            db,
+            run=run,
+            project=project,
+            user=user,
+            provider_name=provider_name,
+            model=model,
+            usage=usage,
+            summary_text="",
+            category="planning",
+        )
     return await _persist_new_plan(
         db,
         run=run,
@@ -464,6 +547,59 @@ class _TaskAttemptOutcome:
     # Human-readable "why" for a run_should_stop, e.g. the exceeded budget dimension - surfaced
     # to the user on OrchestrationRun.error_message rather than left only in the logs.
     detail: str | None = None
+
+
+def _record_run_usage_charge(
+    db: Session,
+    *,
+    run: OrchestrationRun,
+    project: Project,
+    user: User | None,
+    provider_name: str,
+    model: str,
+    usage: dict | None,
+    summary_text: str,
+    category: str,
+    task_id: uuid.UUID | None = None,
+    attempt: int | None = None,
+) -> int:
+    usage_cost = estimate_model_usage_cost(provider=provider_name, model=model, usage=usage)
+    cost = (
+        usage_cost.credits
+        if usage_cost is not None
+        else estimate_task_cost(usage=usage, summary_text=summary_text)
+    )
+    if user is not None:
+        charge_credits_for_run(
+            db,
+            user,
+            project_id=project.id,
+            amount=cost,
+            project_name=project.name,
+            provider_name=provider_name,
+            model=model,
+            usage_cost=usage_cost,
+        )
+    run.credits_used = (run.credits_used or 0) + cost
+    usage_snapshot = json.loads(run.token_usage_json or "{}")
+    charges = usage_snapshot.setdefault("charges", [])
+    charges.append(
+        {
+            "category": category,
+            "task_id": str(task_id) if task_id else None,
+            "attempt": attempt,
+            "provider": provider_name,
+            "model": model,
+            "credits": cost,
+            "usage": usage or {},
+            "provider_cost_usd_micros": (
+                usage_cost.provider_cost_usd_micros if usage_cost else None
+            ),
+        }
+    )
+    run.token_usage_json = json.dumps(usage_snapshot)
+    db.add(run)
+    return cost
 
 
 async def _run_one_task(
@@ -638,6 +774,13 @@ async def _run_one_task(
 
         agent_result = await executor.execute(contract, task_context, cancellation)
 
+        # A persisted cancellation may have arrived while the executor was blocked in a model
+        # turn. Observe it before any build/preview fallback can create fresh resources during
+        # project deletion.
+        db.refresh(run)
+        if run.cancel_requested and not cancellation.is_cancelled:
+            cancellation.cancel("cancellation requested while task was running")
+
         if task.execution_kind == _ExecutionKind.SKILL.value:
             events_bus.emit(
                 db,
@@ -655,14 +798,20 @@ async def _run_one_task(
 
         budget.record_task()
         summary_text = agent_result.task_result.summary if agent_result.task_result else ""
-        cost = estimate_task_cost(usage=agent_result.usage, summary_text=summary_text)
+        cost = _record_run_usage_charge(
+            db,
+            run=run,
+            project=project,
+            user=user,
+            provider_name=provider_name,
+            model=model,
+            usage=agent_result.usage,
+            summary_text=summary_text,
+            category="task",
+            task_id=task.id,
+            attempt=task.attempt,
+        )
         budget.record_credits(cost)
-        if user is not None:
-            charge_credits_for_run(
-                db, user, project_id=project.id, amount=cost, project_name=project.name
-            )
-        run.credits_used = (run.credits_used or 0) + cost
-        db.add(run)
 
         # Tell the user what this run has actually cost so far, and warn once it is close to the
         # ceiling - BudgetStatus.APPROACHING exists precisely so spending is visible BEFORE the
@@ -676,10 +825,19 @@ async def _run_one_task(
             payload={
                 "credits_used": run.credits_used,
                 "credit_budget": run.credit_budget,
+                "cost_rub": run.credits_used / settings.billing_credits_per_rub,
+                "provider": provider_name,
+                "model": model,
                 "status": str(post_charge.status),
                 "detail": post_charge.message,
             },
         )
+
+        if cancellation.is_cancelled:
+            git_txn.abort(handle)
+            task_repo.transition(task, "cancelled")
+            db.commit()
+            return _TaskAttemptOutcome("run_should_stop", detail=cancellation.reason)
 
         task_repo.transition(task, "collecting_evidence")
         db.commit()
@@ -719,14 +877,21 @@ async def _run_one_task(
             project_id=project.id,
             existing=agent_result.build_result,
         )
+        preview_result, runtime_health_result = await _ensure_preview_and_runtime_evidence(
+            contract=contract,
+            project_id=project.id,
+            build_result=build_result,
+            preview_existing=agent_result.preview_result,
+            runtime_existing=agent_result.runtime_health_result,
+        )
         outcome = git_txn.complete(
             handle,
             result=agent_result.task_result,
             build_result=build_result,
             lint_result=agent_result.lint_result,
             test_result=agent_result.test_result,
-            preview_result=agent_result.preview_result,
-            runtime_health_result=agent_result.runtime_health_result,
+            preview_result=preview_result,
+            runtime_health_result=runtime_health_result,
             service_requests=service_requests,
             secret_requests=secret_requests,
             usage=agent_result.usage,
@@ -1138,9 +1303,7 @@ async def _run_orchestration_inner(
                 return
 
             task_repo = AgentTaskRepository(db)
-            before_ready = {
-                t.id for t in task_repo.list_by_plan(plan.id) if t.status == "ready"
-            }
+            before_ready = {t.id for t in task_repo.list_by_plan(plan.id) if t.status == "ready"}
             task_repo.refresh_readiness(plan.id)
             plan_tasks = task_repo.list_by_plan(plan.id)
             ready = [t for t in plan_tasks if t.status == "ready"]
@@ -1308,6 +1471,7 @@ async def _run_orchestration_inner(
                     TaskEvidence.model_validate_json(evidence_json) if evidence_json else None
                 )
                 assert outcome.evaluation is not None
+                replanning_usage: list[dict] = []
                 generation = await generate_replan(
                     original_request=run.original_request or "",
                     context_summary=run.context_summary or "",
@@ -1319,7 +1483,22 @@ async def _run_orchestration_inner(
                     model=model,
                     api_key=api_key,
                     max_tasks=settings.orchestration_max_plan_tasks,
+                    usage_sink=replanning_usage.append,
                 )
+                user = db.query(User).filter(User.id == run.user_id).one_or_none()
+                for usage in replanning_usage:
+                    replan_cost = _record_run_usage_charge(
+                        db,
+                        run=run,
+                        project=project,
+                        user=user,
+                        provider_name=provider_name,
+                        model=model,
+                        usage=usage,
+                        summary_text="",
+                        category="replanning",
+                    )
+                    budget.record_credits(replan_cost)
                 loop_detector.record_plan(
                     json.dumps(sorted(t.local_id for t in generation.plan.tasks))
                 )
@@ -1423,7 +1602,9 @@ def recover_stranded_runs(db_factory: Callable[[], Session] | None = None) -> in
         try:
             stranded = OrchestrationRunRepository(db).list_resumable()
             # Capture as plain values - the session closes before the runs are driven.
-            pending = [(r.id, r.provider or settings.provider_name, r.model or "") for r in stranded]
+            pending = [
+                (r.id, r.provider or settings.provider_name, r.model or "") for r in stranded
+            ]
         finally:
             db.close()
 

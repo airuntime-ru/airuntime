@@ -20,6 +20,9 @@ Levels implemented:
 
 `scope` is always required, regardless of what the contract's validation_steps say - unlike the
 other levels, it isn't a check a task can opt out of.
+
+Write-capable tasks must also produce an observed file change. A successful build of the
+pre-existing checkout is not evidence that a requested modification was implemented.
 """
 
 from __future__ import annotations
@@ -163,6 +166,22 @@ def validate_static(evidence: TaskEvidence) -> ValidationFinding:
     )
 
 
+def validate_changes(contract: TaskContract, evidence: TaskEvidence) -> ValidationFinding | None:
+    """Reject a write task that only inspected and rebuilt the pre-existing checkout."""
+    if contract.forbidden_paths == ["*"]:
+        return None
+    touched = [*evidence.changed_files, *evidence.created_files, *evidence.deleted_files]
+    return ValidationFinding(
+        step="changes",
+        passed=bool(touched),
+        severity=RiskLevel.HIGH,
+        message="task produced file changes"
+        if touched
+        else "write-capable task produced no file changes",
+        evidence_ref="changed_files",
+    )
+
+
 def validate_build(evidence: TaskEvidence) -> ValidationFinding:
     # Symmetric with validate_preview/validate_runtime below: this is only ever called from
     # run_validation() when "build" is in the contract's declared (required-or-not)
@@ -261,6 +280,9 @@ def run_validation(
     *, contract: TaskContract, result: TaskResult | None, evidence: TaskEvidence
 ) -> ValidationResult:
     findings: list[ValidationFinding] = list(validate_scope(contract, evidence))
+    changes_finding = validate_changes(contract, evidence)
+    if changes_finding is not None:
+        findings.append(changes_finding)
     findings.append(validate_static(evidence))
 
     step_required = {step.kind: step.required for step in contract.validation_steps}
@@ -276,6 +298,8 @@ def run_validation(
     def _is_hard_required(finding: ValidationFinding) -> bool:
         if finding.step == "scope":
             return True  # never optional, regardless of contract.validation_steps
+        if finding.step == "changes":
+            return True  # a write task cannot satisfy a new request with an unchanged checkout
         return step_required.get(finding.step, False)
 
     accepted = not any(not f.passed and _is_hard_required(f) for f in findings)

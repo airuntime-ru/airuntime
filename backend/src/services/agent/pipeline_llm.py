@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TypeVar
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
@@ -52,17 +54,16 @@ async def _raw_complete(
     user_text: str,
     timeout_seconds: int,
     images: list[ImageAttachment] | None = None,
+    codex_workspace_root: str | Path | None = None,
+    codex_project_id: str | None = None,
+    usage_sink: Callable[[dict[str, Any]], None] | None = None,
 ) -> str:
     if provider_name in CODEX_ELIGIBLE_PROVIDERS:
-        if images:
-            # Codex CLI would need this project's actual workspace mounted to read image
-            # files from disk (see codex_worker.py's cwd=None -> "nothing to mount" path) -
-            # doing that would hand the review call the same file/shell access as the
-            # creating agent, defeating the point of an independent reviewer. Text-only here
-            # is a deliberate scope boundary, not an oversight - see this module's docstring.
+        usable_images = images if images and codex_workspace_root is not None else None
+        if images and usable_images is None:
             logger.info(
                 "complete_structured: %d image(s) requested but the openai/Codex path is "
-                "text-only for one-shot calls - continuing without them.",
+                "missing a screenshot-only workspace - continuing without them.",
                 len(images),
             )
         return await codex_simple_complete(
@@ -70,6 +71,10 @@ async def _raw_complete(
             user_text=user_text,
             model=model,
             timeout_seconds=timeout_seconds,
+            usage_sink=usage_sink,
+            images=usable_images,
+            workspace_root=codex_workspace_root if usable_images else None,
+            project_id=codex_project_id if usable_images else None,
         )
 
     provider = get_agent_provider(provider_name)
@@ -117,6 +122,9 @@ async def complete_structured(
     response_model: type[ModelT],
     timeout_seconds: int = 60,
     images: list[ImageAttachment] | None = None,
+    codex_workspace_root: str | Path | None = None,
+    codex_project_id: str | None = None,
+    usage_sink: Callable[[dict[str, Any]], None] | None = None,
 ) -> ModelT | None:
     """Ask the model for one JSON object matching response_model. Never raises - on any
     failure (empty response, malformed JSON, schema mismatch) tries exactly one repair
@@ -125,8 +133,9 @@ async def complete_structured(
 
     `images` (optional - e.g. review screenshots) are embedded via each provider's own
     build_messages(), so they land in whatever wire format that provider expects (Anthropic
-    base64 image blocks, OpenAI-compatible data-URI image_url, Gemini inline_data). Ignored
-    (not dropped silently - see _raw_complete) on the openai/Codex path."""
+    base64 image blocks, OpenAI-compatible data-URI image_url, Gemini inline_data). The
+    openai/Codex path accepts them only together with a screenshot-only workspace; otherwise
+    they are deliberately omitted and the omission is logged."""
     prompt = system_prompt + _JSON_ONLY_SUFFIX
     raw = await _raw_complete(
         provider_name=provider_name,
@@ -136,6 +145,9 @@ async def complete_structured(
         user_text=user_text,
         timeout_seconds=timeout_seconds,
         images=images,
+        codex_workspace_root=codex_workspace_root,
+        codex_project_id=codex_project_id,
+        usage_sink=usage_sink,
     )
     value, error_detail = _parse(raw, response_model)
     if value is not None:
@@ -157,6 +169,9 @@ async def complete_structured(
         user_text=repair_text,
         timeout_seconds=timeout_seconds,
         images=images,
+        codex_workspace_root=codex_workspace_root,
+        codex_project_id=codex_project_id,
+        usage_sink=usage_sink,
     )
     retry_value, retry_error = _parse(raw_retry, response_model)
     if retry_value is not None:

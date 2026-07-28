@@ -53,28 +53,41 @@ def _fake_live_deployment(db, project):
     return deployment
 
 
-def _write_minimal_project_files(root: Path) -> None:
+def _write_minimal_project_files(root: Path, project_type: str) -> None:
     """Write the platform's minimal deploy-contract files (see WEBSITE_REQUIRED/TELEGRAM_REQUIRED
     in agentic_artifacts.py) so ensure_required_files() passes regardless of which type the
     project ends up classified as. There is no template-fallback in the real pipeline any more
     (chat.py's own "Шаблон не подставляется" message is the current, intentional behavior) - a
     fake agent that writes nothing can never reach the verify/deploy phases these tests exercise,
     it just short-circuits into the "agent did not produce required files" error path instead."""
-    public_dir = root / "public"
-    public_dir.mkdir(parents=True, exist_ok=True)
-    index = public_dir / "index.html"
-    if not index.exists():
-        index.write_text("<!doctype html><html><body>Test site</body></html>", encoding="utf-8")
+    if project_type in ("website", "mixed"):
+        public_dir = root / "public"
+        public_dir.mkdir(parents=True, exist_ok=True)
+        index = public_dir / "index.html"
+        if not index.exists():
+            index.write_text(
+                "<!doctype html><html><body>Test site</body></html>", encoding="utf-8"
+            )
 
-    app_py = root / "app.py"
-    if not app_py.exists():
-        app_py.write_text(
-            "import os\n\nTELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')\n",
+    if project_type in ("telegram_bot", "mixed"):
+        app_py = root / "app.py"
+        if not app_py.exists():
+            app_py.write_text(
+                "import os\n\nTELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')\n",
+                encoding="utf-8",
+            )
+        requirements = root / "requirements.txt"
+        if not requirements.exists():
+            requirements.write_text("aiogram\n", encoding="utf-8")
+
+    dockerfile = root / "Dockerfile"
+    if not dockerfile.exists():
+        dockerfile.write_text(
+            "FROM nginx:alpine\nCOPY public /usr/share/nginx/html\n"
+            if project_type == "website"
+            else "FROM python:3.13-slim\nCOPY . /app\nWORKDIR /app\nCMD [\"python\", \"app.py\"]\n",
             encoding="utf-8",
         )
-    requirements = root / "requirements.txt"
-    if not requirements.exists():
-        requirements.write_text("aiogram\n", encoding="utf-8")
 
 
 @pytest.fixture
@@ -94,8 +107,15 @@ def orchestration_stub(monkeypatch, tmp_path, db):
     from src.services import project_git
     from src.services import workspace as workspace_module
     from src.services.orchestration import engine as orchestration_engine
+    from src.services.orchestration import planner as orchestration_planner
     from src.services.orchestration.executors import AgentExecutionResult
-    from src.services.orchestration.schemas import TaskResult
+    from src.services.orchestration.schemas import (
+        AcceptanceCriterion,
+        ExecutionPlan,
+        PlannedTask,
+        SpecialistRole,
+        TaskResult,
+    )
 
     monkeypatch.setattr(settings, "generated_projects_dir", str(tmp_path))
 
@@ -132,19 +152,52 @@ def orchestration_stub(monkeypatch, tmp_path, db):
                     "user_message": contract.project_goal,
                 }
             )
-            _write_minimal_project_files(context.workspace_root)
+            is_read_only = contract.forbidden_paths == ["*"]
+            if not is_read_only:
+                _write_minimal_project_files(
+                    context.workspace_root, contract.current_state.project_type
+                )
             return AgentExecutionResult(
                 task_result=TaskResult(
                     status="completed",
                     summary="Готово",
-                    requested_services=[self._service] if self._service else [],
-                    requested_secrets=[self._secret] if self._secret else [],
+                    requested_services=[self._service]
+                    if self._service and not is_read_only
+                    else [],
+                    requested_secrets=[self._secret]
+                    if self._secret and not is_read_only
+                    else [],
                 ),
                 build_result={"ok": True, "log_tail": "ok"},
+                preview_result={"status": "passed", "pages": []},
             )
 
     def _install(*, requested_service=None, requested_secret=None) -> _Stub:
+        async def _fake_plan(**kwargs):  # noqa: ANN003
+            return ExecutionPlan(
+                goal=kwargs["user_text"].split("Запрос пользователя:\n", 1)[-1],
+                complexity="simple",
+                tasks=[
+                    PlannedTask(
+                        local_id="implementation",
+                        title="Реализация",
+                        role=SpecialistRole.IMPLEMENTER,
+                        goal="Выполнить запрос пользователя",
+                        reason="Детерминированный API-test executor",
+                        write_scope="full_workspace",
+                        acceptance_criteria=[
+                            AcceptanceCriterion(
+                                id="implementation_build",
+                                description="Проект собирается",
+                                verification_method="build",
+                            )
+                        ],
+                    )
+                ],
+            )
+
         stub = _Stub(requested_service=requested_service, requested_secret=requested_secret)
+        monkeypatch.setattr(orchestration_planner, "complete_structured", _fake_plan)
         monkeypatch.setattr(
             orchestration_engine, "_build_executor", lambda kind, *, db, mcp_repo: stub
         )

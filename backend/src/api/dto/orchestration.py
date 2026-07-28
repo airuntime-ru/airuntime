@@ -1,7 +1,9 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
+
+from src.core.config import settings
 
 
 class OrchestrationRunCreateRequest(BaseModel):
@@ -20,6 +22,8 @@ class OrchestrationRunResponse(BaseModel):
     original_request: str | None
     complexity: str | None
     plan_version: int
+    provider: str | None
+    model: str | None
     credits_used: int
     # None means "no explicit ceiling for this run" - the UI renders just the spend in that case.
     credit_budget: int | None = None
@@ -29,6 +33,11 @@ class OrchestrationRunResponse(BaseModel):
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
+
+    @computed_field
+    @property
+    def cost_rub(self) -> float:
+        return self.credits_used / settings.billing_credits_per_rub
 
     model_config = {"from_attributes": True}
 

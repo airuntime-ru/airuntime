@@ -67,3 +67,6 @@ admin/*.sqlite3
 # Local audit artifacts
 frontend/docs/landing-audit/
 backend/.email-preview/
+
+# Playwright CLI
+.playwright-cli/

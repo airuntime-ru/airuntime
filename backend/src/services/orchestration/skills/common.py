@@ -19,6 +19,17 @@ from src.services.orchestration.schemas import (
 from src.services.orchestration.skills.base import SkillContext
 
 
+def aggregate_usage(records: list[dict]) -> dict:
+    """Merge usage from an initial structured call and its optional repair retry."""
+    totals: dict[str, int | float] = {}
+    for record in records:
+        for key, value in record.items():
+            if isinstance(value, bool) or not isinstance(value, int | float):
+                continue
+            totals[key] = totals.get(key, 0) + value
+    return totals
+
+
 class BaseSkill:
     definition: SkillDefinition
 

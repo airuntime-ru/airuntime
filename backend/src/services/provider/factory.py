@@ -4,11 +4,11 @@ Strategy (when no per-chat ``model`` override is set):
 1. Read a ranked list from admin ``system_settings`` key ``preferred_models``
    (or ``top_models``) if present.
 2. Otherwise use the curated allowlists in ``config`` (coding-oriented,
-   newest / strongest first within a cost-sensible band).
+   newest / strongest first, with quality taking priority over cost).
 3. Pick the first entry whose provider has a working API key
    (admin setting or env).
-4. OpenAI floor: never auto-select anything weaker than ``gpt-5.4-mini``
-   (nano / gpt-4o* / gpt-3.5* are rejected).
+4. OpenAI floor: never auto-select anything weaker than the current frontier
+   ``gpt-5.6-sol`` tier.
 5. Explicit user ``model`` (and optional ``provider``) overrides always win.
 """
 
@@ -21,6 +21,7 @@ from src.core.config import (
     OPENAI_MODEL_FLOOR,
     settings,
 )
+from src.services.model_pricing import is_selectable_model
 from src.services.provider.base import ProviderClient
 from src.services.provider.external import ExternalProviderClient
 from src.services.system_settings import (
@@ -31,7 +32,10 @@ from src.services.system_settings import (
 _SUPPORTED = ("openai", "anthropic", "gemini", "openrouter")
 
 _OPENAI_BLOCKED_SUBSTRINGS = (
+    "mini",
     "nano",
+    "terra",
+    "luna",
     "gpt-4o",
     "gpt-4.1",
     "gpt-4-",
@@ -45,7 +49,7 @@ def _slug(model: str) -> str:
 
 
 def meets_openai_floor(model: str) -> bool:
-    """Return True if ``model`` is at least as strong as gpt-5.4-mini."""
+    """Return True for the current OpenAI frontier tier (or a newer full frontier model)."""
     slug = _slug(model)
     if not slug:
         return False
@@ -53,13 +57,14 @@ def meets_openai_floor(model: str) -> bool:
         return False
     if slug == OPENAI_MODEL_FLOOR or slug.startswith(f"{OPENAI_MODEL_FLOOR}-"):
         return True
-    # gpt-5.4* (non-nano), other gpt-5.x frontier, and o-series reasoning.
-    if slug.startswith("gpt-5.4"):
+    # The unsuffixed alias currently routes to Sol.
+    if slug == "gpt-5.6":
         return True
-    if slug.startswith("gpt-5") and "mini" not in slug:
-        return True
-    if slug.startswith(("o3", "o4")):
-        return True
+    # Accept future full frontier releases without silently admitting older 5.x models.
+    if slug.startswith("gpt-5."):
+        version = slug.removeprefix("gpt-5.").split("-", 1)[0]
+        if version.isdigit() and int(version) > 6:
+            return True
     return False
 
 
@@ -113,7 +118,7 @@ def _parse_preferred_models(raw: Any) -> list[tuple[str, str]]:
                     entries.append((provider, model))
             elif isinstance(item, str) and item.strip():
                 text = item.strip()
-                # "openai:gpt-5.4-mini" — unambiguous provider/model split.
+                # "openai:gpt-5.6-sol" — unambiguous provider/model split.
                 if ":" in text and "/" not in text.split(":", 1)[0]:
                     provider, _, model = text.partition(":")
                     provider = provider.strip().lower()
@@ -121,7 +126,7 @@ def _parse_preferred_models(raw: Any) -> list[tuple[str, str]]:
                     if provider in _SUPPORTED and model:
                         entries.append((provider, model))
                     continue
-                # "openai/gpt-5.4-mini" → openai + gpt-5.4-mini
+                # "openai/gpt-5.6-sol" → openai + gpt-5.6-sol
                 # For openrouter-native ids use the dict form or per-provider map.
                 provider, _, rest = text.partition("/")
                 provider = provider.strip().lower()
@@ -229,7 +234,10 @@ def resolve_provider_and_model(
         provider = (provider_override or settings.provider_name).strip().lower()
         if provider not in _SUPPORTED:
             provider = settings.provider_name
-        return provider, model_override.strip()
+        model = model_override.strip()
+        if not is_selectable_model(provider, model):
+            raise ValueError(f"Model {model!r} is not available for provider {provider!r}")
+        return provider, model
 
     if provider_override and provider_override.strip():
         provider = provider_override.strip().lower()

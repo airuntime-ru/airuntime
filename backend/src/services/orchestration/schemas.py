@@ -11,11 +11,12 @@ executor that has zero DB access (e.g. a Codex container) without any ORM leakag
 
 from __future__ import annotations
 
+import hashlib
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 ProjectType = Literal["website", "telegram_bot", "mixed"]
 Complexity = Literal["simple", "compound", "large"]
@@ -123,6 +124,18 @@ class AcceptanceCriterion(BaseModel):
     verification_method: Literal["build", "test", "preview", "runtime", "manual", "llm_review"]
     required: bool = True
 
+    @model_validator(mode="before")
+    @classmethod
+    def _supply_missing_llm_id(cls, value: Any) -> Any:
+        """Keep otherwise valid planner output usable when the model omits a criterion id."""
+        if not isinstance(value, dict) or str(value.get("id") or "").strip():
+            return value
+        normalized = dict(value)
+        description = str(normalized.get("description") or "criterion")
+        digest = hashlib.sha256(description.encode("utf-8")).hexdigest()[:12]
+        normalized["id"] = f"criterion_{digest}"
+        return normalized
+
 
 class Risk(BaseModel):
     description: str
@@ -151,6 +164,14 @@ class PlannedTask(BaseModel):
     acceptance_criteria: list[AcceptanceCriterion] = Field(default_factory=list)
     risk_level: RiskLevel = RiskLevel.MEDIUM
     write_scope: WriteScope = WriteScope.SCOPED_PATHS
+
+    @field_validator("execution_preference", mode="before")
+    @classmethod
+    def _normalize_scheduling_aliases(cls, value: Any) -> Any:
+        """The planner sometimes confuses execution routing with task scheduling."""
+        if isinstance(value, str) and value.strip().lower() in {"parallel", "sequential"}:
+            return ExecutionPreference.EITHER
+        return value
 
     @field_validator("local_id")
     @classmethod

@@ -20,8 +20,15 @@ from src.core.config import settings
 from src.db.models.orchestration_run import OrchestrationRun
 from src.services import project_git, workspace
 from src.services.orchestration import engine as orchestration_engine
+from src.services.orchestration import planner as orchestration_planner
 from src.services.orchestration.executors import AgentExecutionResult
-from src.services.orchestration.schemas import TaskResult
+from src.services.orchestration.schemas import (
+    AcceptanceCriterion,
+    ExecutionPlan,
+    PlannedTask,
+    SpecialistRole,
+    TaskResult,
+)
 
 
 class _FakeExecutor:
@@ -31,9 +38,14 @@ class _FakeExecutor:
 
     async def execute(self, contract, context, cancellation) -> AgentExecutionResult:
         self.calls += 1
-        public_dir = context.workspace_root / "public"
-        public_dir.mkdir(parents=True, exist_ok=True)
-        (public_dir / "index.html").write_text("<html>hi</html>", encoding="utf-8")
+        if contract.forbidden_paths != ["*"]:
+            public_dir = context.workspace_root / "public"
+            public_dir.mkdir(parents=True, exist_ok=True)
+            (public_dir / "index.html").write_text("<html>hi</html>", encoding="utf-8")
+            (context.workspace_root / "Dockerfile").write_text(
+                "FROM nginx:alpine\nCOPY public /usr/share/nginx/html\n",
+                encoding="utf-8",
+            )
         return self.result
 
 
@@ -41,6 +53,7 @@ def _ok_result() -> AgentExecutionResult:
     return AgentExecutionResult(
         task_result=TaskResult(status="completed", summary="Готово"),
         build_result={"ok": True, "log_tail": "ok"},
+        preview_result={"status": "passed", "pages": []},
     )
 
 
@@ -86,6 +99,31 @@ def _configure_settings(monkeypatch: pytest.MonkeyPatch, tmp_path):
         return ModerationVerdict(blocked=False)
 
     monkeypatch.setattr(chat_router, "check_project_safety", _fake_check_project_safety)
+
+    async def _fake_plan(**kwargs):  # noqa: ANN003
+        return ExecutionPlan(
+            goal="Сделать лендинг",
+            complexity="simple",
+            tasks=[
+                PlannedTask(
+                    local_id="implementation",
+                    title="Реализация",
+                    role=SpecialistRole.IMPLEMENTER,
+                    goal="Выполнить запрос пользователя",
+                    reason="Детерминированный chat orchestration test",
+                    write_scope="full_workspace",
+                    acceptance_criteria=[
+                        AcceptanceCriterion(
+                            id="implementation_build",
+                            description="Проект собирается",
+                            verification_method="build",
+                        )
+                    ],
+                )
+            ],
+        )
+
+    monkeypatch.setattr(orchestration_planner, "complete_structured", _fake_plan)
 
 
 @pytest.fixture(autouse=True)
@@ -163,7 +201,8 @@ class TestOrchestrationEnabledHappyPath:
         )
 
         assert response.status_code == 200
-        assert fake.calls == 1
+        # One author task plus the server-enforced independent visual QA task.
+        assert fake.calls == 2
         assert any("Сайт запущен" in chunk for chunk in _chunks(response))
         assert "data: [DONE]" in response.text
 

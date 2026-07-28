@@ -15,6 +15,13 @@ x-common-env: &common-env
   PREVIEW_TIMEOUT_SECONDS: ${PREVIEW_TIMEOUT_SECONDS:-90}
   PREVIEW_MEMORY_LIMIT: ${PREVIEW_MEMORY_LIMIT:-1g}
   PREVIEW_CPU_LIMIT: ${PREVIEW_CPU_LIMIT:-1.0}
+  DEFAULT_MODEL_OPENAI: ${DEFAULT_MODEL_OPENAI:-gpt-5.6-sol}
+  DEFAULT_MODEL_OPENROUTER: ${DEFAULT_MODEL_OPENROUTER:-openai/gpt-5.6-sol}
+  BILLING_CREDITS_PER_RUB: ${BILLING_CREDITS_PER_RUB:-100}
+  BILLING_USD_TO_RUB: ${BILLING_USD_TO_RUB:-100}
+  CODEX_REASONING_EFFORT: ${CODEX_REASONING_EFFORT:-max}
+  CODEX_SIMPLE_TIMEOUT_SECONDS: ${CODEX_SIMPLE_TIMEOUT_SECONDS:-300}
+  ORCHESTRATION_TASK_DEFAULT_TIMEOUT_SECONDS: ${ORCHESTRATION_TASK_DEFAULT_TIMEOUT_SECONDS:-1800}
   APP_DOMAIN: ${APP_DOMAIN}
   PUBLIC_BASE_DOMAIN: ${APP_DOMAIN}
   FRONTEND_URL: https://${APP_DOMAIN}
@@ -229,6 +236,9 @@ services:
       # Worker now resolves the OpenAI key itself (it's the one that execs into the codex
       # container - see codex_worker.py) instead of only the backend process needing it.
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # The production Compose project attaches worker-launched Codex turns to the internal
+      # network. The generic config default ("airuntime_default") only exists in local Compose.
+      CODEX_NETWORK: ${CODEX_NETWORK:-airuntime_internal}
       SMTP_HOST: mailserver
       SMTP_PORT: 587
       SMTP_USERNAME: noreply@${APP_DOMAIN}
@@ -264,17 +274,10 @@ services:
     build:
       context: .
       dockerfile: deployment/codex/Dockerfile
-    container_name: airuntime-codex
-    restart: unless-stopped
     logging: *default-logging
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - airruntime_projects_data:/data/airruntime-projects
-    depends_on:
-      redis:
-        condition: service_started
-    networks:
-      - internal
+    # Build source only. The worker creates a fresh isolated container from this image for
+    # every turn; a long-lived `node` container exits immediately and only creates noise.
+    profiles: ["build-only"]
 
   # Build source only - the worker launches a fresh, single-purpose container from this image
   # per preview_project call (see backend/src/services/preview_runner.py), never a long-lived

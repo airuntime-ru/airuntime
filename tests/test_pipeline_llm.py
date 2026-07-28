@@ -241,9 +241,8 @@ async def test_raw_complete_embeds_images_via_provider_build_messages(monkeypatc
 @pytest.mark.asyncio
 async def test_raw_complete_ignores_images_on_codex_path_without_dropping_the_call(monkeypatch):
     async def fake_codex_simple_complete(**kwargs):
-        # Codex's own call signature has no images param at all - if this were passed one,
-        # the call itself would TypeError, which is what proves images are truly not forwarded.
-        assert "images" not in kwargs
+        assert kwargs["images"] is None
+        assert kwargs["workspace_root"] is None
         return '{"name": "codex", "count": 0}'
 
     monkeypatch.setattr(pipeline_llm, "codex_simple_complete", fake_codex_simple_complete)
@@ -259,3 +258,34 @@ async def test_raw_complete_ignores_images_on_codex_path_without_dropping_the_ca
         images=[image],
     )
     assert raw == '{"name": "codex", "count": 0}'
+
+
+@pytest.mark.asyncio
+async def test_raw_complete_forwards_images_to_screenshot_only_codex_workspace(
+    monkeypatch, tmp_path
+):
+    seen = {}
+
+    async def fake_codex_simple_complete(**kwargs):
+        seen.update(kwargs)
+        return '{"name": "codex-vision", "count": 2}'
+
+    monkeypatch.setattr(pipeline_llm, "codex_simple_complete", fake_codex_simple_complete)
+    image = ImageAttachment(filename="desktop.png", content_type="image/png", data_base64="Zm9v")
+
+    raw = await pipeline_llm._raw_complete(
+        provider_name="openai",
+        model="gpt-5.6-sol",
+        api_key="k",
+        system_prompt="sys",
+        user_text="review",
+        timeout_seconds=30,
+        images=[image],
+        codex_workspace_root=tmp_path,
+        codex_project_id="project-1",
+    )
+
+    assert raw == '{"name": "codex-vision", "count": 2}'
+    assert seen["images"] == [image]
+    assert seen["workspace_root"] == tmp_path
+    assert seen["project_id"] == "project-1"
