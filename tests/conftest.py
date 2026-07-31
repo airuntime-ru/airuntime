@@ -20,6 +20,10 @@ os.environ["S3_PUBLIC_ENDPOINT_URL"] = ""
 os.environ.setdefault("S3_ACCESS_KEY", "testing")
 os.environ.setdefault("S3_SECRET_KEY", "testing")
 os.environ.setdefault("S3_BUCKET", "airuntime-files-test")
+# Production default is /data/airuntime-projects (unwritable on CI runners). Set before
+# Settings() loads so any code path that mkdir's the projects root stays in a temp dir.
+_tmp = os.environ.get("TMPDIR") or os.environ.get("TEMP") or "/tmp"
+os.environ.setdefault("GENERATED_PROJECTS_DIR", os.path.join(_tmp, "airuntime-projects-test"))
 
 import src.db.models  # noqa: F401
 from src.db.session import Base, get_db

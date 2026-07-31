@@ -149,9 +149,11 @@ def _workspace_has_bot(root: Path) -> bool:
 
 
 def workspace_root_for(project: Project) -> Path:
-    from src.services.workspace import project_dir
+    from src.services.workspace import project_dir_path
 
-    return project_dir(project.id)
+    # Resolve only - do not mkdir. Reconcile/read paths must not require a writable
+    # generated_projects_dir (CI and hosts where /data is unavailable).
+    return project_dir_path(project.id)
 
 
 def can_update_project_type(project: Project) -> bool:

@@ -45,7 +45,7 @@ from src.services.project_subdomain import (
 from src.services.secrets import TELEGRAM_BOT_TOKEN_KEY
 from src.services.storage import storage_service
 from src.services.system_settings import get_system_setting_number
-from src.services.workspace import project_dir
+from src.services.workspace import project_dir_path
 
 logger = logging.getLogger(__name__)
 
@@ -319,7 +319,7 @@ def delete_project(
             detail="Не удалось удалить загруженные файлы проекта. Повторите удаление.",
         ) from storage_exc
 
-    workspace_path = project_dir(project.id)
+    workspace_path = project_dir_path(project.id)
     try:
         shutil.rmtree(workspace_path)
     except FileNotFoundError:

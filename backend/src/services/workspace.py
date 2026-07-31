@@ -35,17 +35,27 @@ MAX_TOTAL_BYTES = 1_000_000_000
 MAX_FILES = 5_000
 
 
-def projects_root() -> Path:
+def projects_root(*, create: bool = True) -> Path:
     root = Path(settings.generated_projects_dir).resolve()
-    root.mkdir(parents=True, exist_ok=True)
+    if create:
+        root.mkdir(parents=True, exist_ok=True)
     return root
 
 
-def project_dir(project_id: object) -> Path:
+def project_dir_path(project_id: object) -> Path:
+    """Resolve a project's workspace path without creating directories on disk.
+
+    Use this for read-only checks and cleanup (delete/reconcile). Prefer
+    ``project_dir`` when the caller is about to write into the workspace.
+    """
     safe_id = str(project_id)
     if not re.fullmatch(r"[a-fA-F0-9-]{32,36}", safe_id):
         raise WorkspaceError("Invalid project id for workspace path")
-    path = projects_root() / safe_id
+    return projects_root(create=False) / safe_id
+
+
+def project_dir(project_id: object) -> Path:
+    path = project_dir_path(project_id)
     path.mkdir(parents=True, exist_ok=True)
     return path
 
