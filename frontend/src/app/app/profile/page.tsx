@@ -1,9 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { CheckCircle2, ChevronLeft, ChevronRight, CreditCard, History, Layers, Sparkles, UserRound, Zap } from "lucide-react";
+import {
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  CreditCard,
+  Layers,
+  UserRound,
+} from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
+import { ByokSection } from "@/components/app/byok-section";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { PageLoader } from "@/components/ui/loader";
@@ -19,8 +26,10 @@ import {
   getUsageHistory,
   listPlans,
   listTopUps,
-  switchPlan,
+  requestPlanChange,
+  cancelPlanRequest,
 } from "@/lib/api";
+import { cn } from "@/lib/cn";
 import { useProfile } from "@/lib/use-profile";
 
 const TOPUP_PRESETS = [10_000, 50_000, 200_000];
@@ -46,6 +55,7 @@ const LEDGER_REASON_LABEL: Record<CreditLedgerEntryType["reason"], string> = {
   topup: "Пополнение баланса",
   period_renewal: "Обновление тарифного периода",
   plan_change: "Смена тарифа",
+  signup_grant: "Стартовый бюджет",
 };
 
 const LEDGER_DIRECTION_OPTIONS: { value: LedgerDirection; label: string }[] = [
@@ -86,6 +96,12 @@ const TOPUP_STATUS_LABEL: Record<CreditTopUpType["status"], string> = {
   pending: "Ожидает оплаты",
   paid: "Оплачен",
   cancelled: "Отменён",
+};
+
+const TOPUP_STATUS_TONE: Record<CreditTopUpType["status"], string> = {
+  pending: "border-amber-500/30 bg-amber-50 text-amber-800",
+  paid: "border-emerald-500/25 bg-emerald-50 text-emerald-700",
+  cancelled: "border-black/10 bg-black/[0.03] text-[var(--ar-mist)]",
 };
 
 export default function ProfilePage() {
@@ -166,19 +182,29 @@ export default function ProfilePage() {
     }
   };
 
-  const onConfirmPlanSwitch = async () => {
+  const onConfirmPlanRequest = async () => {
     if (!confirmPlan) return;
     setPlanBusy(true);
     setPlanError(null);
     try {
-      await switchPlan(confirmPlan.id);
-      setUsagePage(0);
+      await requestPlanChange(confirmPlan.id);
       await loadBilling();
-      await loadUsage(0, usageDirection);
       setConfirmPlan(null);
       setPlanModalOpen(false);
     } catch (err) {
-      setPlanError(err instanceof Error ? err.message : "Не удалось сменить тариф");
+      setPlanError(err instanceof Error ? err.message : "Не удалось отправить заявку");
+    } finally {
+      setPlanBusy(false);
+    }
+  };
+
+  const onCancelPlanRequest = async () => {
+    const pending = billing?.pending_plan_request;
+    if (!pending) return;
+    setPlanBusy(true);
+    try {
+      await cancelPlanRequest(pending.id);
+      await loadBilling();
     } finally {
       setPlanBusy(false);
     }
@@ -189,168 +215,214 @@ export default function ProfilePage() {
   if (loading) return <PageLoader />;
 
   return (
-    <div className="space-y-5">
-      <div>
-        <p className="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.22em] text-[var(--ar-sky)]">
-          <Sparkles size={15} />
-          Аккаунт
-        </p>
-        <h1 className="mt-2 text-3xl font-semibold tracking-normal text-[var(--ar-black)] sm:text-5xl">Профиль</h1>
-      </div>
+    <div className="space-y-4">
+      <header>
+        <h1 className="text-2xl font-semibold tracking-[-0.025em] text-[var(--ar-black)] sm:text-[1.75rem]">
+          Профиль
+        </h1>
+        <p className="mt-1 text-sm text-[var(--ar-mist)]">Аккаунт, тариф и расход кредитов</p>
+      </header>
+
       {error ? <p className="text-sm text-rose-600">{error}</p> : null}
+
       {profile ? (
-        <Card className="grid gap-4 sm:grid-cols-3" hover={false}>
-          <div className="flex items-center gap-3 border-b border-white/60 pb-4 sm:col-span-3">
-            <span className="flex h-11 w-11 items-center justify-center rounded-[var(--ar-radius-sm)] bg-white/80 text-[var(--ar-sky)] shadow-sm shadow-sky-950/5">
-              <UserRound size={20} />
-            </span>
-            <div className="min-w-0">
-              <p className="truncate font-semibold text-[var(--ar-black)]">{profile.email}</p>
-              <p className="text-sm text-[var(--ar-mist)]">Личный аккаунт AIRuntime</p>
-            </div>
-          </div>
-          <div>
-            <p className="text-sm text-[var(--ar-stone)]">Почта</p>
-            <p className="mt-1 break-all font-medium text-[var(--ar-black)]">{profile.email}</p>
-          </div>
-          <div>
-            <p className="text-sm text-[var(--ar-stone)]">Статус</p>
-            <p className="mt-1 inline-flex items-center gap-1.5 font-medium text-[var(--ar-black)]">
-              <CheckCircle2 size={16} className={profile.is_verified ? "text-emerald-500" : "text-[var(--ar-stone)]"} />
-              {profile.is_verified ? "Подтверждена" : "Не подтверждена"}
-            </p>
-          </div>
-          <div>
-            <p className="text-sm text-[var(--ar-stone)]">Кредиты</p>
-            <p className="mt-1 font-semibold tabular-nums text-[var(--ar-black)]">
-              {profile.credits_balance.toLocaleString()}
+        <Card hover={false} className="flex flex-wrap items-center gap-x-4 gap-y-3 p-5">
+          <span
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[image:var(--ar-accent-gradient-soft)] text-[var(--ar-sky)]"
+            aria-hidden
+          >
+            <UserRound size={20} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-semibold text-[var(--ar-black)]">{profile.email}</p>
+            <p
+              className={cn(
+                "mt-0.5 inline-flex items-center gap-1.5 text-sm",
+                profile.is_verified ? "text-emerald-600" : "text-[var(--ar-stone)]"
+              )}
+            >
+              <CheckCircle2 size={14} aria-hidden />
+              {profile.is_verified ? "Почта подтверждена" : "Почта не подтверждена"}
             </p>
           </div>
         </Card>
       ) : null}
 
       {billing ? (
-        <Card className="space-y-4" hover={false}>
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/60 pb-4">
-            <div className="flex items-center gap-3">
-              <span className="flex h-11 w-11 items-center justify-center rounded-[var(--ar-radius-sm)] bg-white/80 text-[var(--ar-sky)] shadow-sm shadow-sky-950/5">
-                <Zap size={20} />
-              </span>
+        <>
+          <Card hover={false} className="p-5 sm:p-6">
+            <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-5">
               <div>
-                <p className="font-semibold text-[var(--ar-black)]">
-                  Тариф «{billing.plan?.name ?? "не назначен"}»
+                <p className="text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[var(--ar-stone)]">
+                  Баланс
                 </p>
-                <p className="text-sm text-[var(--ar-mist)]">
+                {/* Rubles are the unit users think in; credits are an internal detail. */}
+                <p className="mt-2 text-[2.25rem] font-semibold leading-none tabular-nums tracking-[-0.03em] text-[var(--ar-black)]">
+                  {formatRub(billing.balance_rub)}
+                  <span className="ml-2 text-base font-medium text-[var(--ar-stone)]">₽</span>
+                </p>
+                <p className="mt-1 text-xs tabular-nums text-[var(--ar-stone)]">
+                  {billing.credits_balance.toLocaleString("ru-RU")} кредитов
+                </p>
+                <p className="mt-3 text-sm leading-relaxed text-[var(--ar-mist)]">
+                  Тариф «{billing.plan?.name ?? "не назначен"}»
                   {billing.plan
-                    ? `${billing.plan.monthly_credits.toLocaleString()} кредитов в месяц · до ${billing.plan.max_concurrent_projects} ${pluralizeProjects(billing.plan.max_concurrent_projects)} одновременно`
-                    : "Обратитесь в поддержку, чтобы подключить тариф"}
+                    ? ` · ${billing.plan.monthly_budget_rub} ₽ ${billing.plan.grant_renews ? "в месяц" : "разово при регистрации"} · до ${billing.plan.max_concurrent_projects} ${pluralizeProjects(billing.plan.max_concurrent_projects)} одновременно`
+                    : " — обратитесь в поддержку, чтобы подключить тариф"}
                 </p>
               </div>
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                <Button
+                  variant="outline"
+                  onClick={() => setPlanModalOpen(true)}
+                  disabled={Boolean(billing.pending_plan_request)}
+                >
+                  <Layers size={15} />
+                  {billing.pending_plan_request ? "Заявка отправлена" : "Сменить тариф"}
+                </Button>
+                <Button variant="accent" onClick={() => setTopupOpen(true)}>
+                  <CreditCard size={15} />
+                  Пополнить
+                </Button>
+              </div>
             </div>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <Button variant="outline" onClick={() => setPlanModalOpen(true)}>
-                <Layers size={15} />
-                Сменить тариф
-              </Button>
-              <Button variant="accent" onClick={() => setTopupOpen(true)}>
-                <CreditCard size={15} />
-                Пополнить баланс
-              </Button>
-            </div>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div>
-              <p className="text-sm text-[var(--ar-stone)]">Баланс кредитов</p>
-              <p className="mt-1 font-semibold tabular-nums text-[var(--ar-black)]">
-                {billing.credits_balance.toLocaleString()}
-              </p>
-            </div>
-            <div>
-              <p className="text-sm text-[var(--ar-stone)]">Период начался</p>
-              <p className="mt-1 font-medium text-[var(--ar-black)]">{formatDate(billing.billing_period_start)}</p>
-            </div>
-            <div>
-              <p className="text-sm text-[var(--ar-stone)]">Обновление тарифа</p>
-              <p className="mt-1 font-medium text-[var(--ar-black)]">{formatDate(billing.billing_period_end)}</p>
-            </div>
-          </div>
+
+            {billing.pending_plan_request ? (
+              <div className="mt-5 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-[0.7rem] border border-amber-500/30 bg-amber-50 px-4 py-3">
+                <p className="text-sm text-amber-900">
+                  Заявка на тариф «{billing.pending_plan_request.to_plan_name}» на рассмотрении.
+                  Подключим после подтверждения оплаты.
+                </p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={planBusy}
+                  onClick={() => void onCancelPlanRequest()}
+                >
+                  Отменить заявку
+                </Button>
+              </div>
+            ) : null}
+
+            <dl className="mt-6 grid gap-x-6 gap-y-3 border-t border-black/[0.06] pt-4 sm:grid-cols-2">
+              <div className="flex items-baseline justify-between gap-3 sm:justify-start sm:gap-2">
+                <dt className="text-sm text-[var(--ar-stone)]">Период начался</dt>
+                <dd className="text-sm font-medium text-[var(--ar-black)]">
+                  {formatDate(billing.billing_period_start)}
+                </dd>
+              </div>
+              <div className="flex items-baseline justify-between gap-3 sm:justify-start sm:gap-2">
+                <dt className="text-sm text-[var(--ar-stone)]">Обновление тарифа</dt>
+                <dd className="text-sm font-medium text-[var(--ar-black)]">
+                  {formatDate(billing.billing_period_end)}
+                </dd>
+              </div>
+            </dl>
+          </Card>
+
+          <ByokSection />
 
           {topups.length > 0 ? (
-            <div className="border-t border-white/60 pt-4">
-              <p className="mb-2 text-sm text-[var(--ar-stone)]">Счета на пополнение</p>
-              <div className="space-y-2">
+            <Card hover={false} className="p-5 sm:p-6">
+              <h2 className="text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[var(--ar-stone)]">
+                Счета на пополнение
+              </h2>
+              <ul className="mt-3 space-y-2">
                 {topups.map((invoice) => (
-                  <div
+                  <li
                     key={invoice.id}
-                    className="flex items-center justify-between rounded-[var(--ar-radius-sm)] border border-black/5 bg-white/60 px-3 py-2 text-sm"
+                    className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 rounded-[0.7rem] border border-black/[0.06] px-3.5 py-2.5 text-sm"
                   >
                     <span className="font-medium text-[var(--ar-black)]">
-                      {invoice.credits.toLocaleString()} кредитов · {invoice.amount_rub} ₽
+                      {invoice.credits.toLocaleString("ru-RU")} кредитов · {invoice.amount_rub} ₽
                     </span>
-                    <Badge>{TOPUP_STATUS_LABEL[invoice.status]}</Badge>
-                  </div>
+                    <span
+                      className={cn(
+                        "rounded-full border px-2.5 py-1 text-xs font-semibold",
+                        TOPUP_STATUS_TONE[invoice.status]
+                      )}
+                    >
+                      {TOPUP_STATUS_LABEL[invoice.status]}
+                    </span>
+                  </li>
                 ))}
-              </div>
-            </div>
+              </ul>
+            </Card>
           ) : null}
 
-          <div className="border-t border-white/60 pt-4">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <p className="flex items-center gap-1.5 text-sm text-[var(--ar-stone)]">
-                <History size={14} />
-                История списаний и начислений
-              </p>
-              <div className="flex flex-wrap gap-1">
+          <Card hover={false} className="p-5 sm:p-6">
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+              <h2 className="text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[var(--ar-stone)]">
+                История кредитов
+              </h2>
+              <div className="flex flex-wrap gap-1.5">
                 {LEDGER_DIRECTION_OPTIONS.map((option) => (
                   <button
                     key={option.value}
                     type="button"
                     onClick={() => onDirectionChange(option.value)}
-                    className={`rounded-[var(--ar-radius-sm)] border px-2.5 py-1 text-xs font-medium transition ${
+                    className={cn(
+                      "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
                       usageDirection === option.value
-                        ? "border-[var(--ar-sky)] bg-[var(--ar-sky)]/10 text-[var(--ar-sky)]"
+                        ? "border-transparent bg-[var(--ar-black)] text-white"
                         : "border-black/10 text-[var(--ar-mist)] hover:border-black/20 hover:text-[var(--ar-black)]"
-                    }`}
+                    )}
                   >
                     {option.label}
                   </button>
                 ))}
               </div>
             </div>
+
             {usage.length > 0 ? (
-              <div className={`space-y-2 ${usageLoading ? "opacity-60" : ""}`}>
+              <ul
+                className={cn(
+                  "mt-4 divide-y divide-black/[0.06] transition-opacity",
+                  usageLoading && "opacity-50"
+                )}
+              >
                 {usage.map((entry) => (
-                  <div
+                  <li
                     key={entry.id}
-                    className="flex items-center justify-between rounded-[var(--ar-radius-sm)] border border-black/5 bg-white/60 px-3 py-2 text-sm"
+                    // Wraps instead of truncating: on a 390px screen the project name and the
+                    // amount each get a full line rather than fighting for one.
+                    className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-3"
                   >
-                    <div className="min-w-0 pr-3">
-                      <p className="truncate font-medium text-[var(--ar-black)]">{ledgerTitle(entry)}</p>
-                      <p className="text-xs text-[var(--ar-stone)]">{ledgerSubtitle(entry)}</p>
+                    <div className="min-w-0 flex-1 basis-[11rem]">
+                      <p className="text-sm font-medium text-[var(--ar-black)]">
+                        {ledgerTitle(entry)}
+                      </p>
+                      <p className="mt-0.5 text-xs leading-relaxed text-[var(--ar-stone)]">
+                        {ledgerSubtitle(entry)}
+                      </p>
                     </div>
-                    <span
-                      className={`shrink-0 font-semibold tabular-nums ${entry.amount >= 0 ? "text-emerald-600" : "text-[var(--ar-black)]"}`}
-                    >
-                      <span>
+                    <div className="shrink-0 text-right">
+                      <p
+                        className={cn(
+                          "whitespace-nowrap text-sm font-semibold tabular-nums",
+                          entry.amount >= 0 ? "text-emerald-600" : "text-[var(--ar-black)]"
+                        )}
+                      >
                         {entry.amount >= 0 ? "+" : ""}
-                        {entry.amount.toLocaleString()} кредитов
-                      </span>
+                        {entry.amount.toLocaleString("ru-RU")} кредитов
+                      </p>
                       {entry.cost_rub !== null ? (
-                        <span className="ml-1.5 text-xs font-normal text-[var(--ar-stone)]">
-                          · {formatRub(entry.cost_rub)} ₽
-                        </span>
+                        <p className="mt-0.5 whitespace-nowrap text-xs tabular-nums text-[var(--ar-stone)]">
+                          {formatRub(entry.cost_rub)} ₽
+                        </p>
                       ) : null}
-                    </span>
-                  </div>
+                    </div>
+                  </li>
                 ))}
-              </div>
+              </ul>
             ) : (
-              <p className="text-sm text-[var(--ar-mist)]">
+              <p className="mt-4 text-sm text-[var(--ar-mist)]">
                 {usageLoading ? "Загружаем историю…" : "Пока нет записей по выбранному фильтру"}
               </p>
             )}
+
             {usageTotal > LEDGER_PAGE_SIZE ? (
-              <div className="mt-3 flex items-center justify-center gap-3">
+              <div className="mt-4 flex items-center justify-center gap-3">
                 <Button
                   variant="outline"
                   size="sm"
@@ -374,8 +446,8 @@ export default function ProfilePage() {
                 </Button>
               </div>
             ) : null}
-          </div>
-        </Card>
+          </Card>
+        </>
       ) : null}
 
       <Modal
@@ -391,18 +463,22 @@ export default function ProfilePage() {
                 key={preset}
                 type="button"
                 onClick={() => setTopupCredits(preset)}
-                className={`rounded-[var(--ar-radius-sm)] border px-3 py-2 text-sm font-medium transition ${
+                className={cn(
+                  "rounded-[0.7rem] border px-3 py-2.5 text-sm font-medium transition-colors",
                   topupCredits === preset
-                    ? "border-[var(--ar-sky)] bg-[var(--ar-sky)]/10 text-[var(--ar-sky)]"
+                    ? "border-[var(--ar-sky)] bg-[var(--ar-sky)]/[0.08] text-[var(--ar-sky)]"
                     : "border-black/10 text-[var(--ar-black)] hover:border-black/20"
-                }`}
+                )}
               >
-                {preset.toLocaleString()}
+                {preset.toLocaleString("ru-RU")}
               </button>
             ))}
           </div>
           <p className="text-sm text-[var(--ar-mist)]">
-            Стоимость: <span className="font-semibold text-[var(--ar-black)]">{rubForCredits(topupCredits)} ₽</span>
+            Стоимость:{" "}
+            <span className="font-semibold text-[var(--ar-black)]">
+              {rubForCredits(topupCredits)} ₽
+            </span>
           </p>
           {topupError ? <p className="text-sm text-rose-600">{topupError}</p> : null}
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
@@ -420,7 +496,7 @@ export default function ProfilePage() {
         open={planModalOpen}
         onClose={() => setPlanModalOpen(false)}
         title="Выберите тариф"
-        description="Смена тарифа сразу обновляет баланс до месячного лимита нового тарифа и начинает новый период."
+        description="Тариф подключается после подтверждения оплаты — заявка уйдёт на рассмотрение."
       >
         <div className="space-y-2">
           {plans.map((plan) => {
@@ -431,25 +507,35 @@ export default function ProfilePage() {
                 type="button"
                 disabled={isCurrent}
                 onClick={() => setConfirmPlan(plan)}
-                className={`w-full rounded-[var(--ar-radius-sm)] border p-3 text-left transition ${
+                className={cn(
+                  "w-full rounded-[0.7rem] border p-3.5 text-left transition-colors",
                   isCurrent
-                    ? "cursor-default border-[var(--ar-sky)]/40 bg-[var(--ar-sky)]/5"
+                    ? "cursor-default border-[var(--ar-sky)]/40 bg-[var(--ar-sky)]/[0.05]"
                     : "border-black/10 hover:border-black/20"
-                }`}
+                )}
               >
                 <div className="flex items-center justify-between gap-2">
                   <p className="font-semibold text-[var(--ar-black)]">
                     {plan.name}
-                    {isCurrent ? <span className="ml-2 text-xs font-normal text-[var(--ar-sky)]">текущий</span> : null}
+                    {isCurrent ? (
+                      <span className="ml-2 text-xs font-normal text-[var(--ar-sky)]">текущий</span>
+                    ) : null}
                   </p>
                   <p className="font-semibold tabular-nums text-[var(--ar-black)]">
                     {plan.price_rub > 0 ? `${plan.price_rub} ₽/мес` : "Бесплатно"}
                   </p>
                 </div>
                 <p className="mt-1 text-sm text-[var(--ar-mist)]">
-                  {plan.monthly_credits.toLocaleString()} кредитов в месяц · до {plan.max_concurrent_projects}{" "}
-                  {pluralizeProjects(plan.max_concurrent_projects)} одновременно
+                  {plan.monthly_budget_rub} ₽ на модели{" "}
+                  {plan.grant_renews ? "каждый месяц" : "разово при регистрации"} · до{" "}
+                  {plan.max_projects} {pluralizeProjects(plan.max_projects)} · до{" "}
+                  {plan.max_concurrent_projects} запущено одновременно
                 </p>
+                {plan.allowed_models ? (
+                  <p className="mt-1 text-xs text-[var(--ar-stone)]">
+                    Модели: только экономичная. Sol и Terra — на платных тарифах.
+                  </p>
+                ) : null}
               </button>
             );
           })}
@@ -459,10 +545,10 @@ export default function ProfilePage() {
       <Modal
         open={Boolean(confirmPlan)}
         onClose={() => setConfirmPlan(null)}
-        title="Сменить тариф?"
+        title="Подать заявку на тариф?"
         description={
           confirmPlan
-            ? `Тариф изменится на «${confirmPlan.name}». Баланс сразу станет ${confirmPlan.monthly_credits.toLocaleString()} кредитов, текущий тарифный период начнётся заново.`
+            ? `Отправим заявку на «${confirmPlan.name}» (${confirmPlan.price_rub} ₽/мес). Мы свяжемся по оплате — тариф и бюджет ${confirmPlan.monthly_budget_rub} ₽ подключатся после подтверждения.`
             : undefined
         }
       >
@@ -472,8 +558,12 @@ export default function ProfilePage() {
             <Button variant="ghost" onClick={() => setConfirmPlan(null)} disabled={planBusy}>
               Отмена
             </Button>
-            <Button variant="accent" onClick={() => void onConfirmPlanSwitch()} disabled={planBusy}>
-              {planBusy ? "Меняем тариф…" : "Да, сменить тариф"}
+            <Button
+              variant="accent"
+              onClick={() => void onConfirmPlanRequest()}
+              disabled={planBusy}
+            >
+              {planBusy ? "Отправляем…" : "Отправить заявку"}
             </Button>
           </div>
         </div>

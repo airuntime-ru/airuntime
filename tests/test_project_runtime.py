@@ -114,7 +114,12 @@ def test_runtime_limits_endpoint(client, db):
     response = client.get("/api/v1/projects/runtime-limits", headers=headers)
 
     assert response.status_code == 200
-    assert response.json() == {"running": 2, "max_running": 3}
+    body = response.json()
+    assert body["running"] == 2
+    assert body["max_running"] == 3
+    # Epic A4 added the total-project limit alongside the concurrency one.
+    assert body["total"] == 2
+    assert "max_total" in body
 
 
 def test_start_project_endpoint_returns_conflict_when_limit_reached(client, db):

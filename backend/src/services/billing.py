@@ -30,7 +30,16 @@ LedgerDirection = str  # "all" | "credit" | "debit"
 
 
 def _billing_url() -> str:
-    return f"{settings.resolved_frontend_url.rstrip('/')}/app/settings"
+    # /app/settings is a redirect stub - billing actually lives on the profile page.
+    return f"{settings.resolved_frontend_url.rstrip('/')}/app/profile"
+
+
+def plan_grant_credits(plan: Plan) -> int:
+    """Credits issued for one billing period of `plan`.
+
+    Plans store a budget in rubles; credits are the internal unit derived from it.
+    """
+    return max(0, plan.monthly_budget_rub) * settings.billing_credits_per_rub
 
 
 def get_default_plan(db: Session) -> Plan | None:
@@ -42,10 +51,17 @@ def assign_default_plan(db: Session, user: User) -> None:
     if not plan:
         return
     now = datetime.now(UTC)
+    grant = plan_grant_credits(plan)
     user.plan_id = plan.id
-    user.credits_balance = plan.monthly_credits
+    user.credits_balance = grant
     user.billing_period_start = now
     user.billing_period_end = now + timedelta(days=BILLING_PERIOD_DAYS)
+    if grant > 0:
+        # Called while the User row is still new, so its id only exists after a flush - the
+        # ledger FK would otherwise go in as NULL.
+        db.add(user)
+        db.flush()
+        record_ledger_entry(db, user, amount=grant, reason="signup_grant")
 
 
 def concurrent_project_limit(db: Session, user: User, *, fallback: int) -> int:
@@ -53,6 +69,34 @@ def concurrent_project_limit(db: Session, user: User, *, fallback: int) -> int:
         return fallback
     plan = db.get(Plan, user.plan_id)
     return plan.max_concurrent_projects if plan else fallback
+
+
+def total_project_limit(db: Session, user: User) -> int | None:
+    """Total projects a user may own, from their plan.
+
+    None means the plan imposes no limit - either the account has no plan at all (a
+    misconfiguration; blocking them at one project would be worse than the old behaviour) or
+    the plan opts out with a non-positive value. Callers then fall back to the global ceiling.
+    """
+    if not user.plan_id:
+        return None
+    plan = db.get(Plan, user.plan_id)
+    if plan is None or plan.max_projects <= 0:
+        return None
+    return plan.max_projects
+
+
+def allowed_platform_models(db: Session, user: User) -> list[str] | None:
+    """Models this user may run on the *platform* key, or None for the whole catalog.
+
+    BYOK bypasses this entirely - own key, own money, own choice of model.
+    """
+    if not user.plan_id:
+        return None
+    plan = db.get(Plan, user.plan_id)
+    if not plan or not plan.allowed_models:
+        return None
+    return [str(item) for item in plan.allowed_models]
 
 
 def record_ledger_entry(
@@ -89,6 +133,7 @@ def record_usage(
     cache_write_input_tokens: int | None = None,
     output_tokens: int | None = None,
     provider_cost_usd_micros: int | None = None,
+    markup_percent: int | None = None,
 ) -> None:
     """Deduct credits for a chat turn and log it. `amount` is the positive cost - the balance
     change and ledger entry are both negative.
@@ -115,22 +160,68 @@ def record_usage(
             cache_write_input_tokens=cache_write_input_tokens,
             output_tokens=output_tokens,
             provider_cost_usd_micros=provider_cost_usd_micros,
+            markup_percent=markup_percent,
+        )
+    )
+
+
+def record_byok_usage(
+    db: Session,
+    user: User,
+    *,
+    project_id: uuid.UUID,
+    project_name: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    input_tokens: int | None = None,
+    cached_input_tokens: int | None = None,
+    cache_write_input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    provider_cost_usd_micros: int | None = None,
+) -> None:
+    """Log a turn the user paid their own provider for.
+
+    Balance is untouched (amount 0) but tokens and provider cost are still recorded, so
+    analytics can separate BYOK traffic from traffic the platform actually pays for.
+    """
+    if project_name is None:
+        project = db.get(Project, project_id)
+        project_name = project.name if project else None
+    db.add(
+        CreditLedgerEntry(
+            user_id=user.id,
+            project_id=project_id,
+            project_name=project_name,
+            amount=0,
+            reason="byok_usage",
+            provider=provider,
+            model=model,
+            input_tokens=input_tokens,
+            cached_input_tokens=cached_input_tokens,
+            cache_write_input_tokens=cache_write_input_tokens,
+            output_tokens=output_tokens,
+            provider_cost_usd_micros=provider_cost_usd_micros,
+            markup_percent=0,
         )
     )
 
 
 def switch_plan(db: Session, user: User, plan: Plan) -> User:
-    """Self-service plan change. No proration since there's no real payment yet - switching
-    immediately grants the new plan's monthly credits and starts a fresh billing period."""
+    """Apply a plan change. Grants the plan's budget and starts a fresh billing period.
+
+    Not reachable from the public API on purpose: paid plans hand out a real token budget, so
+    the only callers are admin approval of a PlanChangeRequest and internal/seed tooling.
+    """
     now = datetime.now(UTC)
+    grant = plan_grant_credits(plan)
     user.plan_id = plan.id
-    user.credits_balance = plan.monthly_credits
+    user.credits_balance = grant
     user.billing_period_start = now
     user.billing_period_end = now + timedelta(days=BILLING_PERIOD_DAYS)
     user.low_credits_notified_at = None
     user.period_ending_notified_at = None
     db.add(user)
-    record_ledger_entry(db, user, amount=plan.monthly_credits, reason="plan_change")
+    record_ledger_entry(db, user, amount=grant, reason="plan_change")
     db.commit()
     db.refresh(user)
     return user
@@ -204,16 +295,24 @@ def _renew_period_if_due(db: Session, user: User, *, now: datetime) -> None:
     plan = db.get(Plan, user.plan_id) if user.plan_id else None
     if not plan:
         return
-    user.credits_balance = plan.monthly_credits
+    if not plan.grant_renews:
+        # One-shot grant (free tier). Roll the period forward so period-based UI stays sane,
+        # but never re-issue the budget - otherwise every signup is an unbounded monthly bill.
+        user.billing_period_start = now
+        user.billing_period_end = now + timedelta(days=BILLING_PERIOD_DAYS)
+        db.add(user)
+        return
+    grant = plan_grant_credits(plan)
+    user.credits_balance = grant
     user.billing_period_start = now
     user.billing_period_end = now + timedelta(days=BILLING_PERIOD_DAYS)
     user.low_credits_notified_at = None
     user.period_ending_notified_at = None
     db.add(user)
-    record_ledger_entry(db, user, amount=plan.monthly_credits, reason="period_renewal")
+    record_ledger_entry(db, user, amount=grant, reason="period_renewal")
     content = period_renewed_email(
         plan_name=plan.name,
-        credits=plan.monthly_credits,
+        credits=grant,
         period_end=user.billing_period_end,
     )
     send_branded_email(
@@ -225,9 +324,10 @@ def _notify_low_credits_if_due(db: Session, user: User, *, now: datetime) -> Non
     if not user.plan_id:
         return
     plan = db.get(Plan, user.plan_id)
-    if not plan or plan.monthly_credits <= 0:
+    grant = plan_grant_credits(plan) if plan else 0
+    if not plan or grant <= 0:
         return
-    threshold = plan.monthly_credits * LOW_CREDITS_THRESHOLD_RATIO
+    threshold = grant * LOW_CREDITS_THRESHOLD_RATIO
     if user.credits_balance > threshold:
         return
     if user.low_credits_notified_at is not None:
@@ -296,6 +396,10 @@ def run_billing_maintenance(db: Session) -> None:
     """Periodic sweep: renew expired billing periods, send low-credit/period-ending warnings,
     and credit any top-up invoices an admin has marked paid. Safe to call repeatedly."""
     now = datetime.now(UTC)
+    # Deferred work the Django admin marked but could not execute itself.
+    from src.services.plan_requests import apply_approved_requests
+
+    apply_approved_requests(db)
     _credit_paid_topups(db, now=now)
     users = db.query(User).filter(User.plan_id.isnot(None)).all()
     for user in users:

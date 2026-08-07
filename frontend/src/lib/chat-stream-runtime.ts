@@ -7,6 +7,8 @@
  * "отвалился и стоп". The fetch itself was not aborted on unmount; the UI was.
  */
 
+import type { OutOfCreditsDetail } from "@/lib/api";
+
 export type AgentStatus = {
   phase: string;
   label: string;
@@ -41,6 +43,8 @@ export type ChatStreamSnapshot = {
   agentStatus: AgentStatus | null;
   toolActivity: ToolActivityItem[];
   chatError: string;
+  /** Set when the turn was refused for lack of credits, so the UI can offer real actions. */
+  outOfCredits: OutOfCreditsDetail | null;
   // Wall-clock start of the current turn (Date.now()), so the UI can tick a live elapsed timer -
   // shared across tabs the same way the rest of this snapshot is (see cross-tab sync below), so
   // every tab watching the same chat shows the same elapsed time, not "time since I noticed".
@@ -104,6 +108,7 @@ function ensureSession(projectId: string, chatId: string): InternalSession {
       agentStatus: readPersistedStatus(projectId, chatId),
       toolActivity: [],
       chatError: "",
+      outOfCredits: null,
       controller: null,
       toolActivityId: 0,
       listeners: new Set(),
@@ -146,6 +151,7 @@ function snapshotOf(session: InternalSession): ChatStreamSnapshot {
     agentStatus: session.agentStatus,
     toolActivity: session.toolActivity,
     chatError: session.chatError,
+    outOfCredits: session.outOfCredits,
     turnStartedAt: session.turnStartedAt,
   };
 }
@@ -214,6 +220,7 @@ function handleBroadcastMessage(message: ChatBroadcastMessage) {
   session.agentStatus = message.snapshot.agentStatus;
   session.toolActivity = message.snapshot.toolActivity;
   session.chatError = message.snapshot.chatError;
+  session.outOfCredits = message.snapshot.outOfCredits ?? null;
   session.turnStartedAt = message.snapshot.turnStartedAt;
   writePersistedStatus(message.projectId, message.chatId, session.agentStatus);
   notify(session);
@@ -292,6 +299,7 @@ export function clearChatStreamSession(projectId: string, chatId: string) {
   session.agentStatus = null;
   session.toolActivity = [];
   session.chatError = "";
+  session.outOfCredits = null;
   writePersistedStatus(projectId, chatId, null);
   notify(session);
 }
@@ -315,6 +323,20 @@ type StreamHandlers = {
   /** When stream ends on phase=deploy, mark done (repair) instead of leaving spinner. */
   completeDeployPhase?: boolean;
 };
+
+/** Recognise the structured 402 from services/credit_gate.py. */
+function parseOutOfCredits(raw: string): OutOfCreditsDetail | null {
+  try {
+    const parsed = JSON.parse(raw) as { detail?: unknown };
+    const detail = parsed.detail;
+    if (detail && typeof detail === "object" && (detail as { code?: string }).code === "out_of_credits") {
+      return detail as OutOfCreditsDetail;
+    }
+  } catch {
+    // Not JSON - fall through to the generic formatter.
+  }
+  return null;
+}
 
 function formatApiError(raw: string, status: number): string {
   try {
@@ -353,6 +375,7 @@ async function runStreamLoop(projectId: string, chatId: string, handlers: Stream
   session.isLeader = true;
   session.loading = true;
   session.chatError = "";
+  session.outOfCredits = null;
   session.toolActivity = [];
   session.toolActivityId = 0;
   session.turnStartedAt = Date.now();
@@ -446,6 +469,11 @@ async function runStreamLoop(projectId: string, chatId: string, handlers: Stream
     const response = await handlers.createRequest(controller.signal);
     if (!response.ok) {
       const raw = await response.text();
+      const paywall = parseOutOfCredits(raw);
+      if (paywall) {
+        session.outOfCredits = paywall;
+        throw new Error(paywall.message);
+      }
       throw new Error(formatApiError(raw, response.status));
     }
     if (!response.body) throw new Error("Пустой ответ сервера");

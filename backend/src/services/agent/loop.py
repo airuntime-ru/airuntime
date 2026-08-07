@@ -55,7 +55,10 @@ class CodingAgentSession:
         workspace: WorkspaceTools,
         system_prompt: str,
         correlation_id: str | None = None,
+        reasoning_effort: str | None = None,
     ) -> None:
+        # Plan-scoped reasoning effort (see services/model_access.py). None = global default.
+        self.reasoning_effort = reasoning_effort
         self.provider_name = provider_name
         self.model = model
         self.api_key = api_key
@@ -94,6 +97,7 @@ class CodingAgentSession:
                 workspace=self.workspace,
                 system_prompt=self.system_prompt,
                 correlation_id=self.correlation_id,
+                reasoning_effort=self.reasoning_effort,
             )
             async for event in session.run(
                 history=_normalize_history(history),

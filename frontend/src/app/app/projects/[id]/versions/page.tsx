@@ -259,7 +259,7 @@ export default function ProjectVersionsPage() {
 
             <div className="mt-4 space-y-2">
               {treeEntries.length === 0 ? (
-                <EmptyState title="Папка пуста" description="В этом месте репозитория пока нет файлов." />
+                <EmptyState className="border-0 bg-transparent shadow-none" title="Папка пуста" description="В этом месте репозитория пока нет файлов." />
               ) : null}
 
               {treeEntries.map((e) => {
@@ -303,9 +303,10 @@ export default function ProjectVersionsPage() {
 
           <Card hover={false} className="p-4">
             {!fileData ? (
-              <EmptyState title="Выберите файл" description="Нажмите на файл в дереве слева, чтобы увидеть содержимое." />
+              <EmptyState className="border-0 bg-transparent shadow-none" title="Выберите файл" description="Нажмите на файл в дереве слева, чтобы увидеть содержимое." />
             ) : fileData.is_binary ? (
               <EmptyState
+                className="border-0 bg-transparent shadow-none"
                 title="Файл бинарный"
                 description="Этот файл не подходит для текстового просмотра. Можно скачать весь ZIP снапшота."
                 action={
@@ -382,8 +383,10 @@ export default function ProjectVersionsPage() {
                     <Download size={15} />
                     {downloading === v.commit_hash ? "..." : "ZIP"}
                   </Button>
+                  {/* Rollback replaces the running version - it should not be the loudest
+                      button on every row. Browsing the files is the safe default. */}
                   <Button
-                    variant="accent"
+                    variant="ghost"
                     size="sm"
                     onClick={() => setConfirmRollback(v)}
                     disabled={rollingBack === v.commit_hash}
@@ -392,7 +395,7 @@ export default function ProjectVersionsPage() {
                     {rollingBack === v.commit_hash ? "..." : "Откатиться"}
                   </Button>
                   <Button
-                    variant="outline"
+                    variant="accent"
                     size="sm"
                     onClick={() => {
                       setActiveCommitHash(v.commit_hash);
@@ -402,7 +405,7 @@ export default function ProjectVersionsPage() {
                     }}
                   >
                     <FileText size={15} />
-                    Открыть файлы версии
+                    Открыть файлы
                   </Button>
                 </div>
               </div>

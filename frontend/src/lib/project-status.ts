@@ -13,6 +13,28 @@ export function projectStatusLabel(status: string): string {
   return STATUS_LABELS[status] ?? status;
 }
 
+const TYPE_LABELS: Record<string, string> = {
+  website: "Сайт",
+  telegram_bot: "Telegram-бот",
+  mixed: "Сайт и бот",
+};
+
+/** Shared so no screen ever leaks the raw enum ("website") to the user. */
+export function projectTypeLabel(type: string): string {
+  return TYPE_LABELS[type] ?? type;
+}
+
+export type ProjectStatusTone = "live" | "progress" | "warn" | "danger" | "idle";
+
+/** Semantic colour bucket for a status, so every surface tints it the same way. */
+export function projectStatusTone(status: string): ProjectStatusTone {
+  if (status === "live") return "live";
+  if (status === "deploying") return "progress";
+  if (status === "needs_configuration") return "warn";
+  if (status === "blocked") return "danger";
+  return "idle";
+}
+
 const DEPLOYMENT_STATUS_LABELS: Record<string, string> = {
   completed: "Развёрнут",
   failed: "Ошибка",

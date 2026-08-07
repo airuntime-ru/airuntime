@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from src.db.models.user import User
 from src.services import billing
+from src.services.byok import has_valid_key
 from src.services.model_pricing import ModelUsageCost, estimate_model_usage_cost
 from src.services.orchestration.context_engine import clip_text
 
@@ -71,6 +72,25 @@ def charge_credits_for_run(
     for and easy to unit test independent of the engine's own control flow."""
     if amount <= 0:
         return
+
+    # Charging is gated here rather than threaded down from the router: this is the single
+    # place orchestration touches the balance, so BYOK only has to be checked once.
+    if provider_name and has_valid_key(db, user, provider_name):
+        billing.record_byok_usage(
+            db,
+            user,
+            project_id=project_id,
+            project_name=project_name,
+            provider=provider_name,
+            model=model,
+            input_tokens=usage_cost.input_tokens if usage_cost else None,
+            cached_input_tokens=usage_cost.cached_input_tokens if usage_cost else None,
+            cache_write_input_tokens=usage_cost.cache_write_input_tokens if usage_cost else None,
+            output_tokens=usage_cost.output_tokens if usage_cost else None,
+            provider_cost_usd_micros=usage_cost.provider_cost_usd_micros if usage_cost else None,
+        )
+        return
+
     billing.record_usage(
         db,
         user,
@@ -84,6 +104,7 @@ def charge_credits_for_run(
         cache_write_input_tokens=usage_cost.cache_write_input_tokens if usage_cost else None,
         output_tokens=usage_cost.output_tokens if usage_cost else None,
         provider_cost_usd_micros=usage_cost.provider_cost_usd_micros if usage_cost else None,
+        markup_percent=usage_cost.markup_percent if usage_cost else None,
     )
 
 

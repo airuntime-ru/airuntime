@@ -14,6 +14,7 @@ from src.api.dependencies.rate_limit import enforce_rate_limit  # noqa: E402
 from src.api.routers import (  # noqa: E402
     auth,
     billing,
+    byok,
     chat,
     deployments,
     files,
@@ -87,6 +88,7 @@ app.include_router(providers.router, prefix=settings.api_prefix)
 app.include_router(secrets.router, prefix=settings.api_prefix)
 app.include_router(telegram.router, prefix=settings.api_prefix)
 app.include_router(billing.router, prefix=settings.api_prefix)
+app.include_router(byok.router, prefix=settings.api_prefix)
 app.include_router(orchestration.router, prefix=settings.api_prefix)
 app.include_router(orchestration_admin.router, prefix=settings.api_prefix)
 

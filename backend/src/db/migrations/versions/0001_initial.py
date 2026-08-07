@@ -25,7 +25,7 @@ def upgrade() -> None:
         sa.Column("password_hash", sa.String(length=255), nullable=False),
         sa.Column("is_verified", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("role", sa.String(length=50), nullable=False, server_default="user"),
-        sa.Column("credits_balance", sa.Integer(), nullable=False, server_default="1000000000"),
+        sa.Column("credits_balance", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
     )

@@ -28,7 +28,7 @@ function TelegramTokenHelpContent() {
             <Bot size={22} />
           </span>
           <h1 className="mt-5 text-3xl font-semibold tracking-normal sm:text-5xl">
-            Как получить Telegram token
+            Как получить Telegram-токен
           </h1>
           <p className="mt-4 text-base leading-8 text-[var(--ar-mist)]">
             Токен нужен AIRuntime, чтобы запустить вашего бота от имени созданного Telegram-бота.
@@ -39,7 +39,7 @@ function TelegramTokenHelpContent() {
               "Откройте @BotFather в Telegram.",
               "Отправьте команду /newbot.",
               "Введите имя и username бота.",
-              "Скопируйте token, который выдаст BotFather.",
+              "Скопируйте токен, который выдаст BotFather.",
               "В AIRuntime откройте секреты проекта и добавьте TELEGRAM_BOT_TOKEN.",
             ].map((step, index) => (
               <div key={step} className="flex gap-3 rounded-xl border border-black/8 bg-black/[0.02] p-4">

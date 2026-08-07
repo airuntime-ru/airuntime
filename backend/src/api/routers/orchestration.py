@@ -32,6 +32,9 @@ from src.db.models.chat import Chat
 from src.db.models.project import Project
 from src.db.models.user import User
 from src.db.session import SessionLocal, get_db
+from src.services.byok import resolve_user_api_key
+from src.services.credit_gate import out_of_credits_detail
+from src.services.model_access import ModelNotAllowedError, resolve_model_for_user
 from src.services.orchestration import engine, events_bus
 from src.services.orchestration.repository import (
     AgentTaskRepository,
@@ -40,7 +43,6 @@ from src.services.orchestration.repository import (
 )
 from src.services.orchestration.status import is_run_terminal
 from src.services.prompt_guard import sanitize_user_message
-from src.services.provider.factory import resolve_provider_and_model
 from src.services.system_settings import resolve_api_key_for_provider
 
 logger = logging.getLogger(__name__)
@@ -114,7 +116,8 @@ async def create_run(
         raise HTTPException(status_code=404, detail="Chat not found")
     if current_user.credits_balance <= 0:
         raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="Insufficient credits"
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail=out_of_credits_detail(db, current_user),
         )
 
     try:
@@ -123,16 +126,29 @@ async def create_run(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     try:
-        provider_name, model = resolve_provider_and_model(
-            provider_override=payload.provider, model_override=payload.model
+        provider_name, model = resolve_model_for_user(
+            db,
+            current_user,
+            provider_override=payload.provider,
+            model_override=payload.model,
+            has_own_key=bool(
+                resolve_user_api_key(
+                    db, current_user, (payload.provider or settings.provider_name).strip().lower()
+                )
+            ),
         )
+    except ModelNotAllowedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    # BYOK first: the user's own key means the provider bills them, not us.
     api_key = (
-        resolve_api_key_for_provider(provider_name)
+        resolve_user_api_key(db, current_user, provider_name)
+        or resolve_api_key_for_provider(provider_name)
         or getattr(settings, f"{provider_name}_api_key", None)
         or ""
     )
+
     if not api_key:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="No AI provider API key configured"
@@ -264,11 +280,14 @@ async def resume_run(
 
     provider_name = run.provider or settings.provider_name
     model = run.model or ""
+    # BYOK first: the user's own key means the provider bills them, not us.
     api_key = (
-        resolve_api_key_for_provider(provider_name)
+        resolve_user_api_key(db, current_user, provider_name)
+        or resolve_api_key_for_provider(provider_name)
         or getattr(settings, f"{provider_name}_api_key", None)
         or ""
     )
+
     if not api_key:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="No AI provider API key configured"

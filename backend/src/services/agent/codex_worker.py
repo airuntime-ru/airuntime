@@ -127,7 +127,8 @@ def _build_argv(job: dict, *, model: str, remapped_cwd: str | None) -> list[str]
         "--model",
         model,
         "-c",
-        f'model_reasoning_effort="{settings.codex_reasoning_effort}"',
+        # Per-job so a restricted plan can run a cheaper effort than the global default.
+        f'model_reasoning_effort="{job.get("reasoning_effort") or settings.codex_reasoning_effort}"',
     ]
     if remapped_cwd:
         argv += ["--cd", remapped_cwd]

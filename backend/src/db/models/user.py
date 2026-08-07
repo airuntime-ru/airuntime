@@ -16,7 +16,8 @@ class User(Base):
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     role: Mapped[str] = mapped_column(String(50), default="user", nullable=False)
-    credits_balance: Mapped[int] = mapped_column(Integer, default=1_000_000_000, nullable=False)
+    # Starts empty; the signup grant comes from the default plan (see assign_default_plan).
+    credits_balance: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_banned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     banned_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)

@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useEffect, useState } from "react";
-import { Activity, CheckCircle2, Loader2 } from "lucide-react";
+import { Activity, CheckCircle2, Loader2, Sparkles } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 
@@ -105,6 +105,17 @@ export const MessageItem = memo(function MessageItem({
 
   return (
     <div className="w-full" style={{ contentVisibility: "auto", containIntrinsicSize: "auto 96px" }}>
+      {/* Assistant turns are full-width plain text (no bubble), so without an author line it
+          is hard to see where the agent stops and the next user message starts. */}
+      <div className="mb-1.5 flex items-center gap-2">
+        <span
+          className="flex h-5 w-5 items-center justify-center rounded-full bg-[image:var(--ar-accent-gradient)] text-white"
+          aria-hidden
+        >
+          <Sparkles size={11} />
+        </span>
+        <span className="text-xs font-semibold text-[var(--ar-stone)]">AIRuntime</span>
+      </div>
       <MessageBody message={message} isStreaming={isStreaming} />
     </div>
   );

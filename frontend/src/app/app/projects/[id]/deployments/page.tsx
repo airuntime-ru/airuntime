@@ -79,7 +79,7 @@ function DeployLogPanel({ item, live }: { item: DeploymentType; live: boolean })
           Обновляется в реальном времени
         </p>
       ) : null}
-      <pre className="max-h-[min(50vh,28rem)] overflow-auto whitespace-pre-wrap rounded-lg border border-black/8 bg-[#fbfdff] p-3 font-mono text-[11px] leading-relaxed text-[var(--ar-graphite)]">
+      <pre className="max-h-[min(50vh,28rem)] overflow-auto whitespace-pre-wrap scrollbar-airy rounded-[0.7rem] border border-white/8 bg-[#0d1117] p-3 font-mono text-[11px] leading-relaxed text-[#c9d1d9]">
         {body}
       </pre>
     </div>
@@ -275,15 +275,19 @@ export default function ProjectDeploymentsPage() {
               </Button>
             ) : null}
           </div>
-          <Button
-            variant="accent"
-            size="sm"
-            disabled={deployDisabled}
-            onClick={() => void onDeploy()}
-          >
-            {isLive ? <RotateCcw size={15} /> : <Rocket size={15} />}
-            {primaryLabel}
-          </Button>
+          {/* With no deploys yet the empty state already offers this exact action, centred and
+              explained - two identical primary buttons in one viewport just adds noise. */}
+          {deployments.length > 0 ? (
+            <Button
+              variant="accent"
+              size="sm"
+              disabled={deployDisabled}
+              onClick={() => void onDeploy()}
+            >
+              {isLive ? <RotateCcw size={15} /> : <Rocket size={15} />}
+              {primaryLabel}
+            </Button>
+          ) : null}
         </div>
       </div>
       {error ? <p className="text-sm text-rose-600">{error}</p> : null}
@@ -293,7 +297,9 @@ export default function ProjectDeploymentsPage() {
         const hasLog = Boolean(deployLogBody(item) || live || item.status === "failed");
         return (
           <Card key={item.id} className="space-y-3" hover={false}>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            {/* items-start: without it the inline-flex Badge stretches to the full card width
+                in the stacked mobile layout. */}
+            <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
                 <p className="break-all font-semibold text-[var(--ar-black)]">
                   {item.image_ref ?? "Образ приложения"}
@@ -302,19 +308,17 @@ export default function ProjectDeploymentsPage() {
               </div>
               <Badge className={statusTone(item.status)}>{deploymentStatusLabel(item.status)}</Badge>
             </div>
-            <div className="h-2 overflow-hidden rounded-full bg-white/70">
-              <div
-                className={`h-full rounded-full transition-all ${
-                  item.status === "completed"
-                    ? "w-full bg-emerald-400"
-                    : item.status === "running"
-                      ? "w-2/3 bg-[var(--ar-sky)]"
-                      : item.status === "failed" || item.status === "cancelled"
-                        ? "w-full bg-rose-400"
-                        : "w-1/3 bg-[var(--ar-stone)]"
-                }`}
-              />
-            </div>
+            {/* Only a run in progress needs a progress bar. A full-width saturated bar on every
+                finished deploy shouted "something is wrong" on an otherwise healthy list. */}
+            {item.status === "running" || item.status === "queued" ? (
+              <div className="h-1 overflow-hidden rounded-full bg-black/[0.06]">
+                <div
+                  className={`beacon-bar h-full rounded-full ${
+                    item.status === "running" ? "w-2/3 bg-sky-100" : "w-1/3 bg-black/[0.06]"
+                  }`}
+                />
+              </div>
+            ) : null}
             <div className="grid gap-1 text-xs text-[var(--ar-stone)] sm:grid-cols-2">
               <p>Старт: {formatDateTime(item.started_at)}</p>
               <p>Финиш: {formatDateTime(item.finished_at)}</p>

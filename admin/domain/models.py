@@ -1,4 +1,15 @@
-from core.models import AppUser, CreditTopUp, Deployment, ModerationEvent, Plan, Project, Secret
+from core.models import (
+    AppUser,
+    CreditTopUp,
+    Deployment,
+    ModerationEvent,
+    CreditLedgerEntry,
+    Plan,
+    PlanChangeRequest,
+    Project,
+    Secret,
+    UserProviderCredential,
+)
 
 
 class DomainAppUser(AppUser):
@@ -55,3 +66,24 @@ class DomainCreditTopUp(CreditTopUp):
         proxy = True
         verbose_name = "Пополнение баланса"
         verbose_name_plural = "Пополнения баланса"
+
+
+class DomainPlanChangeRequest(PlanChangeRequest):
+    class Meta:
+        proxy = True
+        verbose_name = "Заявка на смену тарифа"
+        verbose_name_plural = "Заявки на смену тарифа"
+
+
+class DomainCreditLedgerEntry(CreditLedgerEntry):
+    class Meta:
+        proxy = True
+        verbose_name = "Операция с кредитами"
+        verbose_name_plural = "Операции с кредитами"
+
+
+class DomainUserProviderCredential(UserProviderCredential):
+    class Meta:
+        proxy = True
+        verbose_name = "Свой API-ключ"
+        verbose_name_plural = "Свои API-ключи"

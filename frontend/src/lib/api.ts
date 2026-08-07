@@ -107,6 +107,9 @@ export type ModelOptionType = {
 export type ProjectRuntimeLimitsType = {
   running: number;
   max_running: number;
+  total: number;
+  /** null when neither the plan nor the global setting caps the project count. */
+  max_total: number | null;
 };
 
 export type TelegramBotProfileType = {
@@ -134,10 +137,42 @@ async function rawRequest(path: string, init: RequestInit = {}, retry = true): P
   return rawRequest(path, init, false);
 }
 
+export type OutOfCreditsAction = { id: string; label: string; href: string };
+
+/** Structured 402 body (backend services/credit_gate.py), so the UI can offer real choices. */
+export type OutOfCreditsDetail = {
+  code: "out_of_credits";
+  message: string;
+  balance: number;
+  has_byok: boolean;
+  pending_plan_request: boolean;
+  actions: OutOfCreditsAction[];
+};
+
+/** Thrown instead of a plain Error so callers can render the paywall instead of a red string. */
+export class OutOfCreditsError extends Error {
+  readonly detail: OutOfCreditsDetail;
+
+  constructor(detail: OutOfCreditsDetail) {
+    super(detail.message);
+    this.name = "OutOfCreditsError";
+    this.detail = detail;
+  }
+}
+
+function asOutOfCredits(detail: unknown): OutOfCreditsDetail | null {
+  if (detail && typeof detail === "object" && (detail as { code?: string }).code === "out_of_credits") {
+    return detail as OutOfCreditsDetail;
+  }
+  return null;
+}
+
 async function parseErrorMessage(response: Response): Promise<string> {
   const text = await response.text();
   try {
     const payload = JSON.parse(text) as { detail?: unknown };
+    const outOfCredits = asOutOfCredits(payload.detail);
+    if (outOfCredits) throw new OutOfCreditsError(outOfCredits);
     if (typeof payload.detail === "string") return payload.detail;
     // FastAPI / Pydantic validation errors: detail is an array of {loc, msg, type}.
     if (Array.isArray(payload.detail)) {
@@ -160,8 +195,9 @@ async function parseErrorMessage(response: Response): Promise<string> {
       });
       return parts.filter(Boolean).join("; ") || `Request failed: ${response.status}`;
     }
-  } catch {
-    // Response body is not JSON.
+  } catch (err) {
+    // The catch is here for "body is not JSON" - it must not swallow the typed paywall error.
+    if (err instanceof OutOfCreditsError) throw err;
   }
   return text || `Request failed: ${response.status}`;
 }
@@ -563,16 +599,38 @@ export type PlanType = {
   key: string;
   name: string;
   description: string | null;
+  /** Token budget included in the plan, in rubles - the number shown to users. */
+  monthly_budget_rub: number;
+  /** Derived from the budget; kept because the chat still meters in credits. */
   monthly_credits: number;
   max_concurrent_projects: number;
+  max_projects: number;
   price_rub: number;
+  /** false for the free tier: the grant is issued once at signup and never renews. */
+  grant_renews: boolean;
+  /** null = whole catalog; otherwise the only models allowed on the platform key. */
+  allowed_models: string[] | null;
+};
+
+export type PlanChangeRequestType = {
+  id: string;
+  status: "pending" | "approved" | "rejected" | "cancelled";
+  note: string | null;
+  admin_note: string | null;
+  created_at: string;
+  resolved_at: string | null;
+  to_plan_id: string;
+  to_plan_name: string | null;
+  from_plan_name: string | null;
 };
 
 export type BillingSummaryType = {
   credits_balance: number;
+  balance_rub: number;
   billing_period_start: string | null;
   billing_period_end: string | null;
   plan: PlanType | null;
+  pending_plan_request: PlanChangeRequestType | null;
 };
 
 export type CreditTopUpType = {
@@ -603,17 +661,31 @@ export async function listTopUps(): Promise<CreditTopUpType[]> {
   return requestJson<CreditTopUpType[]>("/billing/topups");
 }
 
-export async function switchPlan(planId: string): Promise<BillingSummaryType> {
-  return requestJson<BillingSummaryType>("/billing/plan", {
+/** Plans are never switched self-service - an admin approves the request after payment. */
+export async function requestPlanChange(
+  planId: string,
+  note?: string,
+): Promise<PlanChangeRequestType> {
+  return requestJson<PlanChangeRequestType>("/billing/plan-requests", {
     method: "POST",
-    body: JSON.stringify({ plan_id: planId }),
+    body: JSON.stringify({ plan_id: planId, note: note || null }),
+  });
+}
+
+export async function listPlanRequests(): Promise<PlanChangeRequestType[]> {
+  return requestJson<PlanChangeRequestType[]>("/billing/plan-requests");
+}
+
+export async function cancelPlanRequest(requestId: string): Promise<PlanChangeRequestType> {
+  return requestJson<PlanChangeRequestType>(`/billing/plan-requests/${requestId}/cancel`, {
+    method: "POST",
   });
 }
 
 export type CreditLedgerEntryType = {
   id: string;
   amount: number;
-  reason: "chat_message" | "topup" | "period_renewal" | "plan_change";
+  reason: "chat_message" | "topup" | "period_renewal" | "plan_change" | "signup_grant";
   project_id: string | null;
   project_name: string | null;
   provider: string | null;
@@ -738,4 +810,69 @@ export function streamOrchestrationRunEvents(
     `/projects/${projectId}/orchestration/runs/${runId}/events${query ? `?${query}` : ""}`,
     { method: "GET", signal: options.signal },
   );
+}
+
+export type ByokCredentialType = {
+  id: string;
+  provider: string;
+  last4: string;
+  is_valid: boolean;
+  validated_at: string | null;
+  last_error: string | null;
+  created_at: string;
+};
+
+export type ByokListType = {
+  supported: string[];
+  items: ByokCredentialType[];
+};
+
+export async function listByokCredentials(): Promise<ByokListType> {
+  return requestJson<ByokListType>("/byok");
+}
+
+/** The key is write-only: responses only ever carry the last four characters. */
+export async function saveByokCredential(
+  provider: string,
+  apiKey: string,
+): Promise<ByokCredentialType> {
+  return requestJson<ByokCredentialType>("/byok", {
+    method: "PUT",
+    body: JSON.stringify({ provider, api_key: apiKey }),
+  });
+}
+
+export async function testByokCredential(provider: string): Promise<ByokCredentialType> {
+  return requestJson<ByokCredentialType>(`/byok/${provider}/test`, { method: "POST" });
+}
+
+export async function deleteByokCredential(provider: string): Promise<void> {
+  await requestJson<{ deleted: boolean }>(`/byok/${provider}`, { method: "DELETE" });
+}
+
+export type CustomDomainType = {
+  custom_domain: string | null;
+  status: "none" | "pending_dns" | "verified" | "error";
+  verified_at: string | null;
+  error: string | null;
+  checked_at: string | null;
+  target: { cname_target: string | null; a_record_ip: string | null };
+};
+
+export async function getCustomDomain(projectId: string): Promise<CustomDomainType> {
+  return requestJson<CustomDomainType>(`/projects/${projectId}/domain`);
+}
+
+export async function setCustomDomain(
+  projectId: string,
+  domain: string | null,
+): Promise<CustomDomainType> {
+  return requestJson<CustomDomainType>(`/projects/${projectId}/domain`, {
+    method: "PUT",
+    body: JSON.stringify({ domain }),
+  });
+}
+
+export async function verifyCustomDomain(projectId: string): Promise<CustomDomainType> {
+  return requestJson<CustomDomainType>(`/projects/${projectId}/domain/verify`, { method: "POST" });
 }

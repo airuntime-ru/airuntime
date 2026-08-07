@@ -98,6 +98,37 @@ def db(ensure_tables: None) -> Generator[Session, None, None]:
     connection.close()
 
 
+@pytest.fixture(autouse=True)
+def seed_default_plan(db: Session) -> None:
+    """Give every test the default plan production always has.
+
+    Since the signup grant became plan-derived, an empty `plans` table means a new user gets
+    0 credits and every chat/orchestration call 402s. Deliberately permissive (no project cap,
+    no model allowlist) so this fixture only restores credits; tests that exercise plan limits
+    tighten this row themselves.
+    """
+    from src.db.models.plan import Plan
+
+    if db.query(Plan).filter(Plan.is_default.is_(True)).first():
+        return
+    db.add(
+        Plan(
+            key="free",
+            name="Бесплатный",
+            monthly_budget_rub=100,
+            max_concurrent_projects=3,
+            max_projects=0,
+            price_rub=0,
+            is_default=True,
+            is_active=True,
+            grant_renews=False,
+            allowed_models=None,
+            sort_order=0,
+        )
+    )
+    db.commit()
+
+
 @pytest.fixture()
 def client(db: Session) -> Generator[TestClient, None, None]:
     def override_get_db() -> Generator[Session, None, None]:

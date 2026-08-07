@@ -4,6 +4,7 @@ import time
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from src.api.dependencies.auth import get_current_user
@@ -22,7 +23,14 @@ from src.db.models.project import Project
 from src.db.models.secret import Secret
 from src.db.models.user import User
 from src.db.session import get_db
+from src.services.billing import total_project_limit
 from src.services.cloudflare_dns import delete_dns_for_website_deploy
+from src.services.custom_domain import (
+    CustomDomainError,
+    domain_response,
+    set_custom_domain,
+    verify_custom_domain,
+)
 from src.services.deployment_check import check_and_repair_deployment
 from src.services.docker_control_queue import submit_control_job
 from src.services.orchestration import engine as orchestration_engine
@@ -56,6 +64,28 @@ def _to_response(project: Project) -> ProjectResponse:
     return ProjectResponse.from_project(project)
 
 
+def _owned_project_or_404(db: Session, project_id: UUID, user: User) -> Project:
+    project = (
+        db.query(Project).filter(Project.id == project_id, Project.user_id == user.id).first()
+    )
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+
+def _effective_project_limit(db: Session, user: User) -> int | None:
+    """How many projects this user may own in total, or None for no limit.
+
+    The plan is the product-level source of truth (Epic A4). `max_projects_per_user` survives
+    only as a global emergency ceiling an operator can drop without a deploy - it must not
+    define the offer, and it no longer applies to users whose plan already sets a limit.
+    """
+    plan_limit = total_project_limit(db, user)
+    global_ceiling = get_system_setting_number("max_projects_per_user")
+    candidates = [value for value in (plan_limit, global_ceiling) if value is not None]
+    return min(candidates) if candidates else None
+
+
 @router.get("", response_model=ProjectListResponse)
 def list_projects(
     limit: int = Query(default=20, ge=1, le=100),
@@ -80,14 +110,14 @@ def create_project(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ProjectResponse:
-    max_projects = get_system_setting_number("max_projects_per_user")
+    max_projects = _effective_project_limit(db, current_user)
     if max_projects is not None:
         existing_count = db.query(Project).filter(Project.user_id == current_user.id).count()
         if existing_count >= max_projects:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"Достигнут лимит проектов на аккаунт ({max_projects}). "
-                "Удалите неиспользуемый проект, чтобы создать новый.",
+                detail=f"На вашем тарифе доступно проектов: {max_projects}. "
+                "Удалите неиспользуемый проект или смените тариф в профиле.",
             )
 
     project_type = payload.type or infer_project_type(f"{payload.name}\n{payload.description}")
@@ -143,9 +173,12 @@ def update_project(
 def get_runtime_limits(
     current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ) -> ProjectRuntimeLimitsResponse:
+    max_total = _effective_project_limit(db, current_user)
     return ProjectRuntimeLimitsResponse(
         running=count_running_projects(db, current_user.id),
         max_running=get_running_limit(db, current_user.id),
+        total=db.query(Project).filter(Project.user_id == current_user.id).count(),
+        max_total=max_total,
     )
 
 
@@ -380,3 +413,47 @@ def get_project(
         db.commit()
         db.refresh(project)
     return _to_response(project)
+
+
+class CustomDomainPayload(BaseModel):
+    domain: str | None = None
+
+
+@router.get("/{project_id}/domain")
+def get_custom_domain(
+    project_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    project = _owned_project_or_404(db, project_id, current_user)
+    return domain_response(project)
+
+
+@router.put("/{project_id}/domain")
+def put_custom_domain(
+    project_id: UUID,
+    payload: CustomDomainPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Attach or clear a custom domain. Available on every plan, including free."""
+    project = _owned_project_or_404(db, project_id, current_user)
+    try:
+        project = set_custom_domain(db, project, payload.domain)
+    except CustomDomainError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return domain_response(project)
+
+
+@router.post("/{project_id}/domain/verify")
+def verify_domain(
+    project_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    project = _owned_project_or_404(db, project_id, current_user)
+    try:
+        project = verify_custom_domain(db, project)
+    except CustomDomainError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return domain_response(project)

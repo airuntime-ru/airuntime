@@ -12,6 +12,7 @@ from src.db.models.orchestration_plan import OrchestrationPlan
 from src.db.models.orchestration_run import OrchestrationRun
 from src.db.models.pipeline_run_metric import PipelineRunMetric
 from src.db.models.plan import Plan
+from src.db.models.plan_change_request import PlanChangeRequest
 from src.db.models.project import Project
 from src.db.models.project_service import ProjectService
 from src.db.models.refresh_token import RefreshToken
@@ -19,6 +20,7 @@ from src.db.models.run_event import RunEvent
 from src.db.models.secret import Secret
 from src.db.models.system_setting import SystemSetting
 from src.db.models.user import User
+from src.db.models.user_provider_credential import UserProviderCredential
 from src.db.models.workspace_lease import WorkspaceLease
 
 __all__ = [
@@ -35,6 +37,8 @@ __all__ = [
     "Plan",
     "CreditTopUp",
     "CreditLedgerEntry",
+    "PlanChangeRequest",
+    "UserProviderCredential",
     "ProjectService",
     "AgentRunMetric",
     "PipelineRunMetric",

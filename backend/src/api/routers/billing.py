@@ -1,3 +1,4 @@
+import uuid
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -8,9 +9,22 @@ from src.api.dependencies.auth import get_current_user
 from src.db.models.credit_ledger import CreditLedgerEntry
 from src.db.models.credit_topup import CreditTopUp
 from src.db.models.plan import Plan
+from src.db.models.plan_change_request import PlanChangeRequest
 from src.db.models.user import User
 from src.db.session import get_db
-from src.services.billing import list_ledger, request_topup, switch_plan, usage_credits_to_rub
+from src.services.billing import (
+    list_ledger,
+    plan_grant_credits,
+    request_topup,
+    usage_credits_to_rub,
+)
+from src.services.plan_requests import (
+    PlanRequestError,
+    cancel_request,
+    create_request,
+    get_pending_request,
+    list_requests,
+)
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -21,8 +35,9 @@ class TopUpRequest(BaseModel):
     credits: int = Field(gt=0, le=10_000_000)
 
 
-class SwitchPlanRequest(BaseModel):
+class PlanChangeRequestPayload(BaseModel):
     plan_id: str
+    note: str | None = Field(default=None, max_length=1000)
 
 
 def _plan_response(plan: Plan) -> dict:
@@ -31,9 +46,30 @@ def _plan_response(plan: Plan) -> dict:
         "key": plan.key,
         "name": plan.name,
         "description": plan.description,
-        "monthly_credits": plan.monthly_credits,
+        "monthly_budget_rub": plan.monthly_budget_rub,
+        # Derived, not stored: the UI shows rubles but the chat still meters in credits.
+        "monthly_credits": plan_grant_credits(plan),
         "max_concurrent_projects": plan.max_concurrent_projects,
+        "max_projects": plan.max_projects,
         "price_rub": plan.price_rub,
+        "grant_renews": plan.grant_renews,
+        "allowed_models": list(plan.allowed_models) if plan.allowed_models else None,
+    }
+
+
+def _plan_request_response(row: PlanChangeRequest, plans: dict[str, Plan]) -> dict:
+    to_plan = plans.get(str(row.to_plan_id))
+    from_plan = plans.get(str(row.from_plan_id)) if row.from_plan_id else None
+    return {
+        "id": str(row.id),
+        "status": row.status,
+        "note": row.note,
+        "admin_note": row.admin_note,
+        "created_at": row.created_at,
+        "resolved_at": row.resolved_at,
+        "to_plan_id": str(row.to_plan_id),
+        "to_plan_name": to_plan.name if to_plan else None,
+        "from_plan_name": from_plan.name if from_plan else None,
     }
 
 
@@ -83,11 +119,16 @@ def get_my_billing(
     current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ) -> dict:
     plan = db.get(Plan, current_user.plan_id) if current_user.plan_id else None
+    pending = get_pending_request(db, current_user)
     return {
         "credits_balance": current_user.credits_balance,
+        "balance_rub": float(usage_credits_to_rub(current_user.credits_balance)),
         "billing_period_start": current_user.billing_period_start,
         "billing_period_end": current_user.billing_period_end,
         "plan": _plan_response(plan) if plan else None,
+        "pending_plan_request": (
+            _plan_request_response(pending, _plan_index(db)) if pending else None
+        ),
     }
 
 
@@ -114,24 +155,50 @@ def list_topups(
     return [_topup_response(row) for row in rows]
 
 
-@router.post("/plan")
-def change_plan(
-    payload: SwitchPlanRequest,
+def _plan_index(db: Session) -> dict[str, Plan]:
+    return {str(row.id): row for row in db.query(Plan).all()}
+
+
+@router.post("/plan-requests")
+def create_plan_request(
+    payload: PlanChangeRequestPayload,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
+    """File a plan change request. Paid plans are granted only after an admin approves."""
     plan = db.query(Plan).filter(Plan.id == payload.plan_id, Plan.is_active.is_(True)).first()
     if not plan:
         raise HTTPException(status_code=404, detail="Тариф не найден")
-    if current_user.plan_id and str(current_user.plan_id) == payload.plan_id:
-        raise HTTPException(status_code=400, detail="Этот тариф уже активен")
-    switch_plan(db, current_user, plan)
-    return {
-        "credits_balance": current_user.credits_balance,
-        "billing_period_start": current_user.billing_period_start,
-        "billing_period_end": current_user.billing_period_end,
-        "plan": _plan_response(plan),
-    }
+    try:
+        request = create_request(db, current_user, plan, note=payload.note)
+    except PlanRequestError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _plan_request_response(request, _plan_index(db))
+
+
+@router.get("/plan-requests")
+def get_plan_requests(
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> list[dict]:
+    plans = _plan_index(db)
+    return [_plan_request_response(row, plans) for row in list_requests(db, current_user)]
+
+
+@router.post("/plan-requests/{request_id}/cancel")
+def cancel_plan_request(
+    request_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    try:
+        parsed = uuid.UUID(request_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Заявка не найдена") from exc
+    try:
+        request = cancel_request(db, current_user, parsed)
+    except PlanRequestError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _plan_request_response(request, _plan_index(db))
 
 
 @router.get("/usage")

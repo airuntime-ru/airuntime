@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { ExternalLink, MessageSquare, Rocket, Settings, Square } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
+import { ProjectStatusChip } from "@/components/app/project-status-chip";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { PageLoader } from "@/components/ui/loader";
@@ -21,14 +21,8 @@ import {
   canStartProject,
   canStopProject,
   isProjectRunning,
-  projectStatusLabel,
+  projectTypeLabel,
 } from "@/lib/project-status";
-
-const TYPE_LABELS: Record<string, string> = {
-  website: "Сайт",
-  telegram_bot: "Telegram-бот",
-  mixed: "Сайт и бот",
-};
 
 export default function ProjectOverviewPage() {
   const params = useParams<{ id: string }>();
@@ -104,42 +98,56 @@ export default function ProjectOverviewPage() {
     <div className="space-y-4">
       {error ? <p className="text-sm text-rose-600">{error}</p> : null}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Card hover={false} className="p-4">
-          <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--ar-stone)]">Статус</p>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <Badge>{projectStatusLabel(project.status)}</Badge>
-            {canStopProject(project.status) ? (
-              <Button variant="ghost" size="sm" disabled={actionLoading} onClick={onStop}>
-                <Square size={13} />
-                Стоп
-              </Button>
-            ) : null}
+      {/* One divided card instead of three stacked ones: on mobile three facts this small
+          should not cost three card-heights of scrolling. */}
+      <Card hover={false} className="overflow-hidden p-0">
+        <dl className="grid divide-y divide-black/[0.06] sm:grid-cols-[auto_auto_1fr] sm:divide-x sm:divide-y-0">
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 p-4 sm:block sm:p-5">
+            <dt className="text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[var(--ar-stone)]">
+              Статус
+            </dt>
+            <dd className="flex flex-wrap items-center gap-2 sm:mt-2.5">
+              <ProjectStatusChip status={project.status} />
+              {canStopProject(project.status) ? (
+                <Button variant="ghost" size="sm" disabled={actionLoading} onClick={onStop}>
+                  <Square size={11} fill="currentColor" />
+                  Стоп
+                </Button>
+              ) : null}
+            </dd>
           </div>
-        </Card>
-        <Card hover={false} className="p-4">
-          <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--ar-stone)]">Тип</p>
-          <p className="mt-2 text-sm font-medium text-[var(--ar-black)]">
-            {TYPE_LABELS[project.type] ?? project.type}
-          </p>
-        </Card>
-        <Card hover={false} className="p-4 sm:col-span-2">
-          <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--ar-stone)]">Публичная ссылка</p>
-          {project.deployment_url ? (
-            <a
-              href={project.deployment_url}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-2 inline-flex items-center gap-1.5 break-all text-sm font-medium text-[var(--ar-sky)] hover:underline"
-            >
-              {project.deployment_url}
-              <ExternalLink size={14} aria-hidden />
-            </a>
-          ) : (
-            <p className="mt-2 text-sm text-[var(--ar-mist)]">Появится после первого запуска</p>
-          )}
-        </Card>
-      </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 p-4 sm:block sm:p-5">
+            <dt className="text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[var(--ar-stone)]">
+              Тип
+            </dt>
+            <dd className="text-sm font-medium text-[var(--ar-black)] sm:mt-2.5">
+              {projectTypeLabel(project.type)}
+            </dd>
+          </div>
+
+          <div className="min-w-0 p-4 sm:p-5">
+            <dt className="text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[var(--ar-stone)]">
+              Публичная ссылка
+            </dt>
+            <dd className="mt-2 sm:mt-2.5">
+              {project.deployment_url ? (
+                <a
+                  href={project.deployment_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 break-all font-mono text-sm font-medium text-[var(--ar-sky)] hover:underline"
+                >
+                  {project.deployment_url}
+                  <ExternalLink size={14} className="shrink-0" aria-hidden />
+                </a>
+              ) : (
+                <p className="text-sm text-[var(--ar-mist)]">Появится после первого запуска</p>
+              )}
+            </dd>
+          </div>
+        </dl>
+      </Card>
 
       {limits && atLimit && !isProjectRunning(project.status) ? (
         <Card hover={false} className="border-amber-200 bg-amber-50 p-4">
@@ -165,11 +173,11 @@ export default function ProjectOverviewPage() {
           </p>
           <p className="mt-1 text-sm text-[var(--ar-mist)]">
             {isLive
-              ? "Правки вносите через чат — платформа пересоберёт проект."
+              ? "Правки вносите через чат — платформа пересоберёт проект."
               : isDeploying
-                ? "Статус обновится сам. Подробности — во вкладках «Деплои» и «Логи»."
+                ? "Статус обновится сам. Подробности — во вкладках «Деплои» и «Логи»."
                 : needsConfig
-                  ? "Заполните секреты в настройках — запуск продолжится автоматически."
+                  ? "Заполните секреты в настройках — запуск продолжится автоматически."
                   : canRun
                     ? "Сборка создаст образ и поднимет контейнер."
                     : "Опишите задачу в чате, чтобы собрать первую версию."}
@@ -180,7 +188,7 @@ export default function ProjectOverviewPage() {
             <a href={project.deployment_url} target="_blank" rel="noreferrer">
               <Button variant="accent" className="w-full">
                 <ExternalLink size={16} />
-                Открыть
+                Открыть сайт
               </Button>
             </a>
           ) : null}

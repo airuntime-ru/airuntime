@@ -24,7 +24,6 @@ class Settings(BaseSettings):
     otp_expire_minutes: int = 10
     app_encryption_key: str | None = None
 
-    default_user_credits: int = 1_000_000_000
     # Billing conversion used to turn the provider's USD token price into platform credits.
     # One ruble equals 100 credits (the same ratio used by top-ups); the FX rate is explicit so
     # operators can update it without a code deploy while historical ledger amounts stay fixed.

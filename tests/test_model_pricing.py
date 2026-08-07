@@ -19,9 +19,10 @@ def test_openai_models_have_different_token_costs() -> None:
     terra = estimate_model_usage_cost(provider="openai", model="gpt-5.6-terra", usage=_usage())
     luna = estimate_model_usage_cost(provider="openai", model="gpt-5.6-luna", usage=_usage())
 
-    assert sol is not None and sol.credits == 75
-    assert terra is not None and terra.credits == 38
-    assert luna is not None and luna.credits == 15
+    # 75 raw credits + the 10% platform markup (Epic A3).
+    assert sol is not None and sol.credits == 83
+    assert terra is not None and terra.credits == 42
+    assert luna is not None and luna.credits == 17
     assert sol.provider_cost_usd_micros == 7_475
 
 
@@ -39,7 +40,8 @@ def test_cache_tokens_replace_instead_of_duplicate_input_tokens() -> None:
 
     assert cost is not None
     # (400 * $0.50 + 600 * $6.25) / 1M = $0.00395 = 39.5 credits -> 40.
-    assert cost.credits == 40
+    # 40 raw credits + the 10% platform markup (Epic A3).
+    assert cost.credits == 44
     assert cost.input_tokens == 1_000
 
 

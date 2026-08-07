@@ -64,6 +64,8 @@ class TaskContext:
     api_key: str
     history: list[dict[str, str]] = field(default_factory=list)
     db: Session | None = None
+    # Plan-scoped Codex reasoning effort; None keeps the global default.
+    reasoning_effort: str | None = None
 
 
 @dataclass
@@ -342,6 +344,7 @@ class CodexContainerExecutor(_BaseAgentTurnExecutor):
             # .requested_services - all present on ScopedWorkspaceTools.
             system_prompt=_role_system_prompt(contract),
             correlation_id=str(contract.task_id),
+            reasoning_effort=context.reasoning_effort,
         )
         events = session.run(
             history=context.history,

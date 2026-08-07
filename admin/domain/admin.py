@@ -5,12 +5,15 @@ from core.models import ModerationEvent
 from domain.models import (
     BlockedProject,
     DomainAppUser,
+    DomainCreditLedgerEntry,
     DomainCreditTopUp,
     DomainDeployment,
     DomainModerationEvent,
     DomainPlan,
+    DomainPlanChangeRequest,
     DomainProject,
     DomainSecret,
+    DomainUserProviderCredential,
 )
 
 
@@ -168,9 +171,11 @@ class DomainPlanAdmin(admin.ModelAdmin):
     list_display = (
         "name",
         "key",
-        "monthly_credits",
-        "max_concurrent_projects",
         "price_rub",
+        "monthly_budget_rub",
+        "max_projects",
+        "max_concurrent_projects",
+        "grant_renews",
         "is_default",
         "is_active",
         "sort_order",
@@ -210,3 +215,92 @@ class DomainCreditTopUpAdmin(admin.ModelAdmin):
     def mark_cancelled(self, request, queryset):
         updated = queryset.filter(status="pending").update(status="cancelled")
         self.message_user(request, f"Отменено счетов: {updated}", messages.SUCCESS)
+
+
+@admin.register(DomainPlanChangeRequest)
+class DomainPlanChangeRequestAdmin(admin.ModelAdmin):
+    """Approve/reject only flips the status.
+
+    The actual grant (balance, ledger entry, period reset, email) is done by the FastAPI
+    billing sweep, which this app cannot import - same split as CreditTopUp.mark_paid.
+    """
+
+    list_display = ("user", "to_plan", "from_plan", "status", "created_at", "resolved_at")
+    list_filter = ("status",)
+    search_fields = ("user__email",)
+    readonly_fields = (
+        "id",
+        "user",
+        "from_plan",
+        "to_plan",
+        "note",
+        "created_at",
+        "resolved_at",
+        "applied_at",
+    )
+    ordering = ("-created_at",)
+    actions = ["approve_requests", "reject_requests"]
+
+    def _resolve(self, request, queryset, status: str) -> int:
+        from django.utils import timezone
+
+        updated = 0
+        for row in queryset.filter(status="pending"):
+            row.status = status
+            row.resolved_at = timezone.now()
+            row.resolved_by = request.user.email
+            row.save(update_fields=["status", "resolved_at", "resolved_by"])
+            updated += 1
+        return updated
+
+    @admin.action(description="Одобрить и подключить тариф")
+    def approve_requests(self, request, queryset):
+        updated = self._resolve(request, queryset, "approved")
+        self.message_user(
+            request,
+            "Одобрено заявок: {}. Бюджет будет начислен и письмо отправлено при следующем "
+            "цикле обработки биллинга.".format(updated),
+            messages.SUCCESS,
+        )
+
+    @admin.action(description="Отклонить выбранные заявки")
+    def reject_requests(self, request, queryset):
+        updated = self._resolve(request, queryset, "rejected")
+        self.message_user(
+            request,
+            "Отклонено заявок: {}. Пользователю уйдёт письмо при следующем цикле "
+            "обработки биллинга.".format(updated),
+            messages.SUCCESS,
+        )
+
+
+@admin.register(DomainCreditLedgerEntry)
+class DomainCreditLedgerEntryAdmin(admin.ModelAdmin):
+    """Read-only. `amount` is what the user was charged; provider cost is stored separately so
+    margin stays computable (see core/analytics_reporting.py)."""
+
+    list_display = ("created_at", "user", "reason", "amount", "provider", "model", "markup_percent")
+    list_filter = ("reason", "provider")
+    search_fields = ("user__email", "project_name", "model")
+    ordering = ("-created_at",)
+
+    def has_add_permission(self, request) -> bool:
+        return False
+
+    def has_change_permission(self, request, obj=None) -> bool:
+        return False
+
+
+@admin.register(DomainUserProviderCredential)
+class DomainUserProviderCredentialAdmin(admin.ModelAdmin):
+    """The ciphertext is deliberately not exposed - only the last four characters."""
+
+    list_display = ("user", "provider", "last4", "is_valid", "validated_at")
+    list_filter = ("provider", "is_valid")
+    search_fields = ("user__email",)
+    readonly_fields = ("id", "user", "provider", "last4", "validated_at", "last_error", "created_at")
+    exclude = ("encrypted_key",)
+    ordering = ("-created_at",)
+
+    def has_add_permission(self, request) -> bool:
+        return False

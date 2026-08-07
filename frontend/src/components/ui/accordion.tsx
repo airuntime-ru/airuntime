@@ -25,7 +25,7 @@ export function Accordion({ items, onOpenChange }: AccordionProps) {
   };
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       {items.map((item, index) => {
         const isOpen = open === index;
         const panelId = `${baseId}-panel-${index}`;
@@ -34,26 +34,37 @@ export function Accordion({ items, onOpenChange }: AccordionProps) {
         return (
           <div
             key={item.question}
-            className="overflow-hidden rounded-[0.75rem] border border-black/[0.08] bg-white"
+            className={cn(
+              "sky-card overflow-hidden rounded-[0.95rem] transition-colors",
+              isOpen && "border-[rgba(35,136,255,0.24)]"
+            )}
           >
             <h3>
               <button
                 id={buttonId}
                 type="button"
-                className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ar-sky)]/35"
+                className="flex w-full items-center justify-between gap-4 px-5 py-[1.1rem] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ar-sky)]/35 sm:px-6"
                 aria-expanded={isOpen}
                 aria-controls={panelId}
                 onClick={() => toggle(index)}
               >
-                <span className="font-medium text-[var(--ar-black)]">{item.question}</span>
-                <ChevronDown
-                  size={16}
-                  aria-hidden
+                <span className="text-[1.02rem] font-medium text-[var(--ar-black)]">
+                  {item.question}
+                </span>
+                <span
                   className={cn(
-                    "shrink-0 text-[var(--ar-stone)] transition-transform",
-                    isOpen && "rotate-180"
+                    "flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors",
+                    isOpen
+                      ? "bg-[image:var(--ar-accent-gradient)] text-white"
+                      : "bg-black/[0.04] text-[var(--ar-stone)]"
                   )}
-                />
+                  aria-hidden
+                >
+                  <ChevronDown
+                    size={15}
+                    className={cn("transition-transform duration-300", isOpen && "rotate-180")}
+                  />
+                </span>
               </button>
             </h3>
             <AnimatePresence initial={false}>
@@ -68,7 +79,7 @@ export function Accordion({ items, onOpenChange }: AccordionProps) {
                   transition={{ duration: reduceMotion ? 0 : 0.28, ease: [0.22, 1, 0.36, 1] }}
                   className="overflow-hidden"
                 >
-                  <p className="px-5 pb-4 text-sm leading-relaxed text-[var(--ar-mist)]">
+                  <p className="px-5 pb-5 text-[0.95rem] leading-relaxed text-[var(--ar-mist)] sm:px-6">
                     {item.answer}
                   </p>
                 </motion.div>

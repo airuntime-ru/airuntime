@@ -18,10 +18,10 @@ export function Tabs({
     <nav
       aria-label="Разделы проекта"
       className={cn(
-        "flex gap-0.5 overflow-x-auto border-b border-[var(--ar-border)] bg-[var(--ar-canvas)] [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
-        // Sit below the fixed mobile app header (pt-[3.75rem] on main); flush to top on lg.
+        "flex gap-1 overflow-x-auto py-1.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+        // Sits just under the floating top bar, which is fixed at every width (see AppTopBar).
         sticky &&
-          "sticky top-[3.75rem] z-20 -mx-3 px-3 sm:-mx-4 sm:px-4 lg:top-0 lg:-mx-0 lg:px-0"
+          "sticky top-[4.9rem] z-20 -mx-3 border-b border-[var(--ar-border)] bg-[rgba(246,249,253,0.88)] px-3 backdrop-blur-md sm:-mx-4 sm:px-4 lg:-mx-0 lg:px-0"
       )}
     >
       {items.map((item) => {
@@ -31,10 +31,10 @@ export function Tabs({
             key={item.href}
             href={item.href}
             className={cn(
-              "relative shrink-0 whitespace-nowrap px-3 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ar-sky)]/35",
+              "shrink-0 whitespace-nowrap rounded-full px-3.5 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ar-sky)]/35",
               active
-                ? "text-[var(--ar-black)] after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-[var(--ar-sky)]"
-                : "text-[var(--ar-stone)] hover:text-[var(--ar-graphite)]"
+                ? "bg-[var(--ar-black)] text-white"
+                : "text-[var(--ar-stone)] hover:bg-black/[0.04] hover:text-[var(--ar-graphite)]"
             )}
           >
             {item.label}

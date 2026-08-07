@@ -27,7 +27,7 @@ const steps: TourStep[] = [
     route: "/app",
     selector: "[data-tour='nav-projects']",
     title: "Навигация всегда рядом",
-    text: "Слева на больших экранах и снизу на телефоне — проекты и профиль.",
+    text: "Сверху на больших экранах и снизу на телефоне — проекты и профиль.",
   },
   {
     route: "/app",
@@ -79,7 +79,12 @@ export function OnboardingTour({
 
   const updateRect = useCallback(() => {
     if (!active) return;
-    const element = document.querySelector(step.selector);
+    // Several tour targets exist twice - once in the top bar (desktop) and once in the bottom
+    // bar (mobile), each hidden at the other breakpoint. querySelector would happily return
+    // the hidden one and highlight a zero-size box, so take the first one actually rendered.
+    const element = Array.from(document.querySelectorAll(step.selector)).find(
+      (node) => node.getClientRects().length > 0
+    );
     if (!element) {
       setRect(null);
       return;

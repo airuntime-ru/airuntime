@@ -22,6 +22,16 @@
   --ar-warning: #b8860b;
   --ar-danger: #c43c35;
 
+  /* Deep-space palette. The landing alternates light "daylight" sections with these
+     dark ones, so every dark surface is mixed from exactly these three values. */
+  --ar-space: #05070f;
+  --ar-space-2: #0a1123;
+  --ar-nebula: #171045;
+  --ar-violet: #7c6cff;
+  --ar-glow-sky: #2388ff;
+  --ar-glow-cyan: #19c7d2;
+  --ar-glow-mint: #5ce6b0;
+
   --ar-surface-1: #ffffff;
   --ar-surface-2: #ffffff;
   --ar-surface-3: #f8f9fb;
@@ -41,6 +51,7 @@
   --ar-shadow-md: 0 8px 24px rgba(15, 23, 42, 0.06);
   --ar-shadow: var(--ar-shadow-md);
   --ar-transition: 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  --ar-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
 
   --ar-ink: #04050a;
   --ar-ink-2: #0a0d18;
@@ -52,6 +63,10 @@
   --ar-ink-text-strong: #f4f8ff;
   --ar-accent-gradient: linear-gradient(135deg, #2388ff 0%, #6975ff 55%, #b69cff 100%);
   --ar-accent-gradient-soft: linear-gradient(135deg, rgba(35, 136, 255, 0.16), rgba(105, 117, 255, 0.14) 55%, rgba(182, 156, 255, 0.14));
+
+  /* One 200x200 SVG tile of stars, reused by every dark surface. A single tiled image
+     costs one paint; the dozens-of-radial-gradients trick costs one per star. */
+  --ar-starfield: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cg fill='%23fff'%3E%3Ccircle cx='20' cy='31' r='1' opacity='.85'/%3E%3Ccircle cx='141' cy='52' r='.8' opacity='.55'/%3E%3Ccircle cx='74' cy='119' r='1.2' opacity='.7'/%3E%3Ccircle cx='181' cy='161' r='.7' opacity='.45'/%3E%3Ccircle cx='41' cy='176' r='.9' opacity='.6'/%3E%3Ccircle cx='112' cy='14' r='.6' opacity='.4'/%3E%3Ccircle cx='166' cy='96' r='1' opacity='.5'/%3E%3Ccircle cx='96' cy='72' r='.6' opacity='.38'/%3E%3Ccircle cx='8' cy='94' r='.7' opacity='.42'/%3E%3Ccircle cx='128' cy='188' r='.8' opacity='.5'/%3E%3C/g%3E%3C/svg%3E");
 }
 
 @theme inline {
@@ -66,12 +81,12 @@
 }
 
 html {
-  scroll-behavior: auto;
+  scroll-behavior: smooth;
 }
 
 body {
   min-height: 100vh;
-  background: #f8fcff;
+  background: var(--background);
   color: var(--foreground);
   font-family: var(--font-inter), system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -85,167 +100,122 @@ textarea {
 }
 
 @layer components {
-.runtime-sky {
+/* ---------------------------------------------------------------------------
+   Deep space surfaces
+   Every animation below moves transform/opacity only - no animated blur, no
+   animated background-position - so the compositor handles them without
+   repainting. Static blurs are fine: they paint once.
+   --------------------------------------------------------------------------- */
+
+.cosmos {
   position: relative;
-  overflow-x: hidden;
+  isolation: isolate;
   background:
-    radial-gradient(ellipse 80% 60% at 50% 18%, rgba(35, 136, 255, 0.08), transparent 70%),
-    radial-gradient(ellipse 70% 54% at 18% 34%, rgba(182, 156, 255, 0.075), transparent 68%),
-    radial-gradient(ellipse 62% 48% at 82% 38%, rgba(16, 185, 129, 0.075), transparent 70%),
-    linear-gradient(180deg, #fbfbfd 0%, #f5f5f7 48%, #edf7ff 100%);
+    radial-gradient(ellipse 90% 60% at 50% -10%, rgba(35, 136, 255, 0.22), transparent 62%),
+    radial-gradient(ellipse 60% 50% at 12% 20%, rgba(124, 108, 255, 0.22), transparent 66%),
+    radial-gradient(ellipse 66% 54% at 92% 72%, rgba(25, 199, 210, 0.14), transparent 68%),
+    linear-gradient(178deg, var(--ar-space) 0%, var(--ar-space-2) 46%, #070c1a 100%);
+  color: #eaf1ff;
 }
 
-.runtime-sky::before {
+/* Star layer. Two tiles at different scales give parallax depth from one image. */
+.cosmos-stars::before,
+.cosmos-stars::after {
   content: "";
   position: absolute;
-  inset: 0;
-  z-index: 0;
+  inset: -10%;
+  z-index: -1;
   pointer-events: none;
-  background:
-    linear-gradient(102deg, transparent 18%, rgba(255, 255, 255, 0.58) 35%, transparent 52%),
-    linear-gradient(78deg, transparent 22%, rgba(35, 136, 255, 0.075) 44%, transparent 66%),
-    linear-gradient(118deg, transparent 12%, rgba(16, 185, 129, 0.06) 56%, transparent 72%);
-  filter: blur(20px);
-  opacity: 0.86;
-  animation: sky-drift 18s ease-in-out infinite alternate;
+  background-image: var(--ar-starfield);
+  background-repeat: repeat;
+  will-change: transform;
 }
 
-.runtime-sky::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background: transparent;
+.cosmos-stars::before {
+  background-size: 200px 200px;
+  opacity: 0.5;
+  animation: star-drift-a 150s linear infinite;
 }
 
-/* The dashboard shell renders on every authenticated page, so the landing page's infinitely
-   animated + blurred background (repaints every frame, forever) is a real perf cost there.
-   Keep the static gradient wash but drop the continuous animation - one paint instead of an
-   endless one. */
-.app-shell-bg::before {
+.cosmos-stars::after {
+  background-size: 340px 340px;
+  opacity: 0.32;
+  animation: star-drift-b 220s linear infinite;
+}
+
+/* Same starfield with the drift switched off - for surfaces that mount on every
+   authenticated page, where a forever-running animation is not worth the cost. */
+.cosmos-stars-still::before,
+.cosmos-stars-still::after {
   animation: none;
 }
 
-.runtime-wind {
+/* Slow nebula bloom. One statically blurred blob, moved on the GPU. */
+.aurora-blob {
   position: absolute;
-  inset: 0;
-  z-index: 0;
+  z-index: -1;
   pointer-events: none;
-  overflow: hidden;
+  border-radius: 999px;
+  filter: blur(64px);
+  opacity: 0.55;
+  will-change: transform;
+  animation: aurora-float 22s ease-in-out infinite alternate;
 }
 
-.runtime-wind::before,
-.runtime-wind::after {
-  content: "";
+.aurora-blob-slow {
+  animation-duration: 30s;
+  animation-direction: alternate-reverse;
+}
+
+/* Thin elliptical orbit rings behind the hero visual. */
+.orbit-ring {
   position: absolute;
-  left: 54%;
-  height: 1px;
-  width: min(42rem, 72vw);
-  background: linear-gradient(90deg, transparent, rgba(7, 20, 38, 0.13), transparent);
-  filter: blur(0.2px);
-  opacity: 0.58;
-  animation: wind-pass 7s ease-in-out infinite;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: 999px;
+  border: 1px solid rgba(140, 180, 255, 0.16);
+  will-change: transform;
+  animation: orbit-spin 46s linear infinite;
 }
 
-.runtime-wind::before {
-  top: 27%;
+.orbit-ring-reverse {
+  border-color: rgba(124, 108, 255, 0.16);
+  animation-duration: 66s;
+  animation-direction: reverse;
 }
 
-.runtime-wind::after {
-  top: 42%;
-  width: min(34rem, 62vw);
-  animation-delay: 1.7s;
-  opacity: 0.42;
+/* Horizon glow that seals a dark section into the light one below it. */
+.cosmos-horizon {
+  position: absolute;
+  inset: auto 0 0;
+  height: 34vh;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(ellipse 70% 100% at 50% 128%, rgba(35, 136, 255, 0.42), rgba(124, 108, 255, 0.16) 42%, transparent 72%);
 }
 
-.atmosphere {
+/* ---------------------------------------------------------------------------
+   Light surfaces
+   --------------------------------------------------------------------------- */
+
+.daylight {
   position: relative;
-  overflow-x: hidden;
   background:
-    radial-gradient(ellipse 80% 60% at 50% 10%, rgba(35, 136, 255, 0.08), transparent 70%),
-    radial-gradient(ellipse 64% 52% at 20% 30%, rgba(182, 156, 255, 0.07), transparent 70%),
-    radial-gradient(ellipse 58% 46% at 84% 28%, rgba(16, 185, 129, 0.07), transparent 72%),
-    linear-gradient(180deg, #fbfbfd 0%, #f5f5f7 48%, #edf7ff 100%);
+    radial-gradient(ellipse 70% 44% at 50% 0%, rgba(35, 136, 255, 0.06), transparent 64%),
+    linear-gradient(180deg, #ffffff 0%, #f6f8fc 100%);
 }
 
-.atmosphere::before {
+/* Faint star dust for light surfaces - the cabinet's "cosmic but weightless" cue. */
+.stardust::before {
   content: "";
-  position: fixed;
-  inset: -8% -8% auto;
-  z-index: 0;
-  height: 58vh;
-  pointer-events: none;
-  background:
-    linear-gradient(102deg, transparent 17%, rgba(255, 255, 255, 0.62) 34%, transparent 52%),
-    linear-gradient(74deg, transparent 22%, rgba(35, 136, 255, 0.07) 44%, transparent 63%),
-    linear-gradient(121deg, transparent 14%, rgba(16, 185, 129, 0.06) 58%, transparent 72%);
-  filter: blur(22px);
-  opacity: 0.9;
-  animation: sky-drift 18s ease-in-out infinite alternate;
-}
-
-.atmosphere::after {
-  content: "";
-  position: fixed;
+  position: absolute;
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  background: transparent;
-}
-
-.atmosphere-grid {
-  background:
-    radial-gradient(ellipse 72% 48% at 50% 0%, rgba(255, 255, 255, 0.64), transparent 62%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.28), transparent 54%);
-}
-
-.celestial-ribbons {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  overflow: hidden;
-}
-
-.celestial-ribbons::before,
-.celestial-ribbons::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: -18%;
-  width: 118vw;
-  height: 58vh;
-  border: 1px solid rgba(35, 136, 255, 0.12);
-  border-bottom-color: rgba(100, 220, 168, 0.14);
-  border-radius: 50%;
-  transform: translateX(-50%) rotate(-5deg);
-  filter: blur(0.2px);
-  opacity: 0.34;
-  animation: orbit-breathe 11s ease-in-out infinite alternate;
-}
-
-.celestial-ribbons::after {
-  top: -11%;
-  width: 92vw;
-  height: 46vh;
-  border-color: rgba(246, 201, 107, 0.14);
-  border-left-color: rgba(182, 156, 255, 0.16);
-  transform: translateX(-50%) rotate(7deg);
-  animation-duration: 14s;
-}
-
-.light-script {
-  position: relative;
-}
-
-.light-script::after {
-  content: "";
-  position: absolute;
-  inset: auto 0 -0.18em;
-  height: 0.16em;
-  background: linear-gradient(90deg, transparent, rgba(35, 136, 255, 0.34), rgba(100, 220, 168, 0.3), rgba(246, 201, 107, 0.28), transparent);
-  filter: blur(2px);
+  background-image: var(--ar-starfield);
+  background-size: 260px 260px;
+  filter: invert(1);
+  opacity: 0.05;
 }
 
 .glass {
@@ -273,40 +243,199 @@ textarea {
   z-index: 1;
 }
 
-.glass-hover {
-  transition: transform var(--ar-transition), border-color var(--ar-transition), box-shadow var(--ar-transition), background var(--ar-transition);
-}
-
-.glass-hover:hover {
-  transform: translateY(-2px);
-  border-color: var(--ar-border-strong);
-  box-shadow: 0 24px 74px rgba(35, 136, 255, 0.14);
-}
-
-.celestial-panel {
+/* Card that sits on light backgrounds: a hairline gradient crown on top, a lift on hover. */
+.sky-card {
+  position: relative;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.82);
-  background:
-    radial-gradient(ellipse 80% 60% at 50% 0%, rgba(35, 136, 255, 0.08), transparent 70%),
-    linear-gradient(145deg, rgba(255, 255, 255, 0.86), rgba(246, 251, 255, 0.68));
-  box-shadow: 0 18px 58px rgba(84, 123, 176, 0.11), inset 0 1px 0 rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(22px);
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 12px 32px -18px rgba(15, 23, 42, 0.24);
+  transition: transform var(--ar-transition), box-shadow var(--ar-transition), border-color var(--ar-transition);
 }
 
-.heaven-line {
-  background: linear-gradient(90deg, transparent, rgba(35, 136, 255, 0.45), rgba(100, 220, 168, 0.35), transparent);
+.sky-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(35, 136, 255, 0.5), rgba(124, 108, 255, 0.42), transparent);
+  opacity: 0;
+  transition: opacity var(--ar-transition);
+}
+
+.sky-card-hover:hover {
+  transform: translateY(-3px);
+  border-color: rgba(35, 136, 255, 0.24);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 26px 56px -26px rgba(35, 136, 255, 0.4);
+}
+
+.sky-card-hover:hover::before {
+  opacity: 1;
+}
+
+/* Dark twin of .sky-card, for panels inside .cosmos sections. */
+.void-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
+  transition: transform var(--ar-transition), border-color var(--ar-transition), background var(--ar-transition);
+}
+
+.void-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(120, 180, 255, 0.55), transparent);
+  opacity: 0.5;
+  transition: opacity var(--ar-transition);
+}
+
+.void-card-hover:hover {
+  transform: translateY(-3px);
+  border-color: rgba(120, 180, 255, 0.3);
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03));
+}
+
+.void-card-hover:hover::before {
+  opacity: 1;
 }
 
 .panel-ink {
   position: relative;
   overflow: hidden;
-  background: linear-gradient(180deg, #0e1522 0%, #0a101a 100%);
+  background:
+    radial-gradient(ellipse 120% 42% at 50% 0%, rgba(35, 136, 255, 0.16), transparent 68%),
+    linear-gradient(180deg, #0c1424 0%, #070c17 100%);
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: none;
 }
 
 .panel-ink::before {
   display: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Type, accents, controls
+   --------------------------------------------------------------------------- */
+
+.accent-text {
+  background: var(--ar-accent-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Headline word on dark surfaces. */
+.text-cosmic {
+  background: linear-gradient(100deg, #9fd4ff 0%, #7c6cff 42%, #5ce6b0 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Headline word on light surfaces. */
+.text-daylight {
+  background: linear-gradient(100deg, #1f7aef 0%, #6975ff 52%, #12b5c9 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Neon marker behind a word, the way hse-spb-bc highlights its verb. */
+.marker-glow {
+  position: relative;
+  white-space: nowrap;
+}
+
+.marker-glow > span {
+  position: relative;
+  z-index: 1;
+}
+
+.marker-glow::before {
+  content: "";
+  position: absolute;
+  inset: 0.1em -0.24em 0.14em;
+  z-index: 0;
+  border-radius: 0.24em;
+  background: linear-gradient(100deg, #2388ff, #7c6cff 55%, #19c7d2);
+  box-shadow: 0 0 44px rgba(52, 138, 255, 0.55);
+}
+
+.btn-glow {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(120deg, #2388ff 0%, #6d6cff 52%, #19c7d2 100%);
+  color: #fff;
+  box-shadow: 0 10px 30px -10px rgba(45, 130, 255, 0.85);
+  transition: transform var(--ar-transition), box-shadow var(--ar-transition);
+}
+
+.btn-glow:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 40px -12px rgba(45, 130, 255, 0.95);
+}
+
+.btn-glow:active {
+  transform: translateY(0);
+}
+
+/* Sheen sweeps across only while hovered, so it costs nothing at rest. */
+.btn-glow::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 20%, rgba(255, 255, 255, 0.42) 46%, transparent 70%);
+  transform: translateX(-120%);
+}
+
+.btn-glow:hover::after {
+  animation: sheen 900ms var(--ar-ease-out);
+}
+
+.accent-ring {
+  box-shadow: 0 0 0 1px rgba(35, 136, 255, 0.16), 0 18px 46px rgba(35, 136, 255, 0.1);
+}
+
+/* Live status dot: a halo that expands and fades. */
+.live-dot {
+  position: relative;
+}
+
+.live-dot::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
+  border: 1px solid currentColor;
+  opacity: 0;
+  animation: pulse-ring 2.6s ease-out infinite;
+}
+
+/* Indeterminate build progress: one sweeping highlight, transform-only. */
+.beacon-bar {
+  position: relative;
+  overflow: hidden;
+}
+
+.beacon-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 38%;
+  background: linear-gradient(90deg, transparent, #2388ff, transparent);
+  will-change: transform;
+  animation: beacon-sweep 1.7s ease-in-out infinite;
+}
+
+.breathe {
+  animation: breathe 4.8s ease-in-out infinite;
+}
+
+.float {
+  animation: float 7s ease-in-out infinite;
 }
 
 .nav-pill {
@@ -327,86 +456,83 @@ textarea {
 
 .nav-pill-active {
   color: #f4f8ff;
-  background: rgba(31, 122, 239, 0.18);
-  box-shadow: inset 3px 0 0 #1f7aef;
+  background: linear-gradient(100deg, rgba(35, 136, 255, 0.26), rgba(124, 108, 255, 0.14));
+  box-shadow: inset 2px 0 0 #4f9dff;
 }
 
 .nav-icon-active {
-  background: rgba(31, 122, 239, 0.22);
-  box-shadow: none;
-  color: #7eb6ff;
+  background: linear-gradient(135deg, rgba(35, 136, 255, 0.4), rgba(124, 108, 255, 0.32));
+  color: #ffffff;
+  box-shadow: 0 6px 18px -8px rgba(35, 136, 255, 0.9);
 }
 
-.app-shell {
-  background: var(--ar-canvas);
-}
+/* ---------------------------------------------------------------------------
+   Motion primitives
+   --------------------------------------------------------------------------- */
 
-.app-shell .runtime-sky,
-.app-shell.runtime-sky {
-  background: var(--ar-canvas);
-}
-
-.app-shell.runtime-sky::before,
-.app-shell.runtime-sky::after {
-  display: none;
-}
-
-.grid-texture {
-  position: relative;
-}
-
-.grid-texture::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  opacity: 0.35;
-  background-image: linear-gradient(rgba(7, 20, 38, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(7, 20, 38, 0.05) 1px, transparent 1px);
-  background-size: 34px 34px;
-  mask-image: radial-gradient(85% 55% at 50% 0%, black, transparent 78%);
-}
-
-.accent-ring {
-  box-shadow: 0 0 0 1px rgba(35, 136, 255, 0.16), 0 18px 46px rgba(35, 136, 255, 0.1);
-}
-
-.accent-text {
-  background: var(--ar-accent-gradient);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-
-.text-gradient {
-  background: linear-gradient(110deg, #071426 0%, #2388ff 34%, #19c7d2 62%, #f6c96b 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-
-.float {
-  animation: float 7s ease-in-out infinite;
-}
-
-.breathe {
-  animation: breathe 4.8s ease-in-out infinite;
-}
-
-.pulse-ring {
-  position: relative;
-}
-
-.pulse-ring::after {
-  content: "";
-  position: absolute;
-  inset: -5px;
-  border-radius: inherit;
-  border: 1px solid rgba(35, 136, 255, 0.26);
+/* Scroll reveal. Driven by IntersectionObserver adding .is-in - no scroll handler. */
+.reveal {
   opacity: 0;
-  animation: pulse-ring 2.8s ease-out infinite;
+  transform: translate3d(0, 18px, 0);
+  transition: opacity 620ms var(--ar-ease-out), transform 620ms var(--ar-ease-out);
+  transition-delay: var(--reveal-delay, 0ms);
 }
+
+.reveal.is-in {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+}
+
+.marquee {
+  overflow: hidden;
+  mask-image: linear-gradient(90deg, transparent, black 8%, black 92%, transparent);
+  -webkit-mask-image: linear-gradient(90deg, transparent, black 8%, black 92%, transparent);
+}
+
+.marquee-track {
+  display: flex;
+  width: max-content;
+  will-change: transform;
+  animation: marquee var(--marquee-duration, 38s) linear infinite;
+}
+
+.marquee:hover .marquee-track {
+  animation-play-state: paused;
+}
+
+/* ---------------------------------------------------------------------------
+   App shell
+   --------------------------------------------------------------------------- */
+
+/* No background-attachment: fixed here - it forces a full repaint on every scroll frame,
+   and this shell wraps every authenticated page. */
+.app-shell {
+  position: relative;
+  background:
+    radial-gradient(ellipse 120% 46% at 50% -6%, rgba(35, 136, 255, 0.09), transparent 62%),
+    radial-gradient(ellipse 60% 40% at 96% 4%, rgba(124, 108, 255, 0.08), transparent 66%),
+    linear-gradient(180deg, #f7f9fd 0%, #f3f5f9 52%, #eef3fa 100%);
+}
+
+.atmosphere {
+  position: relative;
+  overflow-x: hidden;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 6%, rgba(35, 136, 255, 0.12), transparent 66%),
+    radial-gradient(ellipse 62% 50% at 16% 34%, rgba(124, 108, 255, 0.1), transparent 68%),
+    radial-gradient(ellipse 58% 46% at 86% 26%, rgba(25, 199, 210, 0.09), transparent 70%),
+    linear-gradient(180deg, #ffffff 0%, #f5f7fc 52%, #eaf2ff 100%);
+}
+
+.atmosphere-grid {
+  background:
+    radial-gradient(ellipse 72% 48% at 50% 0%, rgba(255, 255, 255, 0.6), transparent 62%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.28), transparent 54%);
+}
+
+/* ---------------------------------------------------------------------------
+   Chat / markdown (unchanged behaviour, kept alongside the new system)
+   --------------------------------------------------------------------------- */
 
 .ai-typing {
   display: inline-flex;
@@ -431,13 +557,20 @@ textarea {
   animation-delay: 0.28s;
 }
 
+/* highlight.js/github-dark paints the inner <code> dark; a light <pre> around it reads as two
+   nested boxes, so the block owns the dark surface and the code sits transparent on top. */
 .prose-chat pre {
   position: relative;
-  border-radius: var(--ar-radius-sm);
-  background: rgba(7, 20, 38, 0.06) !important;
-  border: 1px solid rgba(7, 20, 38, 0.12) !important;
-  padding: 1rem;
+  border-radius: 0.7rem;
+  background: #0d1117 !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  padding: 0.9rem 1rem;
   overflow-x: auto;
+}
+
+.prose-chat pre code {
+  background: transparent !important;
+  padding: 0 !important;
 }
 
 .prose-chat code {
@@ -448,6 +581,77 @@ textarea {
 .prose-chat p {
   margin: 0.5rem 0;
   line-height: 1.7;
+}
+
+/* Tailwind's preflight strips list markers globally; the agent writes plenty of markdown
+   lists, and without these they render as unindented bare lines. */
+.prose-chat ul,
+.prose-chat ol {
+  margin: 0.5rem 0;
+  padding-left: 1.35rem;
+}
+
+.prose-chat ul {
+  list-style: disc;
+}
+
+.prose-chat ol {
+  list-style: decimal;
+}
+
+.prose-chat li {
+  margin: 0.2rem 0;
+  line-height: 1.65;
+}
+
+.prose-chat li::marker {
+  color: var(--ar-stone);
+}
+
+.prose-chat h1,
+.prose-chat h2,
+.prose-chat h3 {
+  margin: 1.1rem 0 0.45rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.prose-chat h1 {
+  font-size: 1.15em;
+}
+
+.prose-chat h2 {
+  font-size: 1.08em;
+}
+
+.prose-chat h3 {
+  font-size: 1em;
+}
+
+.prose-chat blockquote {
+  margin: 0.6rem 0;
+  border-left: 2px solid rgba(35, 136, 255, 0.35);
+  padding-left: 0.85rem;
+  color: var(--ar-mist);
+}
+
+.prose-chat table {
+  width: 100%;
+  margin: 0.6rem 0;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.prose-chat th,
+.prose-chat td {
+  border: 1px solid rgba(7, 20, 38, 0.1);
+  padding: 0.35rem 0.6rem;
+  text-align: left;
+}
+
+.prose-chat th {
+  background: rgba(7, 20, 38, 0.03);
+  font-weight: 600;
 }
 
 .prose-chat-compact p {
@@ -539,35 +743,63 @@ textarea {
 }
 }
 
-@keyframes sky-drift {
-  0% {
-    transform: translate3d(-1%, -0.8%, 0) scale(1);
+@keyframes star-drift-a {
+  from {
+    transform: translate3d(0, 0, 0);
   }
-  100% {
-    transform: translate3d(1.2%, 1.4%, 0) scale(1.035);
-  }
-}
-
-@keyframes wind-pass {
-  0% {
-    transform: translate3d(32vw, 0, 0);
-    opacity: 0;
-  }
-  28% {
-    opacity: 0.52;
-  }
-  100% {
-    transform: translate3d(-96vw, 0, 0);
-    opacity: 0;
+  to {
+    transform: translate3d(-200px, -120px, 0);
   }
 }
 
-@keyframes aurora-drift {
-  0% {
-    transform: translate3d(-1.5%, -1%, 0) scale(1);
+@keyframes star-drift-b {
+  from {
+    transform: translate3d(0, 0, 0);
   }
-  100% {
-    transform: translate3d(1.5%, 2%, 0) scale(1.04);
+  to {
+    transform: translate3d(170px, -200px, 0);
+  }
+}
+
+@keyframes aurora-float {
+  from {
+    transform: translate3d(-3%, -2%, 0) scale(1);
+  }
+  to {
+    transform: translate3d(4%, 3%, 0) scale(1.12);
+  }
+}
+
+@keyframes orbit-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes marquee {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+@keyframes sheen {
+  to {
+    transform: translateX(120%);
+  }
+}
+
+@keyframes beacon-sweep {
+  from {
+    transform: translateX(-110%);
+  }
+  to {
+    transform: translateX(370%);
   }
 }
 
@@ -605,23 +837,12 @@ textarea {
 
 @keyframes pulse-ring {
   0% {
-    transform: scale(0.96);
-    opacity: 0.42;
+    transform: scale(0.9);
+    opacity: 0.55;
   }
   100% {
-    transform: scale(1.18);
+    transform: scale(1.9);
     opacity: 0;
-  }
-}
-
-@keyframes orbit-breathe {
-  0% {
-    transform: translateX(-50%) rotate(-6deg) scale(0.985);
-    opacity: 0.46;
-  }
-  100% {
-    transform: translateX(-50%) rotate(-2deg) scale(1.025);
-    opacity: 0.78;
   }
 }
 
@@ -634,11 +855,22 @@ textarea {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .runtime-sky::before,
-  .runtime-wind::before,
-  .runtime-wind::after,
-  .atmosphere::before {
+  .cosmos-stars::before,
+  .cosmos-stars::after,
+  .aurora-blob,
+  .orbit-ring,
+  .marquee-track,
+  .float,
+  .breathe,
+  .beacon-bar::after,
+  .live-dot::after {
     animation: none !important;
+  }
+
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
   }
 
   html {

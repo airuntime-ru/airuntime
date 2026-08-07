@@ -1,4 +1,4 @@
-import type { FaqItem, HowStep, NavItem, TrustPoint, UseCase } from "./types";
+import type { FaqItem, HowStep, NavItem, StatItem, TrustPoint, UseCase } from "./types";
 
 export const LOGIN_HREF = "/auth/login";
 export const PROCESS_ANCHOR = "#how-it-works";
@@ -7,26 +7,45 @@ export const navItems: NavItem[] = [
   { href: "#capabilities", label: "Результат" },
   { href: "#how-it-works", label: "Как работает" },
   { href: "#trust", label: "Платформа" },
+  { href: "#pricing", label: "Тарифы" },
   { href: "#faq", label: "FAQ" },
 ];
 
 export const heroCopy = {
+  eyebrow: "Idea → Build → Runtime",
   titleLine1: "Опишите идею.",
-  titleLine2: "Получите работающий проект.",
+  titleHighlight: "И она полетит",
   subtitle:
-    "AIRuntime создаст сайт или Telegram-бота, проверит сборку и запустит готовую версию.",
+    "AIRuntime соберёт сайт или Telegram-бота, проверит сборку и сам выведет проект в прод.",
   primaryCta: "Создать проект",
-  secondaryCta: "Посмотреть, как это работает",
+  secondaryCta: "Как это работает",
 } as const;
 
+/** Runtime guarantees, looped as a ticker under the hero. */
+export const marqueeItems = [
+  "Docker build",
+  "HTTPS-домен",
+  "Автодеплой",
+  "Postgres · Redis",
+  "Секреты вне LLM",
+  "Версии и rollback",
+  "Логи в реальном времени",
+] as const;
+
+export const heroStats: StatItem[] = [
+  { value: "1 чат", label: "от идеи до ссылки" },
+  { value: "0", label: "строк кода от вас" },
+  { value: "24/7", label: "проект живёт в проде" },
+];
+
 export const resultCopy = {
-  title: "Что вы получаете",
-  subtitle: "Публичный сайт или активный Telegram-бот — без ручной сборки и деплоя.",
+  title: "Не архив с кодом. Живой продукт.",
+  subtitle: "Публичный сайт по HTTPS или бот, который уже отвечает в Telegram.",
 } as const;
 
 export const howCopy = {
-  title: "Как это работает",
-  subtitle: "Один чат — от описания задачи до рабочей ссылки.",
+  title: "Три шага до запуска",
+  subtitle: "Один чат — от описания задачи до рабочей ссылки.",
 } as const;
 
 export const howSteps: HowStep[] = [
@@ -48,8 +67,8 @@ export const howSteps: HowStep[] = [
 ];
 
 export const useCasesCopy = {
-  title: "Что можно создать",
-  subtitle: "Типовые задачи, с которых удобно начать.",
+  title: "С чего начать",
+  subtitle: "Скопируйте формулировку — или напишите свою.",
 } as const;
 
 export const useCases: UseCase[] = [
@@ -80,8 +99,8 @@ export const useCases: UseCase[] = [
 ];
 
 export const trustCopy = {
-  title: "AIRuntime отвечает не только за код",
-  subtitle: "Платформа собирает, запускает и сохраняет проект.",
+  title: "Под капотом — настоящая инфраструктура",
+  subtitle: "Не генератор файлов, а платформа, которая собирает, запускает и хранит проект.",
   audienceLine:
     "Для предпринимателей, маркетологов и продуктовых команд, которым нужно быстро проверить идею.",
 } as const;
@@ -113,12 +132,12 @@ export const faqs: FaqItem[] = [
   {
     question: "Нужен ли опыт разработки?",
     answer:
-      "Нет. Опишите нужный результат обычными словами — агент спроектирует структуру, напишет код и запустит проект.",
+      "Нет. Опишите нужный результат обычными словами — агент спроектирует структуру, напишет код и запустит проект.",
   },
   {
     question: "Что можно создать?",
     answer:
-      "Сайт компании, лендинг, сервис записи, Telegram-бота или смешанный вариант — сайт и бот вместе. Стек выбирает агент под задачу.",
+      "Сайт компании, лендинг, сервис записи, Telegram-бота или смешанный вариант — сайт и бот вместе. Стек выбирает агент под задачу.",
   },
   {
     question: "Сколько занимает запуск?",
@@ -138,14 +157,14 @@ export const faqs: FaqItem[] = [
 ];
 
 export const finalCtaCopy = {
-  title: "Опишите задачу — получите работающий сайт или Telegram-бота.",
-  subtitle: "Создайте первый проект в чате. AIRuntime соберёт и запустит его за вас.",
+  title: "Ваш проект в одном сообщении отсюда",
+  subtitle: "Опишите задачу в чате — AIRuntime соберёт и запустит её за вас.",
   primaryCta: "Создать проект",
   secondaryCta: "Уже есть аккаунт? Войти",
 } as const;
 
 export const seoCopy = {
-  title: "AIRuntime — от идеи до работающего сайта или Telegram-бота",
+  title: "AIRuntime — от идеи до работающего сайта или Telegram-бота",
   description:
     "Опишите задачу в чате. AIRuntime создаст сайт или Telegram-бота, проверит сборку и запустит готовую версию.",
 } as const;

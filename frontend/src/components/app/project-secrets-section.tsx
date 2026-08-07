@@ -54,7 +54,7 @@ function SecretRow({
   };
 
   return (
-    <div className="flex flex-col gap-3 rounded-[var(--ar-radius-sm)] border border-white/70 bg-white/64 px-4 py-3">
+    <div className="flex flex-col gap-3 rounded-[0.7rem] border border-black/[0.07] bg-white px-4 py-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <p className="font-medium text-[var(--ar-black)]">{secret.key}</p>
@@ -153,13 +153,13 @@ export function ProjectSecretsSection({
     <Card hover={false} className="md:col-span-2" id="secrets">
       <div className="space-y-4">
         <div className="flex items-start gap-3">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--ar-radius-sm)] bg-white/80 text-[var(--ar-sky)] shadow-sm shadow-sky-950/5">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[0.7rem] bg-[image:var(--ar-accent-gradient-soft)] text-[var(--ar-sky)]">
             <ShieldCheck size={18} />
           </span>
           <div>
             <p className="text-sm font-semibold text-[var(--ar-black)]">Ключи и токены</p>
             <p className="mt-1 text-sm leading-7 text-[var(--ar-mist)]">
-              Когда проекту нужен токен или API-ключ, AIRuntime сам заводит для него слот здесь -
+              Когда проекту нужен токен или API-ключ, AIRuntime сам заводит для него слот здесь —
               просто впишите значение. Хранится зашифрованно и доступно только при сборке и
               запуске проекта.
             </p>

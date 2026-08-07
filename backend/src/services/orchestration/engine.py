@@ -57,6 +57,7 @@ from src.db.models.project import Project
 from src.db.models.user import User
 from src.db.session import SessionLocal
 from src.services import project_git
+from src.services.model_access import reasoning_effort_for_user
 from src.services.model_pricing import estimate_model_usage_cost
 from src.services.orchestration import events_bus
 from src.services.orchestration.budget import (
@@ -248,6 +249,19 @@ async def _ensure_preview_and_runtime_evidence(
         collected_preview if "preview" in step_kinds else preview_existing,
         collected_runtime,
     )
+
+
+def _reasoning_effort_for_project(db, project) -> str | None:
+    """Codex reasoning effort for the project owner's plan.
+
+    Restricted (free) plans run a cheaper effort so a one-time grant is not spent in two turns.
+    """
+    from src.db.models.user import User
+
+    owner = db.get(User, project.user_id)
+    if owner is None:
+        return None
+    return reasoning_effort_for_user(db, owner)
 
 
 def _select_workspace_mode(
@@ -752,6 +766,7 @@ async def _run_one_task(
             model=model,
             api_key=api_key,
             db=db,
+            reasoning_effort=_reasoning_effort_for_project(db, project),
         )
         # Granular per-capability audit trail (spec section 11's "каждый вызов записывается в
         # audit log"): task_started alone doesn't say WHICH skill/MCP capability ran, and after

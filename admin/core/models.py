@@ -43,9 +43,12 @@ class Plan(models.Model):
     key = models.CharField(max_length=50, unique=True)
     name = models.CharField(max_length=100)
     description = models.TextField(null=True, blank=True)
-    monthly_credits = models.IntegerField()
+    monthly_budget_rub = models.IntegerField(default=0)
     max_concurrent_projects = models.IntegerField()
+    max_projects = models.IntegerField(default=1)
     price_rub = models.IntegerField(default=0)
+    grant_renews = models.BooleanField(default=True)
+    allowed_models = models.JSONField(null=True, blank=True)
     is_default = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
     sort_order = models.IntegerField(default=0)
@@ -68,7 +71,7 @@ class AppUser(models.Model):
     password_hash = models.CharField(max_length=255, null=True, blank=True)
     is_verified = models.BooleanField(default=False)
     role = models.CharField(max_length=50, default="user")
-    credits_balance = models.IntegerField(default=1_000_000_000)
+    credits_balance = models.IntegerField(default=0)
     onboarding_completed = models.BooleanField(default=False)
     is_banned = models.BooleanField(default=False)
     banned_reason = models.CharField(max_length=500, null=True, blank=True)
@@ -302,3 +305,107 @@ class SystemSetting(models.Model):
 
     def __str__(self) -> str:
         return self.title
+
+
+class PlanChangeRequest(models.Model):
+    """User application to move to another plan. Approving it is what actually grants the budget."""
+
+    STATUS_CHOICES = [
+        ("pending", "На рассмотрении"),
+        ("approved", "Одобрена"),
+        ("rejected", "Отклонена"),
+        ("cancelled", "Отменена"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(AppUser, on_delete=models.DO_NOTHING, db_column="user_id")
+    from_plan = models.ForeignKey(
+        Plan,
+        on_delete=models.DO_NOTHING,
+        db_column="from_plan_id",
+        null=True,
+        blank=True,
+        related_name="plan_requests_from",
+    )
+    to_plan = models.ForeignKey(
+        Plan,
+        on_delete=models.DO_NOTHING,
+        db_column="to_plan_id",
+        related_name="plan_requests_to",
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+    note = models.TextField(null=True, blank=True)
+    admin_note = models.TextField(null=True, blank=True)
+    resolved_by = models.CharField(max_length=255, null=True, blank=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    # Set by the FastAPI billing sweep once the grant has actually been issued.
+    applied_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField()
+    updated_at = models.DateTimeField()
+
+    class Meta:
+        managed = False
+        db_table = "plan_change_requests"
+        verbose_name = "Заявка на смену тарифа"
+        verbose_name_plural = "Заявки на смену тарифа"
+
+    def __str__(self) -> str:
+        return f"{self.user.email} → {self.to_plan.name} ({self.get_status_display()})"
+
+
+class CreditLedgerEntry(models.Model):
+    """Read-only mirror of the FastAPI credit ledger, used by the analytics dashboard.
+
+    `amount` is what the user was charged (negative for usage, markup already applied);
+    `provider_cost_usd_micros` is the raw provider price. Keeping both is what makes margin
+    computable. Rows with reason="byok_usage" have amount 0 - the user paid their own provider.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(AppUser, on_delete=models.DO_NOTHING, db_column="user_id")
+    project_id = models.UUIDField(null=True, blank=True)
+    project_name = models.CharField(max_length=255, null=True, blank=True)
+    amount = models.IntegerField()
+    reason = models.CharField(max_length=32)
+    provider = models.CharField(max_length=32, null=True, blank=True)
+    model = models.CharField(max_length=128, null=True, blank=True)
+    input_tokens = models.IntegerField(null=True, blank=True)
+    cached_input_tokens = models.IntegerField(null=True, blank=True)
+    cache_write_input_tokens = models.IntegerField(null=True, blank=True)
+    output_tokens = models.IntegerField(null=True, blank=True)
+    provider_cost_usd_micros = models.IntegerField(null=True, blank=True)
+    markup_percent = models.IntegerField(null=True, blank=True)
+    created_at = models.DateTimeField()
+
+    class Meta:
+        managed = False
+        db_table = "credit_ledger_entries"
+        verbose_name = "Операция с кредитами"
+        verbose_name_plural = "Операции с кредитами"
+
+    def __str__(self) -> str:
+        return f"{self.reason} {self.amount}"
+
+
+class UserProviderCredential(models.Model):
+    """BYOK key. The ciphertext is never exposed in the admin - only the last four characters."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(AppUser, on_delete=models.DO_NOTHING, db_column="user_id")
+    provider = models.CharField(max_length=32)
+    encrypted_key = models.TextField()
+    last4 = models.CharField(max_length=8)
+    is_valid = models.BooleanField(default=False)
+    validated_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.CharField(max_length=500, null=True, blank=True)
+    created_at = models.DateTimeField()
+    updated_at = models.DateTimeField()
+
+    class Meta:
+        managed = False
+        db_table = "user_provider_credentials"
+        verbose_name = "Свой API-ключ"
+        verbose_name_plural = "Свои API-ключи"
+
+    def __str__(self) -> str:
+        return f"{self.user.email} · {self.provider} ····{self.last4}"

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
@@ -19,6 +20,7 @@ import { AgentStatusPanel } from "@/components/chat/message-item";
 import { MessageList } from "@/components/chat/message-list";
 import { ToolActivityFeed } from "@/components/chat/tool-activity-feed";
 import { AutoTextarea } from "@/components/ui/auto-textarea";
+import { Button } from "@/components/ui/button";
 import {
   createChat,
   createMessage,
@@ -33,6 +35,7 @@ import {
   type ChatType,
   type MessageType,
   type ModelOptionType,
+  type OutOfCreditsDetail,
   type ProvidersType,
 } from "@/lib/api";
 import {
@@ -135,6 +138,7 @@ export default function ProjectChatPage() {
   const [bootstrapping, setBootstrapping] = useState(true);
   const [bootstrapError, setBootstrapError] = useState("");
   const [chatError, setChatError] = useState("");
+  const [outOfCredits, setOutOfCredits] = useState<OutOfCreditsDetail | null>(null);
   const [mobilePanel, setMobilePanel] = useState<"list" | "chat">("list");
   const [toolActivity, setToolActivity] = useState<ToolActivityItem[]>([]);
   const [providers, setProviders] = useState<ProvidersType | null>(null);
@@ -155,6 +159,7 @@ export default function ProjectChatPage() {
     setTurnStartedAt(snap.turnStartedAt);
     setToolActivity(snap.toolActivity);
     setChatError(snap.chatError);
+    setOutOfCredits(snap.outOfCredits ?? null);
     if (snap.messages) {
       messagesRef.current = snap.messages;
       setMessages(snap.messages);
@@ -480,7 +485,7 @@ export default function ProjectChatPage() {
     loading && streamingMessage?.role === "assistant" ? streamingMessage.content.length : 0;
 
   return (
-    <div className="grid h-[calc(100dvh-14rem)] max-h-[calc(100dvh-14rem)] min-h-0 gap-0 overflow-hidden rounded-[var(--ar-radius-md)] border border-black/[0.08] bg-white lg:h-[calc(100dvh-9rem)] lg:max-h-[calc(100dvh-9rem)] lg:grid-cols-[220px_1fr]">
+    <div className="grid min-h-0 flex-1 gap-0 overflow-hidden rounded-[0.95rem] border border-black/[0.07] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04),0_12px_32px_-18px_rgba(15,23,42,0.24)] lg:grid-cols-[220px_1fr]">
       <aside
         className={cn(
           "flex min-h-0 flex-col border-black/[0.08] bg-[#f7f8fa] lg:border-r",
@@ -565,6 +570,7 @@ export default function ProjectChatPage() {
           loading={loading}
           stickToBottom={stickToBottom}
           onStickChange={setStickToBottom}
+          onPickPrompt={setInput}
           bottomSlot={
             <div className="space-y-3 pt-2">
               {loading && toolActivity.length > 0 ? <ToolActivityFeed items={toolActivity} /> : null}
@@ -603,7 +609,24 @@ export default function ProjectChatPage() {
                 {bootstrapError}
               </p>
             ) : null}
-            {chatError ? (
+            {outOfCredits ? (
+              // A bare red string leaves the user stuck - these are the actual ways forward.
+              <div className="mb-2 rounded-[0.7rem] border border-amber-500/30 bg-amber-50 px-4 py-3">
+                <p className="text-sm font-medium text-amber-900">{outOfCredits.message}</p>
+                <p className="mt-1 text-xs leading-relaxed text-amber-800">
+                  На своём API-ключе токены оплачивает провайдер — кредиты не списываются.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {outOfCredits.actions.map((action) => (
+                    <Link key={action.id} href={action.href}>
+                      <Button variant={action.id === "topup" ? "accent" : "outline"} size="sm">
+                        {action.label}
+                      </Button>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            ) : chatError ? (
               <p className="mb-2 rounded-[0.5rem] border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
                 {chatError}
               </p>

@@ -25,3 +25,8 @@ export type HowStep = {
   title: string;
   detail: string;
 };
+
+export type StatItem = {
+  value: string;
+  label: string;
+};

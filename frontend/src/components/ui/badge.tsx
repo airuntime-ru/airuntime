@@ -1,5 +1,10 @@
 import { cn } from "@/lib/cn";
 
+/**
+ * The dot inherits the badge's own text colour: callers tint the badge per status
+ * (green "готово", red "ошибка"), and a fixed brand-gradient dot contradicted every one
+ * of them.
+ */
 export function Badge({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
     <span
@@ -8,7 +13,7 @@ export function Badge({ children, className }: { children: React.ReactNode; clas
         className
       )}
     >
-      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[image:var(--ar-accent-gradient)]" aria-hidden />
+      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-70" aria-hidden />
       {children}
     </span>
   );

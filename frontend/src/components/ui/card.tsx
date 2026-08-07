@@ -8,8 +8,8 @@ export function Card({
   return (
     <div
       className={cn(
-        "rounded-[var(--ar-radius-md)] border border-black/[0.08] bg-white p-5 shadow-[var(--ar-shadow-sm)]",
-        hover && "transition-colors hover:border-black/15",
+        "sky-card rounded-[0.95rem] p-5",
+        hover && "sky-card-hover",
         className
       )}
       {...props}

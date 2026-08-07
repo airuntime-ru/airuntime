@@ -18,7 +18,8 @@ def test_provider_catalog_exposes_priced_openai_models(client, monkeypatch) -> N
         "gpt-5.6-terra",
         "gpt-5.6-luna",
     ]
-    assert body["models"]["openai"][0]["output_credits_per_million"] == 300_000
+    # Catalog prices are quoted with the markup already applied (Epic A3).
+    assert body["models"]["openai"][0]["output_credits_per_million"] == 330_000
 
 
 def test_chat_rejects_model_slug_outside_public_catalog(client, monkeypatch) -> None:

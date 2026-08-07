@@ -145,9 +145,13 @@ def test_billing_usage_api_pagination_and_project_name(client, db: Session):
     credits = client.get("/api/v1/billing/usage?direction=credit", headers=headers)
     assert credits.status_code == 200
     credit_body = credits.json()
-    assert credit_body["total"] == 1
-    assert credit_body["items"][0]["amount"] == 1000
-    assert credit_body["items"][0]["project_name"] is None
+    assert credit_body["total"] == 2, "top-up plus the signup grant"
+    # Both rows are written inside one transaction, so Postgres stamps them with the same
+    # now() and the id tiebreak is a random UUID - assert on content, not position.
+    by_reason = {row["reason"]: row for row in credit_body["items"]}
+    assert by_reason["topup"]["amount"] == 1000
+    assert by_reason["topup"]["project_name"] is None
+    assert by_reason["signup_grant"]["amount"] > 0
 
     bad = client.get("/api/v1/billing/usage?direction=sideways", headers=headers)
     assert bad.status_code == 422

@@ -14,10 +14,21 @@ export function SiteHeader() {
   const menuId = useId();
 
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 8);
+    // rAF-throttled so a fast scroll queues at most one state check per frame.
+    let frame = 0;
+    const onScroll = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        setScrolled(window.scrollY > 12);
+      });
+    };
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
   }, []);
 
   useEffect(() => {
@@ -33,24 +44,42 @@ export function SiteHeader() {
     };
   }, [open]);
 
+  // Floating pill rather than a full-width bar: the page alternates light and dark
+  // sections, and a translucent dark bar reads as a muddy grey slab over the light ones.
   return (
-    <header
-      className={cn(
-        "sticky top-0 z-40 border-b transition-[background-color,box-shadow,border-color] duration-200",
-        scrolled
-          ? "border-black/[0.08] bg-white/90 shadow-[0_8px_30px_rgba(7,20,38,0.06)] backdrop-blur-md"
-          : "border-transparent bg-[#f7f8fa]/92 backdrop-blur-sm"
-      )}
-    >
-      <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-5 sm:h-16 sm:px-8">
-        <Logo href="/" variant="full" theme="dark" size="sm" priority />
+    <header className="fixed inset-x-0 top-0 z-40 px-3 sm:px-5">
+      {/* Dim layer behind the pill (not below it in the page): tap-outside-to-close, and it
+          stops page content showing through the gap beside the floating panel. */}
+      {open ? (
+        <button
+          type="button"
+          aria-label="Закрыть меню"
+          onClick={() => setOpen(false)}
+          className="fixed inset-0 -z-10 bg-[rgba(4,8,20,0.6)] backdrop-blur-sm lg:hidden"
+        />
+      ) : null}
+      <div
+        className={cn(
+          "mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 border px-4 transition-all duration-300 sm:px-6",
+          scrolled || open
+            ? "mt-3 rounded-full border-white/10 bg-[rgba(9,14,28,0.74)] shadow-[0_20px_50px_-26px_rgba(0,0,0,0.95)] backdrop-blur-xl"
+            : "mt-1 border-transparent bg-transparent"
+        )}
+      >
+        {/* The wordmark plus a CTA plus a burger does not fit a 360px pill - mark only there. */}
+        <span className="sm:hidden">
+          <Logo href="/" variant="mark" theme="light" size="sm" priority />
+        </span>
+        <span className="hidden sm:inline-flex">
+          <Logo href="/" variant="full" theme="light" size="sm" priority />
+        </span>
 
         <nav className="hidden items-center gap-1 lg:flex" aria-label="Основная навигация">
           {navItems.map((item) => (
             <a
               key={item.href}
               href={item.href}
-              className="rounded-[0.5rem] px-3 py-2 text-sm font-medium text-[var(--ar-graphite)] transition-colors hover:bg-black/[0.04] hover:text-[var(--ar-black)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ar-sky)]/35"
+              className="rounded-full px-4 py-2 text-sm font-medium text-white/65 transition-colors hover:bg-white/[0.08] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
             >
               {item.label}
             </a>
@@ -60,19 +89,19 @@ export function SiteHeader() {
         <div className="flex items-center gap-2 sm:gap-3">
           <Link
             href={LOGIN_HREF}
-            className="hidden rounded-[0.5rem] px-3 py-2 text-sm font-medium text-[var(--ar-graphite)] transition-colors hover:text-[var(--ar-black)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ar-sky)]/35 sm:inline-flex"
+            className="hidden rounded-full px-4 py-2 text-sm font-medium text-white/65 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 sm:inline-flex"
           >
             Войти
           </Link>
           <Link
             href={LOGIN_HREF}
-            className="inline-flex h-9 items-center justify-center rounded-[0.55rem] bg-[var(--ar-black)] px-3.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ar-sky)]/40 sm:h-10 sm:px-4"
+            className="btn-glow inline-flex h-10 items-center justify-center whitespace-nowrap rounded-full px-3.5 text-[0.82rem] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 sm:px-5 sm:text-sm"
           >
             Создать проект
           </Link>
           <button
             type="button"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-[0.55rem] border border-black/10 bg-white text-[var(--ar-black)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ar-sky)]/35 lg:hidden"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/12 bg-white/[0.06] text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 lg:hidden"
             aria-expanded={open}
             aria-controls={menuId}
             aria-label={open ? "Закрыть меню" : "Открыть меню"}
@@ -84,16 +113,19 @@ export function SiteHeader() {
       </div>
 
       {open ? (
-        <div id={menuId} className="border-t border-black/[0.06] bg-white lg:hidden">
+        <div
+          id={menuId}
+          className="mx-auto mt-2 max-w-6xl overflow-hidden rounded-[1.25rem] border border-white/10 bg-[rgba(9,14,28,0.96)] shadow-[0_20px_50px_-26px_rgba(0,0,0,0.95)] backdrop-blur-xl lg:hidden"
+        >
           <nav
-            className="mx-auto flex max-w-6xl flex-col gap-1 px-5 py-4 sm:px-8"
+            className="flex flex-col gap-1 p-3"
             aria-label="Мобильная навигация"
           >
             {navItems.map((item) => (
               <a
                 key={item.href}
                 href={item.href}
-                className="rounded-[0.55rem] px-3 py-3 text-base font-medium text-[var(--ar-black)] hover:bg-black/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ar-sky)]/35"
+                className="rounded-[0.7rem] px-3 py-3 text-base font-medium text-white/80 hover:bg-white/[0.07] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
                 onClick={() => setOpen(false)}
               >
                 {item.label}
@@ -101,7 +133,7 @@ export function SiteHeader() {
             ))}
             <Link
               href={LOGIN_HREF}
-              className="rounded-[0.55rem] px-3 py-3 text-base font-medium text-[var(--ar-sky)] hover:bg-sky-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ar-sky)]/35"
+              className="rounded-[0.7rem] px-3 py-3 text-base font-medium text-[#8ec4ff] hover:bg-white/[0.07] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
               onClick={() => setOpen(false)}
             >
               Войти

@@ -42,45 +42,95 @@ function formatDateTime(value: string | null): string {
   });
 }
 
-function TaskCard({
+/** Statuses where the engine is actively working on the task right now. */
+function isTaskActive(status: string): boolean {
+  return (
+    status === "running" ||
+    status === "collecting_evidence" ||
+    status === "validating" ||
+    status === "repairing"
+  );
+}
+
+/** Node colour on the timeline rail, matching taskStatusTone's semantics. */
+function taskNodeTone(status: string): string {
+  if (status === "completed") return "border-emerald-300 bg-emerald-50 text-emerald-700";
+  if (status === "failed" || status === "cancelled") return "border-rose-300 bg-rose-50 text-rose-700";
+  if (status === "running" || status === "collecting_evidence" || status === "validating") {
+    return "border-sky-300 bg-sky-50 text-sky-700";
+  }
+  if (status === "repairing" || status === "waiting_for_user") {
+    return "border-amber-300 bg-amber-50 text-amber-700";
+  }
+  return "border-black/10 bg-white text-[var(--ar-stone)]";
+}
+
+/**
+ * Rendered as a timeline rather than a stack of cards: the tasks are an ordered pipeline with
+ * dependencies, and a flat list threw that away.
+ */
+function TaskRow({
   task,
+  index,
+  isLast,
   titleByLocalId,
 }: {
   task: OrchestrationTaskType;
+  index: number;
+  isLast: boolean;
   titleByLocalId: Map<string, string>;
 }) {
+  const meta = [
+    roleLabel(task.role),
+    `попытка ${task.attempt}/${task.max_attempts}`,
+    workspaceModeLabel(task.workspace_mode),
+  ].filter(Boolean);
+
   return (
-    <Card hover={false} className="space-y-2.5 p-4">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="font-semibold text-[var(--ar-black)]">{task.title}</p>
-          <p className="mt-0.5 text-xs text-[var(--ar-stone)]">{roleLabel(task.role)}</p>
+    <li className="relative flex gap-4 pb-5 last:pb-0">
+      {!isLast ? (
+        <span
+          className="absolute bottom-0 left-[0.9375rem] top-8 w-px bg-black/[0.09]"
+          aria-hidden
+        />
+      ) : null}
+      <span
+        className={cn(
+          "relative z-10 flex h-[1.875rem] w-[1.875rem] shrink-0 items-center justify-center rounded-full border text-xs font-semibold",
+          taskNodeTone(task.status),
+          // A halo marks where the engine is right now; colour alone made "выполняется" and
+          // "в очереди" look like the same kind of thing.
+          isTaskActive(task.status) && "live-dot"
+        )}
+        aria-hidden
+      >
+        {index + 1}
+      </span>
+
+      <div className="min-w-0 flex-1 pt-0.5">
+        <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1.5">
+          <p className="min-w-0 font-medium text-[var(--ar-black)]">{task.title}</p>
+          <Badge className={taskStatusTone(task.status)}>{taskStatusLabel(task.status)}</Badge>
         </div>
-        <Badge className={taskStatusTone(task.status)}>{taskStatusLabel(task.status)}</Badge>
+        <p className="mt-1 text-xs text-[var(--ar-stone)]">{meta.join(" · ")}</p>
+        {task.dependencies.length > 0 ? (
+          <p className="mt-1 text-xs text-[var(--ar-stone)]">
+            После:{" "}
+            {task.dependencies.map((id, i) => (
+              <span key={id}>
+                {i > 0 ? ", " : ""}
+                <span className="text-[var(--ar-graphite)]">{titleByLocalId.get(id) ?? id}</span>
+              </span>
+            ))}
+          </p>
+        ) : null}
+        {task.error_message ? (
+          <p className="mt-2 rounded-[0.6rem] border border-rose-100 bg-rose-50/70 p-2 text-xs text-rose-700">
+            {task.error_message}
+          </p>
+        ) : null}
       </div>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--ar-stone)]">
-        <span>
-          Попытка {task.attempt}/{task.max_attempts}
-        </span>
-        <span>Режим: {workspaceModeLabel(task.workspace_mode)}</span>
-      </div>
-      {task.dependencies.length > 0 ? (
-        <p className="text-xs text-[var(--ar-stone)]">
-          Зависит от:{" "}
-          {task.dependencies.map((id, i) => (
-            <span key={id}>
-              {i > 0 ? ", " : ""}
-              <span className="text-[var(--ar-graphite)]">{titleByLocalId.get(id) ?? id}</span>
-            </span>
-          ))}
-        </p>
-      ) : null}
-      {task.error_message ? (
-        <p className="rounded-lg border border-rose-100 bg-rose-50/60 p-2 text-xs text-rose-700">
-          {task.error_message}
-        </p>
-      ) : null}
-    </Card>
+    </li>
   );
 }
 
@@ -106,7 +156,7 @@ function RunDetailView({
       setDetail(row);
       setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось загрузить run");
+      setError(err instanceof Error ? err.message : "Не удалось загрузить запуск");
     } finally {
       refetchInFlight.current = false;
     }
@@ -160,7 +210,7 @@ function RunDetailView({
       await load();
       onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось отменить run");
+      setError(err instanceof Error ? err.message : "Не удалось отменить запуск");
     } finally {
       setActionLoading(false);
     }
@@ -173,13 +223,13 @@ function RunDetailView({
       await load();
       onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось возобновить run");
+      setError(err instanceof Error ? err.message : "Не удалось возобновить запуск");
     } finally {
       setActionLoading(false);
     }
   };
 
-  if (!detail) return <Loader label="Загружаем run…" />;
+  if (!detail) return <Loader label="Загружаем запуск…" />;
 
   const sortedTasks = [...detail.tasks].sort((a, b) => a.sequence - b.sequence);
 
@@ -244,14 +294,23 @@ function RunDetailView({
 
       {error ? <p className="text-sm text-rose-600">{error}</p> : null}
 
-      <div className="space-y-2.5">
-        {sortedTasks.map((task) => (
-          <TaskCard key={task.id} task={task} titleByLocalId={titleByLocalId} />
-        ))}
-        {sortedTasks.length === 0 ? (
-          <p className="text-sm text-[var(--ar-stone)]">План ещё строится…</p>
-        ) : null}
-      </div>
+      {sortedTasks.length > 0 ? (
+        <Card hover={false} className="p-5 sm:p-6">
+          <ol className="relative">
+            {sortedTasks.map((task, index) => (
+              <TaskRow
+                key={task.id}
+                task={task}
+                index={index}
+                isLast={index === sortedTasks.length - 1}
+                titleByLocalId={titleByLocalId}
+              />
+            ))}
+          </ol>
+        </Card>
+      ) : (
+        <p className="text-sm text-[var(--ar-stone)]">План ещё строится…</p>
+      )}
     </div>
   );
 }
@@ -271,7 +330,7 @@ export default function ProjectOrchestrationPage() {
       setLoadError("");
       setSelectedRunId((current) => current ?? result.items[0]?.id ?? null);
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : "Не удалось загрузить runs");
+      setLoadError(err instanceof Error ? err.message : "Не удалось загрузить запускs");
       setRuns([]);
     }
   }, [projectId]);
@@ -315,7 +374,7 @@ export default function ProjectOrchestrationPage() {
       {runs.length === 0 ? (
         <EmptyState
           title="Запусков оркестрации пока нет"
-          description="Начните новый запрос в чате - здесь появится план и ход его выполнения."
+          description="Начните новый запрос в чате — здесь появится план и ход его выполнения."
           action={
             <span className="inline-flex items-center gap-2 text-sm text-[var(--ar-stone)]">
               <Layers size={16} aria-hidden />

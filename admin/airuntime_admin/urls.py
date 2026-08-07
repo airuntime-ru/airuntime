@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.urls import path
 
 from airuntime_admin import docker_views
+from core import analytics_views
 
 _orig_get_app_list = admin.site.get_app_list
 
@@ -60,6 +61,16 @@ urlpatterns = [
         "docker/resources/",
         admin.site.admin_view(docker_views.docker_resources),
         name="admin_docker_resources",
+    ),
+    path(
+        "analytics/",
+        admin.site.admin_view(analytics_views.analytics_dashboard_view),
+        name="admin_analytics_dashboard",
+    ),
+    path(
+        "analytics/export/<str:report>.csv",
+        admin.site.admin_view(analytics_views.analytics_export_csv_view),
+        name="admin_analytics_export",
     ),
     path("", admin.site.urls),
 ]

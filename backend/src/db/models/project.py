@@ -25,6 +25,16 @@ class Project(Base):
         String(63), nullable=True, unique=True, index=True
     )
     git_history: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    # Custom domain (Epic D). Status: none | pending_dns | verified | error.
+    custom_domain: Mapped[str | None] = mapped_column(String(253), nullable=True)
+    custom_domain_status: Mapped[str] = mapped_column(String(20), nullable=False, default="none")
+    custom_domain_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    custom_domain_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    custom_domain_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     blocked_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

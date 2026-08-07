@@ -3,9 +3,20 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, usePathname, useRouter } from "next/navigation";
-import { ArrowLeft, BookOpen, KeyRound, Loader2, MessageSquare, Settings } from "lucide-react";
+import {
+  ArrowLeft,
+  BookOpen,
+  Bot,
+  Globe,
+  KeyRound,
+  Layers,
+  Loader2,
+  MessageSquare,
+  Settings,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
+import { ProjectStatusChip } from "@/components/app/project-status-chip";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { Tabs } from "@/components/ui/tabs";
@@ -17,13 +28,13 @@ import {
   type ChatStreamSnapshot,
 } from "@/lib/chat-stream-runtime";
 import { cn } from "@/lib/cn";
-import { projectStatusLabel } from "@/lib/project-status";
+import { projectTypeLabel } from "@/lib/project-status";
 import { usePageVisible } from "@/lib/use-page-visible";
 
-const TYPE_LABELS: Record<string, string> = {
-  website: "Сайт",
-  telegram_bot: "Telegram-бот",
-  mixed: "Сайт и бот",
+const TYPE_ICONS: Record<string, LucideIcon> = {
+  website: Globe,
+  telegram_bot: Bot,
+  mixed: Layers,
 };
 
 const STATUS_GUIDANCE: Record<
@@ -41,7 +52,7 @@ const STATUS_GUIDANCE: Record<
     body:
       project.type === "telegram_bot" || project.type === "mixed"
         ? "Код бота уже есть в проекте, но запустить его пока нельзя: не хватает токена. Откройте секреты проекта, вставьте TELEGRAM_BOT_TOKEN (его выдаёт @BotFather в Telegram после команды /newbot) и запуск продолжится автоматически."
-        : "Проекту не хватает данных для запуска - откройте настройки проекта и заполните то, что запрашивается в разделе «Ключи и токены».",
+        : "Проекту не хватает данных для запуска — откройте настройки проекта и заполните то, что запрашивается в разделе «Ключи и токены».",
     showSecrets: true,
     showChat: true,
     showHelp: project.type === "telegram_bot" || project.type === "mixed",
@@ -51,18 +62,9 @@ const STATUS_GUIDANCE: Record<
     body:
       "Проект остановлен автоматической проверкой безопасности" +
       (project.blocked_reason ? `: ${project.blocked_reason}.` : ".") +
-      " Если считаете это ошибкой, напишите в поддержку - решение может принять только администратор.",
+      " Если считаете это ошибкой, напишите в поддержку — решение может принять только администратор.",
   }),
 };
-
-function statusBadgeClass(status: string) {
-  if (status === "live") return "border-emerald-200 bg-emerald-50 text-emerald-800";
-  if (status === "deploying") return "border-sky-200 bg-sky-50 text-sky-800";
-  if (status === "blocked") return "border-rose-200 bg-rose-50 text-rose-700";
-  if (status === "needs_configuration") return "border-amber-200 bg-amber-50 text-amber-800";
-  if (status === "stopped") return "border-black/10 bg-black/[0.03] text-[var(--ar-mist)]";
-  return "";
-}
 
 export default function ProjectLayout({ children }: { children: React.ReactNode }) {
   const params = useParams<{ id: string }>();
@@ -128,45 +130,55 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
 
   const guidance = STATUS_GUIDANCE[project.status]?.(project);
   const showStreamBanner = Boolean(chatStream?.loading && chatStream.agentStatus && !onChatTab);
+  const TypeIcon = TYPE_ICONS[project.type] ?? Globe;
 
   return (
-    <div className="space-y-4">
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-[var(--ar-border)] pb-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
+      <header className="space-y-3 border-b border-[var(--ar-border)] pb-4">
         <Link
           href="/app"
-          className="inline-flex min-h-10 items-center gap-1.5 rounded-[var(--ar-radius-sm)] px-2 text-sm text-[var(--ar-mist)] transition-colors hover:bg-black/[0.04] hover:text-[var(--ar-black)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ar-sky)]/35"
+          className="inline-flex min-h-9 items-center gap-1.5 rounded-full px-2 text-sm text-[var(--ar-stone)] transition-colors hover:bg-black/[0.04] hover:text-[var(--ar-black)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ar-sky)]/35"
         >
-          <ArrowLeft size={16} aria-hidden />
-          Проекты
+          <ArrowLeft size={15} aria-hidden />
+          Все проекты
         </Link>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="truncate text-lg font-semibold tracking-[-0.02em] text-[var(--ar-black)] sm:text-xl">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-3">
+          <span
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[0.7rem] bg-[image:var(--ar-accent-gradient-soft)] text-[var(--ar-sky)]"
+            aria-hidden
+          >
+            <TypeIcon size={19} />
+          </span>
+          <div className="min-w-0 flex-1 basis-[12rem]">
+            {/* Wraps rather than truncates - a project name is the one thing you must be
+                able to read on a 390px screen. */}
+            <h1 className="text-xl font-semibold leading-tight tracking-[-0.025em] text-[var(--ar-black)] sm:text-2xl">
               {project.name}
             </h1>
-            <span className="rounded-[0.5rem] border border-black/10 bg-white px-2 py-0.5 text-xs text-[var(--ar-mist)]">
-              {TYPE_LABELS[project.type] ?? project.type}
-            </span>
-            {guidance ? (
-              <button type="button" onClick={() => setStatusModalOpen(true)} className="min-h-8">
-                <Badge className={cn("cursor-pointer", statusBadgeClass(project.status))}>
-                  {projectStatusLabel(project.status)}
-                </Badge>
-              </button>
-            ) : (
-              <Badge className={statusBadgeClass(project.status)}>
-                {projectStatusLabel(project.status)}
-              </Badge>
-            )}
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+              {guidance ? (
+                <button type="button" onClick={() => setStatusModalOpen(true)}>
+                  <ProjectStatusChip status={project.status} className="cursor-pointer" />
+                </button>
+              ) : (
+                <ProjectStatusChip status={project.status} />
+              )}
+              <span className="rounded-full border border-black/[0.07] bg-black/[0.02] px-2.5 py-1 text-xs text-[var(--ar-stone)]">
+                {projectTypeLabel(project.type)}
+              </span>
+            </div>
           </div>
+          {/* Pointless while you are already looking at the chat. */}
+          {onChatTab ? null : (
+            <Link
+              href={`${base}/chat`}
+              className="btn-glow inline-flex min-h-10 items-center gap-2 rounded-[0.7rem] px-4 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ar-sky)]/40"
+            >
+              <MessageSquare size={15} aria-hidden />
+              Чат
+            </Link>
+          )}
         </div>
-        <Link
-          href={`${base}/chat`}
-          className="inline-flex min-h-10 items-center gap-2 rounded-[var(--ar-radius-sm)] bg-[var(--ar-black)] px-3.5 text-sm font-semibold text-white hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ar-sky)]/40"
-        >
-          <MessageSquare size={15} aria-hidden />
-          Чат
-        </Link>
       </header>
 
       <Tabs items={tabs} sticky />
@@ -182,13 +194,13 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
             <span className="block truncate text-sm font-medium text-[var(--ar-black)]">
               {chatStream.agentStatus.label}
             </span>
-            <span className="block text-xs text-[var(--ar-stone)]">Агент работает — открыть чат</span>
+            <span className="block text-xs text-[var(--ar-stone)]">Агент работает — открыть чат</span>
           </span>
           <MessageSquare size={16} className="shrink-0 text-[var(--ar-sky)]" aria-hidden />
         </button>
       ) : null}
 
-      {children}
+      <div className="flex min-h-0 flex-1 flex-col">{children}</div>
 
       {guidance ? (
         <Modal open={statusModalOpen} onClose={() => setStatusModalOpen(false)} title={guidance.title}>

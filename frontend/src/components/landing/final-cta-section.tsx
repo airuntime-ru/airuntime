@@ -1,38 +1,56 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 
-import { LandingSection } from "@/components/landing/section";
+import { Reveal } from "@/components/ui/reveal";
 import { LOGIN_HREF, finalCtaCopy } from "@/lib/landing/content";
 
 export function FinalCtaSection() {
   return (
-    <LandingSection tone="ink" ariaLabelledBy="final-cta-title">
-      <div className="mx-auto max-w-2xl text-center">
-        <h2
-          id="final-cta-title"
-          className="text-balance text-[2rem] font-semibold tracking-[-0.03em] text-white sm:text-[2.5rem] sm:leading-[1.15]"
-        >
-          {finalCtaCopy.title}
-        </h2>
-        <p className="mx-auto mt-4 max-w-xl text-base leading-relaxed text-white/65 sm:text-lg">
-          {finalCtaCopy.subtitle}
-        </p>
-        <div className="mt-8 flex flex-col items-center gap-4">
-          <Link
-            href={LOGIN_HREF}
-            className="inline-flex h-12 items-center justify-center gap-2 rounded-[0.65rem] bg-white px-7 text-sm font-semibold text-[var(--ar-black)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+    <section
+      className="cosmos cosmos-stars relative overflow-hidden py-24 sm:py-28 lg:py-36"
+      aria-labelledby="final-cta-title"
+    >
+      <div
+        className="aurora-blob left-1/2 top-1/2 h-[36rem] w-[36rem] -translate-x-1/2 -translate-y-1/2 bg-[radial-gradient(circle,rgba(35,136,255,0.45),transparent_64%)]"
+        aria-hidden
+      />
+      <div
+        className="orbit-ring left-1/2 top-1/2 h-[44rem] w-[44rem] -translate-x-1/2 -translate-y-1/2 max-sm:hidden"
+        aria-hidden
+      />
+
+      <div className="relative mx-auto max-w-2xl px-5 text-center sm:px-8">
+        <Reveal>
+          <h2
+            id="final-cta-title"
+            className="text-balance text-[2.2rem] font-semibold leading-[1.1] tracking-[-0.035em] text-white sm:text-[3rem]"
           >
-            {finalCtaCopy.primaryCta}
-            <ArrowRight size={16} aria-hidden />
-          </Link>
-          <Link
-            href={LOGIN_HREF}
-            className="text-sm font-medium text-white/70 underline-offset-4 transition-colors hover:text-white hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
-          >
-            {finalCtaCopy.secondaryCta}
-          </Link>
-        </div>
+            {finalCtaCopy.title}
+          </h2>
+        </Reveal>
+        <Reveal delay={80}>
+          <p className="mx-auto mt-5 max-w-lg text-base leading-relaxed text-white/55 sm:text-lg">
+            {finalCtaCopy.subtitle}
+          </p>
+        </Reveal>
+        <Reveal delay={160}>
+          <div className="mt-10 flex flex-col items-center gap-5">
+            <Link
+              href={LOGIN_HREF}
+              className="btn-glow inline-flex h-14 items-center justify-center gap-2 rounded-full px-9 text-base font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
+            >
+              {finalCtaCopy.primaryCta}
+              <ArrowRight size={18} aria-hidden />
+            </Link>
+            <Link
+              href={LOGIN_HREF}
+              className="text-sm font-medium text-white/55 underline-offset-4 transition-colors hover:text-white hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
+            >
+              {finalCtaCopy.secondaryCta}
+            </Link>
+          </div>
+        </Reveal>
       </div>
-    </LandingSection>
+    </section>
   );
 }

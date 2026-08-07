@@ -1,9 +1,13 @@
 import { cn } from "@/lib/cn";
 
-export function Loader({ label = "Loading" }: { label?: string }) {
+export function Loader({ label = "Загружаем" }: { label?: string }) {
   return (
     <div className="flex items-center gap-3 text-[var(--ar-mist)]" role="status" aria-live="polite">
-      <span className="breathe inline-block h-2 w-2 rounded-full bg-[var(--ar-cyan)] shadow-[0_0_18px_rgba(24,199,202,0.35)]" />
+      <span className="ai-typing" aria-hidden>
+        <span />
+        <span />
+        <span />
+      </span>
       <span className="text-sm">{label}</span>
     </div>
   );
@@ -29,10 +33,18 @@ export function EmptyState({
   className?: string;
 }) {
   return (
-    <div className={cn("glass rounded-[var(--ar-radius-sm)] p-8 text-center", className)}>
-      <h3 className="text-lg font-semibold text-[var(--ar-black)]">{title}</h3>
-      <p className="mt-2 text-sm text-[var(--ar-mist)]">{description}</p>
-      {action ? <div className="mt-5">{action}</div> : null}
+    <div className={cn("sky-card rounded-[0.95rem] px-6 py-12 text-center", className)}>
+      <span
+        className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[image:var(--ar-accent-gradient-soft)] text-xl"
+        aria-hidden
+      >
+        ✦
+      </span>
+      <h3 className="mt-5 text-lg font-semibold text-[var(--ar-black)]">{title}</h3>
+      <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-[var(--ar-mist)]">
+        {description}
+      </p>
+      {action ? <div className="mt-6">{action}</div> : null}
     </div>
   );
 }

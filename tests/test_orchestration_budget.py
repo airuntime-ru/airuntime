@@ -50,8 +50,9 @@ class TestEstimateTaskCost:
             model="gpt-5.6-luna",
         )
 
-        assert sol == 80
-        assert luna == 16
+        # 80 raw credits + the 10% platform markup (Epic A3).
+        assert sol == 88
+        assert luna == 18
 
 
 class TestBudgetTrackerCheck:

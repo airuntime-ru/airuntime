@@ -1,24 +1,34 @@
 "use client";
 
-import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { FolderKanban, MessageSquare, Plus, Rocket } from "lucide-react";
+import { Plus } from "lucide-react";
 
-import { CreateProjectModal } from "@/components/app/create-project-modal";
-import { Badge } from "@/components/ui/badge";
+import { useCreateProject } from "@/components/app/create-project-context";
+import { ProjectCard } from "@/components/app/project-card";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { EmptyState } from "@/components/ui/loader";
 import { getProjectRuntimeLimits, type ProjectRuntimeLimitsType } from "@/lib/api";
-import { projectStatusLabel } from "@/lib/project-status";
 import { useProjects } from "@/lib/use-projects";
 
+const STARTER_IDEAS = [
+  "Сайт автосервиса с записью",
+  "Лендинг для запуска курса",
+  "Бот принимает заявки и напоминает",
+  "Сервис записи к мастеру",
+] as const;
+
+// "4 проекта" / "1 проект" / "5 проектов"
+function pluralize(count: number, one: string, few: string, many: string): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
+}
+
 export default function ProjectsPage() {
-  const router = useRouter();
-  const { projects, total, deployedTotal, error, loading, loadingMore, hasMore, refresh, loadMore } =
+  const { projects, total, deployedTotal, error, loading, loadingMore, hasMore, loadMore } =
     useProjects();
-  const [createOpen, setCreateOpen] = useState(false);
+  const { openCreateProject } = useCreateProject();
   const [limits, setLimits] = useState<ProjectRuntimeLimitsType | null>(null);
 
   useEffect(() => {
@@ -31,123 +41,98 @@ export default function ProjectsPage() {
     })();
   }, [projects]);
 
-  const running = projects.filter((project) => project.status === "live" || project.status === "deploying").length;
+  const running =
+    limits?.running ??
+    projects.filter((project) => project.status === "live" || project.status === "deploying").length;
+
+  const summary = [
+    `${total} ${pluralize(total, "проект", "проекта", "проектов")}`,
+    `${running} ${pluralize(running, "запущен", "запущено", "запущено")}`,
+    `${deployedTotal} ${pluralize(deployedTotal, "опубликован", "опубликовано", "опубликовано")}`,
+  ].join(" · ");
 
   return (
-    <div className="space-y-6">
-      <section className="accent-ring relative overflow-hidden rounded-[var(--ar-radius-lg)] border border-black/[0.06] bg-white p-5 sm:p-7">
-        <div
-          className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full opacity-[0.14] blur-3xl"
-          style={{ background: "var(--ar-accent-gradient)" }}
-          aria-hidden
-        />
-        <div className="relative grid gap-6 lg:grid-cols-[1.1fr_0.9fr] lg:items-end">
-          <div>
-            <p className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-black/[0.03] px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ar-mist)]">
-              <span className="h-1.5 w-1.5 rounded-full bg-[image:var(--ar-accent-gradient)]" aria-hidden />
-              AIRuntime
-            </p>
-            <h1 className="mt-5 max-w-3xl text-[2.35rem] font-semibold leading-[1.04] tracking-normal text-[var(--ar-black)] sm:text-5xl xl:text-6xl">
-              Создайте <span className="accent-text">проект</span> и запустите его сегодня
-            </h1>
-            <p className="mt-5 max-w-2xl text-base leading-8 text-[var(--ar-mist)]">
-              Опишите идею в чате, а AIRuntime соберет и задеплоит рабочую версию.
-            </p>
-            <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-              <Button variant="accent" size="lg" data-tour="project-create-trigger" onClick={() => setCreateOpen(true)}>
-                <Plus size={18} />
-                Новый проект
-              </Button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-3 gap-2 sm:gap-3 lg:grid-cols-1">
-            {[
-              { label: "Проектов", value: total, icon: FolderKanban },
-              {
-                label: "Запущено",
-                value: limits ? `${limits.running}/${limits.max_running}` : running,
-                icon: Rocket,
-              },
-              { label: "Опубликовано", value: deployedTotal, icon: Rocket },
-            ].map((item) => (
-              <div
-                key={item.label}
-                className="min-h-20 rounded-[var(--ar-radius-md)] border border-black/[0.06] bg-white p-3 shadow-[0_8px_22px_rgba(7,20,38,0.045)] sm:min-h-24 sm:p-4"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-[0.62rem] font-semibold uppercase tracking-[0.12em] text-[var(--ar-stone)] sm:text-xs sm:tracking-[0.16em]">{item.label}</p>
-                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--ar-accent-gradient-soft)] text-[var(--ar-sky)]">
-                    <item.icon size={13} />
-                  </span>
-                </div>
-                <p className="mt-3 text-2xl font-semibold tabular-nums text-[var(--ar-black)] sm:text-3xl">{item.value}</p>
-              </div>
-            ))}
-          </div>
+    <div className="space-y-7">
+      <header className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
+        <div>
+          <h1 className="text-[1.9rem] font-semibold leading-[1.1] tracking-[-0.03em] text-[var(--ar-black)] sm:text-[2.35rem]">
+            Что <span className="text-daylight">запустим</span> сегодня?
+          </h1>
+          <p className="mt-2 text-sm text-[var(--ar-mist)]">
+            {loading ? "Загружаем проекты…" : summary}
+          </p>
         </div>
-      </section>
+        <Button
+          variant="accent"
+          size="lg"
+          data-tour="project-create-trigger"
+          onClick={() => openCreateProject()}
+          className="rounded-full"
+        >
+          <Plus size={18} />
+          Новый проект
+        </Button>
+      </header>
 
       {error ? <p className="text-sm text-rose-600">{error}</p> : null}
 
       {!loading && projects.length === 0 ? (
-        <EmptyState
-          title="Проектов пока нет"
-          description="Создайте первый проект: после этого сразу откроется чат, где можно описать, что нужно собрать и запустить."
-          action={
-            <Button variant="accent" onClick={() => setCreateOpen(true)}>
-              <Plus size={16} />
-              Новый проект
-            </Button>
-          }
-        />
+        // The empty cabinet is the one place that still gets the full deep-space treatment -
+        // there is no project content to carry the identity yet.
+        <section className="cosmos cosmos-stars cosmos-stars-still relative isolate overflow-hidden rounded-[1.25rem] border border-white/10 px-6 py-14 text-center sm:py-16">
+          <div
+            className="pointer-events-none absolute left-1/2 top-0 -z-10 h-72 w-72 -translate-x-1/2 -translate-y-1/3 rounded-full bg-[radial-gradient(circle,rgba(35,136,255,0.45),transparent_66%)] blur-3xl"
+            aria-hidden
+          />
+          <h2 className="text-2xl font-semibold tracking-[-0.025em] text-white sm:text-[1.75rem]">
+            Здесь появятся ваши проекты
+          </h2>
+          <p className="mx-auto mt-3 max-w-md text-[0.95rem] leading-relaxed text-white/55">
+            Создайте первый — сразу откроется чат, где можно описать задачу обычными словами.
+          </p>
+
+          {/* Clickable, not decorative: a first-time user's real blocker is not knowing what
+              to type, so each example opens the create dialog. */}
+          <p className="mt-9 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-white/45">
+            Например
+          </p>
+          <ul className="mx-auto mt-3.5 flex max-w-2xl flex-wrap justify-center gap-2">
+            {STARTER_IDEAS.map((idea) => (
+              <li key={idea}>
+                <button
+                  type="button"
+                  onClick={() => openCreateProject()}
+                  className="rounded-full border border-white/12 bg-white/[0.06] px-4 py-2 text-sm text-white/75 transition-colors hover:border-white/30 hover:bg-white/[0.12] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+                >
+                  {idea}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
       ) : null}
 
-      <div className="grid gap-3" data-tour="project-list">
+      <div
+        className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3"
+        data-tour="project-list"
+      >
         {projects.map((project) => (
-          <Card
-            key={project.id}
-            role="link"
-            tabIndex={0}
-            onClick={() => router.push(`/app/projects/${project.id}`)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") router.push(`/app/projects/${project.id}`);
-            }}
-            className="group grid cursor-pointer gap-4 p-4 sm:grid-cols-[1fr_auto] sm:items-center"
-          >
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="truncate text-lg font-semibold text-[var(--ar-black)]">{project.name}</p>
-                <Badge>{projectStatusLabel(project.status)}</Badge>
-              </div>
-              <p className="mt-2 text-sm font-medium text-[var(--ar-mist)]">
-                {project.deployment_url ?? (project.description || "Откройте чат и опишите задачу")}
-              </p>
-            </div>
-            <div className="sm:w-36">
-              <Link
-                href={`/app/projects/${project.id}/chat`}
-                onClick={(event) => event.stopPropagation()}
-              >
-                <Button variant="accent" size="sm" className="w-full">
-                  <MessageSquare size={15} />
-                  Открыть чат
-                </Button>
-              </Link>
-            </div>
-          </Card>
+          <ProjectCard key={project.id} project={project} />
         ))}
       </div>
 
       {hasMore ? (
         <div className="flex justify-center">
-          <Button variant="outline" onClick={() => void loadMore()} disabled={loadingMore}>
+          <Button
+            variant="outline"
+            className="rounded-full"
+            onClick={() => void loadMore()}
+            disabled={loadingMore}
+          >
             {loadingMore ? "Загружаем…" : "Показать ещё"}
           </Button>
         </div>
       ) : null}
-
-      <CreateProjectModal open={createOpen} onClose={() => setCreateOpen(false)} onCreated={refresh} />
     </div>
   );
 }

@@ -37,4 +37,7 @@ class CreditLedgerEntry(Base):
     cache_write_input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     provider_cost_usd_micros: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Markup applied at charge time. Snapshotted so changing the setting never rewrites history,
+    # and analytics can separate provider cost from what the user was actually charged.
+    markup_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

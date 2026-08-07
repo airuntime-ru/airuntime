@@ -135,6 +135,7 @@ def _submit_run(
     timeout_seconds: int,
     job_id: str | None = None,
     allow_docker: bool = True,
+    reasoning_effort: str | None = None,
 ) -> str:
     # Every attempt needs its own event key/container identity. Reusing the orchestration task id
     # here left the previous attempt's terminal marker and JSONL tail in Redis; the next retry
@@ -153,6 +154,7 @@ def _submit_run(
         "image_paths": image_paths,
         "timeout_seconds": timeout_seconds,
         "allow_docker": allow_docker,
+        "reasoning_effort": reasoning_effort,
     }
     _redis().rpush(QUEUE_KEY, json.dumps(job))
     return run_id
@@ -444,6 +446,7 @@ class CodexAgentSession:
         system_prompt: str,
         correlation_id: str | None = None,
         allow_docker: bool = True,
+        reasoning_effort: str | None = None,
     ) -> None:
         self.model = model
         self.workspace = workspace
@@ -455,6 +458,8 @@ class CodexAgentSession:
         # behavior of a fresh random id per call - those callers have no cancellation support.
         self.correlation_id = correlation_id
         self.allow_docker = allow_docker
+        # None = use the global default; a restricted plan passes a cheaper effort.
+        self.reasoning_effort = reasoning_effort
 
     def _handle_terminal(self, payload: dict[str, Any]) -> AgentDone | None:
         # Bare {"type": "error", "message": ...} events (straight from codex's own JSONL
@@ -590,6 +595,7 @@ class CodexAgentSession:
             image_paths=image_paths,
             timeout_seconds=settings.codex_turn_timeout_seconds,
             allow_docker=self.allow_docker,
+            reasoning_effort=self.reasoning_effort,
         )
 
         saw_event = False

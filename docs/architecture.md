@@ -227,7 +227,7 @@ class ToolExecutor(Protocol):
 
 ## 11) Credits and Product Rules
 
-- On registration: initialize each user with `1_000_000_000` credits.
+- On registration: the default plan grants its monthly budget once (see `assign_default_plan`); free grants are one-shot and never renew.
 - Credits decremented by AI usage units (model-dependent multiplier, configurable).
 - Prevent execution when credits <= 0, with clear UX messaging.
 

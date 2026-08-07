@@ -36,12 +36,15 @@ from src.services.agentic_artifacts import (
     workspace_has_agent_code,
 )
 from src.services.artifacts import ArtifactError, _telegram_token
+from src.services.byok import resolve_user_api_key
+from src.services.credit_gate import out_of_credits_detail
 from src.services.deployments import create_deployment_for_project
 from src.services.file_context import (
     attach_files_to_message,
     build_attachment_context,
     serialize_message_metadata,
 )
+from src.services.model_access import ModelNotAllowedError, resolve_model_for_user
 from src.services.moderation import (
     check_project_safety,
     is_token_related_block_reason,
@@ -63,7 +66,6 @@ from src.services.project_subdomain import (
     normalize_deploy_subdomain,
 )
 from src.services.prompt_guard import prepare_agent_user_message, sanitize_user_message
-from src.services.provider.factory import resolve_provider_and_model
 from src.services.secrets import capture_telegram_tokens_from_text, ensure_secret_placeholder
 from src.services.sse_heartbeat import SSE_PING, Ticker
 from src.services.system_settings import resolve_api_key_for_provider
@@ -867,7 +869,8 @@ async def _stream_events(
 ) -> StreamingResponse:
     if current_user.credits_balance <= 0:
         raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="Insufficient credits"
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail=out_of_credits_detail(db, current_user),
         )
     if current_user.is_banned:
         raise HTTPException(
@@ -947,18 +950,29 @@ async def _stream_events(
     # keep the useful tail of oversized log pastes instead of 400/422 rejecting the turn.
     safe_message = prepare_agent_user_message(user_agent_message)
 
+    # Resolved first: a user on their own key is not subject to the plan's model allowlist.
+    byok_provider = (provider_override or settings.provider_name).strip().lower()
+    has_own_key = bool(resolve_user_api_key(db, current_user, byok_provider))
     try:
-        provider_name, model = resolve_provider_and_model(
+        provider_name, model = resolve_model_for_user(
+            db,
+            current_user,
             provider_override=provider_override,
             model_override=model_override,
+            has_own_key=has_own_key,
         )
+    except ModelNotAllowedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    # BYOK first: the user's own key means the provider bills them, not us.
     api_key = (
-        resolve_api_key_for_provider(provider_name)
+        resolve_user_api_key(db, current_user, provider_name)
+        or resolve_api_key_for_provider(provider_name)
         or getattr(settings, f"{provider_name}_api_key", None)
         or ""
     )
+
 
     if content:
         verdict = await check_project_safety(
@@ -1041,7 +1055,8 @@ async def stream_repair_post(
     project, chat = _authorize_chat(db, project_id, chat_id, current_user)
     if current_user.credits_balance <= 0:
         raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="Insufficient credits"
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail=out_of_credits_detail(db, current_user),
         )
     force_error = (payload.error_log or "").strip() or None
 

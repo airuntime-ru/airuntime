@@ -232,7 +232,9 @@ def test_request_code_verify_and_me(client):
     body = me.json()
     assert body["email"] == email
     assert body["is_verified"] is True
-    assert body["credits_balance"] == 1_000_000_000
+    # The default plan's one-time signup grant (100 ₽ -> 10 000 credits), not a
+    # hardcoded billion (Epic A5).
+    assert body["credits_balance"] == 10_000
 
 
 def test_projects_crud(client):
@@ -776,7 +778,9 @@ def test_project_start_is_limited_to_three_running_projects(client, db):
 
     limits = client.get("/api/v1/projects/runtime-limits", headers=headers)
     assert limits.status_code == 200
-    assert limits.json() == {"running": 3, "max_running": 3}
+    limits_body = limits.json()
+    assert limits_body["running"] == 3
+    assert limits_body["max_running"] == 3
 
     started = client.post(f"/api/v1/projects/{projects[3]['id']}/start", headers=headers)
     assert started.status_code == 409

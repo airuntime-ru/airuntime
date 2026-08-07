@@ -1,13 +1,14 @@
 import { LandingSection, SectionHeading } from "@/components/landing/section";
 import { FaqAccordion } from "@/components/landing/faq-accordion";
+import { Reveal } from "@/components/ui/reveal";
 
 export function FaqSection() {
   return (
-    <LandingSection id="faq" tone="muted" ariaLabelledBy="faq-title">
-      <SectionHeading title="Частые вопросы" id="faq-title" />
-      <div className="mx-auto mt-10 max-w-3xl">
+    <LandingSection id="faq" ariaLabelledBy="faq-title">
+      <SectionHeading eyebrow="FAQ" title="Частые вопросы" id="faq-title" align="center" />
+      <Reveal delay={80} className="mx-auto mt-12 max-w-3xl">
         <FaqAccordion />
-      </div>
+      </Reveal>
     </LandingSection>
   );
 }

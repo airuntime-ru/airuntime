@@ -1,66 +1,136 @@
-import { Bot, ExternalLink, Globe2 } from "lucide-react";
+import { Bot, Lock } from "lucide-react";
 
 import { LandingSection, SectionHeading } from "@/components/landing/section";
+import { Reveal } from "@/components/ui/reveal";
 import { resultCopy } from "@/lib/landing/content";
 
-const trustStrip = [
-  "Docker build ✓",
-  "HTTPS ✓",
-  "Git version ✓",
-  "Runtime live ✓",
+const trustStrip = ["Docker build", "HTTPS", "Версии в Git", "Runtime live"] as const;
+
+const services = [
+  { name: "Диагностика", price: "1 500 ₽" },
+  { name: "Замена масла", price: "900 ₽" },
+  { name: "Шиномонтаж", price: "2 400 ₽" },
 ] as const;
 
 export function ResultSection() {
   return (
     <LandingSection id="capabilities" ariaLabelledBy="result-title" tone="muted">
-      <SectionHeading title={resultCopy.title} description={resultCopy.subtitle} id="result-title" />
+      <SectionHeading
+        eyebrow="Результат"
+        title={resultCopy.title}
+        description={resultCopy.subtitle}
+        id="result-title"
+        align="center"
+      />
 
-      <div className="mt-10 overflow-hidden rounded-[1rem] border border-black/[0.08] bg-white">
-        <div className="grid lg:grid-cols-2">
-          <article className="border-b border-black/[0.06] p-5 sm:p-6 lg:border-b-0 lg:border-r">
-            <div className="flex items-center gap-2">
-              <Globe2 size={16} className="text-[var(--ar-sky)]" aria-hidden />
-              <h3 className="text-sm font-semibold text-[var(--ar-black)]">Публичный сайт</h3>
+      <div className="mt-14 grid gap-6 lg:grid-cols-2">
+        {/* Browser window */}
+        <Reveal>
+          <article className="sky-card sky-card-hover h-full rounded-[1.25rem]">
+            <div className="flex items-center gap-2.5 border-b border-black/[0.06] bg-[#fbfcfe] px-4 py-3">
+              <span className="flex gap-1.5" aria-hidden>
+                <span className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]" />
+                <span className="h-2.5 w-2.5 rounded-full bg-[#febc2e]" />
+                <span className="h-2.5 w-2.5 rounded-full bg-[#28c840]" />
+              </span>
+              <p className="ml-2 inline-flex min-w-0 items-center gap-1.5 rounded-full bg-black/[0.045] px-3 py-1">
+                <Lock size={11} className="shrink-0 text-emerald-600" aria-hidden />
+                <span className="truncate font-mono text-[0.72rem] text-[var(--ar-mist)]">
+                  autoservice.airuntime.ru
+                </span>
+              </p>
             </div>
-            <div className="mt-4 rounded-[0.75rem] bg-[#f4f7fb] p-4 sm:p-5">
-              <p className="font-mono text-xs text-[var(--ar-stone)]">autoservice.airuntime.ru</p>
-              <p className="mt-3 text-xl font-semibold tracking-[-0.02em] text-[var(--ar-black)]">
-                Запись в автосервис
+
+            <div className="p-5 sm:p-7">
+              <p className="text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-[var(--ar-sky)]">
+                Автосервис на Лесной
               </p>
-              <p className="mt-2 text-sm leading-relaxed text-[var(--ar-mist)]">
-                Услуга, дата и контакты — заявка сразу попадает в работу.
+              <p className="mt-2.5 text-[1.6rem] font-semibold leading-[1.15] tracking-[-0.03em] text-[var(--ar-black)] sm:text-3xl">
+                Запишитесь <span className="text-daylight">за минуту</span>
               </p>
-              <p className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-[var(--ar-sky)]">
-                Открыть сайт
-                <ExternalLink size={14} aria-hidden />
+
+              <ul className="mt-6 space-y-2">
+                {services.map((service) => (
+                  <li
+                    key={service.name}
+                    className="flex items-center justify-between rounded-[0.7rem] border border-black/[0.06] bg-white px-3.5 py-2.5"
+                  >
+                    <span className="text-sm text-[var(--ar-graphite)]">{service.name}</span>
+                    <span className="text-sm font-semibold tabular-nums text-[var(--ar-black)]">
+                      {service.price}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+
+              <p className="btn-glow mt-5 flex h-11 items-center justify-center rounded-[0.7rem] text-sm font-semibold">
+                Записаться
               </p>
             </div>
           </article>
+        </Reveal>
 
-          <article className="p-5 sm:p-6">
-            <div className="flex items-center gap-2">
-              <Bot size={16} className="text-[var(--ar-sky)]" aria-hidden />
-              <h3 className="text-sm font-semibold text-[var(--ar-black)]">Telegram-бот</h3>
+        {/* Telegram chat */}
+        <Reveal delay={110}>
+          <article className="sky-card sky-card-hover flex h-full flex-col rounded-[1.25rem]">
+            <div className="flex items-center gap-3 border-b border-black/[0.06] bg-[#fbfcfe] px-4 py-3">
+              <span
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-[image:var(--ar-accent-gradient)] text-white"
+                aria-hidden
+              >
+                <Bot size={17} />
+              </span>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-[var(--ar-black)]">
+                  @autoservice_bot
+                </p>
+                <p className="flex items-center gap-1.5 text-[0.72rem] text-emerald-600">
+                  <span
+                    className="live-dot h-1.5 w-1.5 rounded-full bg-emerald-500 text-emerald-500"
+                    aria-hidden
+                  />
+                  онлайн
+                </p>
+              </div>
             </div>
-            <div className="mt-4 space-y-2 rounded-[0.75rem] bg-[#f4f7fb] p-4">
-              <p className="max-w-[92%] rounded-lg rounded-bl-md bg-white px-3 py-2 text-sm text-[var(--ar-black)]">
+
+            <div className="flex flex-1 flex-col gap-2.5 bg-[linear-gradient(180deg,#f6f9ff,#eef4fd)] p-5 sm:p-7">
+              <p className="max-w-[88%] rounded-[1rem] rounded-bl-sm bg-white px-3.5 py-2.5 text-sm leading-relaxed text-[var(--ar-black)] shadow-[0_2px_8px_rgba(15,23,42,0.06)]">
                 Запишите меня на завтра, 11:00
               </p>
-              <p className="ml-auto max-w-[90%] rounded-lg rounded-br-md bg-[var(--ar-black)] px-3 py-2 text-sm text-white">
-                Готово. Заявка принята, пришлю напоминание.
+              <p className="ml-auto max-w-[88%] rounded-[1rem] rounded-br-sm bg-[linear-gradient(120deg,#2388ff,#6d6cff)] px-3.5 py-2.5 text-sm leading-relaxed text-white shadow-[0_10px_24px_-14px_rgba(45,130,255,0.9)]">
+                Готово ✅ Завтра в 11:00, замена масла. Напомню за час.
+              </p>
+              <p className="max-w-[88%] rounded-[1rem] rounded-bl-sm bg-white px-3.5 py-2.5 text-sm leading-relaxed text-[var(--ar-black)] shadow-[0_2px_8px_rgba(15,23,42,0.06)]">
+                А цену подскажешь?
+              </p>
+              <p className="ml-auto inline-flex w-fit items-center rounded-[1rem] rounded-br-sm bg-[linear-gradient(120deg,#2388ff,#6d6cff)] px-4 py-3">
+                <span className="ai-typing" aria-label="бот печатает">
+                  <span />
+                  <span />
+                  <span />
+                </span>
               </p>
             </div>
           </article>
-        </div>
-
-        <div className="flex flex-wrap gap-x-5 gap-y-2 border-t border-black/[0.06] bg-[#fafbfc] px-5 py-3.5 sm:px-6">
-          {trustStrip.map((item) => (
-            <span key={item} className="font-mono text-xs text-[var(--ar-graphite)] sm:text-[13px]">
-              {item}
-            </span>
-          ))}
-        </div>
+        </Reveal>
       </div>
+
+      <Reveal delay={180}>
+        <ul className="mt-10 flex flex-wrap justify-center gap-2.5">
+          {trustStrip.map((item) => (
+            <li
+              key={item}
+              className="inline-flex items-center gap-2 rounded-full border border-black/[0.07] bg-white px-4 py-2 text-[0.82rem] font-medium text-[var(--ar-graphite)]"
+            >
+              <span className="text-emerald-500" aria-hidden>
+                ✓
+              </span>
+              {item}
+            </li>
+          ))}
+        </ul>
+      </Reveal>
     </LandingSection>
   );
 }

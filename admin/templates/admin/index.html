@@ -13,6 +13,15 @@
 
 {% block content %}
 <div id="content-main">
+  <div class="module" style="margin-bottom:18px;">
+    <table>
+      <caption>Аналитика</caption>
+      <tr>
+        <th scope="row"><a href="{% url 'admin_analytics_dashboard' %}">Расходы, маржа и воронка</a></th>
+        <td>Расход на провайдера, списания с пользователей, BYOK, заявки на тарифы, burn free.</td>
+      </tr>
+    </table>
+  </div>
   {% include "admin/app_list.html" with app_list=app_list show_changelinks=True %}
 </div>
 {% endblock %}

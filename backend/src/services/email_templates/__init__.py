@@ -24,6 +24,9 @@ __all__ = [
     "invoice_created_email",
     "invoice_paid_email",
     "credits_topup_paid_email",
+    "plan_request_created_email",
+    "plan_request_approved_email",
+    "plan_request_rejected_email",
     "project_deployed_email",
     "deploy_failed_email",
     "list_template_previews",
@@ -237,6 +240,90 @@ def credits_topup_paid_email(
     return invoice_paid_email(credits=credits, amount_rub=amount_rub, new_balance=new_balance)
 
 
+def plan_request_created_email(
+    *,
+    plan_name: str,
+    price_rub: int,
+    budget_rub: int,
+    billing_url: str | None = None,
+) -> EmailContent:
+    rows = [
+        {"label": "Тариф", "value": plan_name},
+        {"label": "Стоимость", "value": f"{price_rub} ₽/мес"},
+        {"label": "Бюджет в тарифе", "value": f"{budget_rub} ₽/мес"},
+        {"label": "Статус", "value": "На рассмотрении"},
+    ]
+    return _content(
+        "plan_request_created",
+        subject="Заявка на смену тарифа принята",
+        preheader=f"Заявка на тариф «{plan_name}» принята и ожидает подтверждения.",
+        title="Заявка принята",
+        plan_name=plan_name,
+        price_rub=price_rub,
+        budget_rub=budget_rub,
+        summary_rows=rows,
+        billing_url=billing_url,
+        reason="Вы получили это письмо, потому что подали заявку на смену тарифа.",
+    )
+
+
+def plan_request_approved_email(
+    *,
+    plan_name: str,
+    budget_rub: int,
+    credits: int,
+    period_end: datetime | None = None,
+    billing_url: str | None = None,
+) -> EmailContent:
+    credits_label = _fmt_int(credits)
+    period_end_label = period_end.strftime("%d.%m.%Y") if period_end else None
+    rows = [
+        {"label": "Тариф", "value": plan_name},
+        {"label": "Начислено", "value": f"{budget_rub} ₽ ({credits_label} кредитов)"},
+    ]
+    if period_end_label:
+        rows.append({"label": "Период до", "value": period_end_label})
+    return _content(
+        "plan_request_approved",
+        subject=f"Тариф «{plan_name}» подключён",
+        preheader=f"Тариф «{plan_name}» подключён. Бюджет {budget_rub} ₽ уже на балансе.",
+        title="Тариф подключён",
+        plan_name=plan_name,
+        budget_rub=budget_rub,
+        credits=credits,
+        credits_label=credits_label,
+        period_end_label=period_end_label,
+        summary_rows=rows,
+        billing_url=billing_url,
+        reason="Вы получили это письмо, потому что ваша заявка на смену тарифа подтверждена.",
+    )
+
+
+def plan_request_rejected_email(
+    *,
+    plan_name: str,
+    admin_note: str | None = None,
+    billing_url: str | None = None,
+) -> EmailContent:
+    rows = [
+        {"label": "Тариф", "value": plan_name},
+        {"label": "Статус", "value": "Отклонена"},
+    ]
+    if admin_note:
+        rows.append({"label": "Причина", "value": admin_note})
+    return _content(
+        "plan_request_rejected",
+        subject="Заявка на смену тарифа отклонена",
+        preheader=f"Заявка на тариф «{plan_name}» отклонена.",
+        title="Заявка отклонена",
+        plan_name=plan_name,
+        admin_note=admin_note,
+        summary_rows=rows,
+        billing_url=billing_url,
+        reason="Вы получили это письмо, потому что подавали заявку на смену тарифа.",
+    )
+
+
 def project_deployed_email(
     *,
     project_name: str,
@@ -323,6 +410,33 @@ def list_template_previews(*, use_cid: bool = False) -> list[dict[str, object]]:
         (
             "period_renewed",
             period_renewed_email(plan_name="Starter", credits=2000, period_end=now),
+        ),
+        (
+            "plan_request_created",
+            plan_request_created_email(
+                plan_name="Про",
+                price_rub=990,
+                budget_rub=700,
+                billing_url="https://airuntime.ru/app/profile",
+            ),
+        ),
+        (
+            "plan_request_approved",
+            plan_request_approved_email(
+                plan_name="Про",
+                budget_rub=700,
+                credits=70_000,
+                period_end=now,
+                billing_url="https://airuntime.ru/app/profile",
+            ),
+        ),
+        (
+            "plan_request_rejected",
+            plan_request_rejected_email(
+                plan_name="Про",
+                admin_note="Оплата не поступила",
+                billing_url="https://airuntime.ru/app/profile",
+            ),
         ),
         (
             "invoice_created",

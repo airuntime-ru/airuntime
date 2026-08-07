@@ -15,6 +15,30 @@ from src.core.config import CURATED_TOP_MODELS, settings
 _MILLION = Decimal(1_000_000)
 _USD_MICRO = Decimal(1_000_000)
 
+# Platform-key usage carries a margin on top of the provider's list price. Read from
+# SystemSetting so it can be tuned without a deploy; the value actually applied is snapshotted
+# onto every ledger row, so changing it never rewrites history.
+DEFAULT_MARKUP_PERCENT = 10
+_MARKUP_SETTING_KEY = "billing_markup_percent"
+
+
+def platform_markup_percent() -> int:
+    """Current markup for platform-key usage, in percent. Falls back to the default."""
+    from src.services.system_settings import get_system_setting_number
+
+    try:
+        value = get_system_setting_number(_MARKUP_SETTING_KEY)
+    except Exception:
+        # Never let an unreachable admin DB break billing - charge the documented default.
+        return DEFAULT_MARKUP_PERCENT
+    if value is None or value < 0:
+        return DEFAULT_MARKUP_PERCENT
+    return int(value)
+
+
+def _apply_markup(amount: Decimal, markup_percent: int) -> Decimal:
+    return amount * (Decimal(100) + Decimal(markup_percent)) / Decimal(100)
+
 
 @dataclass(frozen=True)
 class ModelPrice:
@@ -38,6 +62,8 @@ class ModelUsageCost:
     cached_input_tokens: int
     cache_write_input_tokens: int
     output_tokens: int
+    # Markup actually applied to `credits`. 0 for BYOK, where the user pays the provider.
+    markup_percent: int = 0
 
     @property
     def provider_cost_usd(self) -> Decimal:
@@ -124,8 +150,12 @@ def public_model_options(provider: str) -> list[dict[str, Any]]:
                 }
             )
             continue
-        credit_factor = Decimal(settings.billing_usd_to_rub) * Decimal(
-            settings.billing_credits_per_rub
+        # Catalog prices are shown with the markup already applied, so the number a user sees
+        # matches what actually gets deducted.
+        markup = platform_markup_percent()
+        credit_factor = _apply_markup(
+            Decimal(settings.billing_usd_to_rub) * Decimal(settings.billing_credits_per_rub),
+            markup,
         )
         options.append(
             {
@@ -156,11 +186,19 @@ def estimate_model_usage_cost(
     provider: str,
     model: str,
     usage: dict[str, Any] | None,
+    markup_percent: int | None = None,
 ) -> ModelUsageCost | None:
-    """Price detailed provider usage, including cache reads and writes, for a known model."""
+    """Price detailed provider usage, including cache reads and writes, for a known model.
+
+    `markup_percent` defaults to the platform margin. Pass 0 for BYOK runs, where the provider
+    bills the user directly and we only record the usage for analytics.
+    """
     price = get_model_price(provider, model)
     if price is None or not usage:
         return None
+    effective_markup = (
+        platform_markup_percent() if markup_percent is None else max(0, int(markup_percent))
+    )
 
     input_tokens = _usage_int(usage, "input_tokens", "prompt_tokens")
     output_tokens = _usage_int(usage, "output_tokens", "completion_tokens")
@@ -185,13 +223,15 @@ def estimate_model_usage_cost(
         + Decimal(cache_write) * price.cache_write_usd_per_million
         + Decimal(output_tokens) * price.output_usd_per_million
     ) / _MILLION
+    charged_usd = _apply_markup(cost_usd, effective_markup)
     credits = int(
         (
-            cost_usd
+            charged_usd
             * Decimal(settings.billing_usd_to_rub)
             * Decimal(settings.billing_credits_per_rub)
         ).to_integral_value(rounding=ROUND_CEILING)
     )
+    # Provider cost stays the raw list price - margin analytics needs cost and charge apart.
     usd_micros = int((cost_usd * _USD_MICRO).to_integral_value(rounding=ROUND_CEILING))
     return ModelUsageCost(
         credits=max(1, credits),
@@ -200,4 +240,5 @@ def estimate_model_usage_cost(
         cached_input_tokens=cached_input,
         cache_write_input_tokens=cache_write,
         output_tokens=output_tokens,
+        markup_percent=effective_markup,
     )

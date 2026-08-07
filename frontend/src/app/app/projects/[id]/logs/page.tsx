@@ -78,7 +78,7 @@ function LogBlock({
           <Maximize2 size={14} aria-hidden />
         </button>
       </div>
-      <pre className="max-h-[42vh] overflow-auto whitespace-pre-wrap bg-[#f8f9fb] p-4 font-mono text-xs leading-relaxed text-[var(--ar-graphite)]">
+      <pre className="max-h-[42vh] overflow-auto whitespace-pre-wrap scrollbar-airy bg-[#0d1117] p-4 font-mono text-xs leading-relaxed text-[#c9d1d9]">
         {preview}
       </pre>
     </section>
@@ -275,6 +275,7 @@ export default function ProjectLogsPage() {
       ) : (
         <Card hover={false}>
           <EmptyState
+            className="border-0 bg-transparent shadow-none"
             title="Логов пока нет"
             description="Лог сборки смотрите во вкладке «Деплои». Здесь — события платформы и runtime контейнера."
           />
@@ -287,7 +288,7 @@ export default function ProjectLogsPage() {
         title={expanded ? `Логи: ${expanded.title}` : ""}
         className="max-w-4xl"
       >
-        <pre className="max-h-[75vh] overflow-auto whitespace-pre-wrap bg-[#f8f9fb] p-4 font-mono text-xs leading-relaxed text-[var(--ar-graphite)]">
+        <pre className="max-h-[75vh] overflow-auto whitespace-pre-wrap scrollbar-airy bg-[#0d1117] p-4 font-mono text-xs leading-relaxed text-[#c9d1d9]">
           {expanded?.value}
         </pre>
       </Modal>

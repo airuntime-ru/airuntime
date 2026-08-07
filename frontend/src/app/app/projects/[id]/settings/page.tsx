@@ -11,6 +11,8 @@ import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { PageLoader } from "@/components/ui/loader";
 import { Textarea } from "@/components/ui/textarea";
+import { CustomDomainSection } from "@/components/app/custom-domain-section";
+import { projectTypeLabel } from "@/lib/project-status";
 import {
   deleteProject,
   getProject,
@@ -322,13 +324,13 @@ export default function ProjectSettingsPage() {
     <div className="space-y-8">
       <nav
         aria-label="Разделы настроек"
-        className="flex gap-1 overflow-x-auto border-b border-black/8 pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {nav.map((item) => (
           <a
             key={item.href}
             href={item.href}
-            className="shrink-0 rounded-[0.5rem] px-3 py-2 text-sm font-medium text-[var(--ar-mist)] hover:bg-black/[0.04] hover:text-[var(--ar-black)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ar-sky)]/35"
+            className="shrink-0 rounded-full border border-black/[0.07] bg-white px-3.5 py-1.5 text-sm font-medium text-[var(--ar-mist)] transition-colors hover:border-[var(--ar-sky)]/35 hover:text-[var(--ar-black)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ar-sky)]/35"
           >
             {item.label}
           </a>
@@ -347,7 +349,7 @@ export default function ProjectSettingsPage() {
           </div>
           <div>
             <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--ar-stone)]">Тип</p>
-            <p className="mt-1 text-sm font-medium text-[var(--ar-black)]">{project.type}</p>
+            <p className="mt-1 text-sm font-medium text-[var(--ar-black)]">{projectTypeLabel(project.type)}</p>
           </div>
           {project.description ? (
             <div className="sm:col-span-2">
@@ -403,7 +405,7 @@ export default function ProjectSettingsPage() {
       <SettingsSection
         id="publish"
         title="Домен и публикация"
-        description="Публичный адрес сайта на инфраструктуре AIRuntime."
+        description="Адрес на поддомене AIRuntime или ваш собственный домен."
       >
         {showSubdomainCard ? (
           <Card hover={false}>
@@ -452,8 +454,7 @@ export default function ProjectSettingsPage() {
                   <span className="font-medium text-[var(--ar-black)]">{previewUrl}</span>
                 </p>
                 <p className="text-xs text-[var(--ar-stone)]">
-                  Поддомен проверяется на уникальность. Собственный домен в текущей версии не
-                  подключается.
+                  Поддомен проверяется на уникальность. Собственный домен подключается ниже.
                 </p>
                 {project.deployment_url ? (
                   <p className="text-xs leading-6 text-[var(--ar-stone)]">
@@ -487,6 +488,8 @@ export default function ProjectSettingsPage() {
             </p>
           </Card>
         )}
+
+        <CustomDomainSection projectId={params.id} />
       </SettingsSection>
 
       <SettingsSection id="danger" title="Опасная зона" description="Необратимые действия с проектом.">
