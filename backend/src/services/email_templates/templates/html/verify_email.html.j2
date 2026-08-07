@@ -1,8 +1,9 @@
 {% extends "base.html.j2" %}
-{% from "macros.html.j2" import button, security_notice %}
+{% from "macros.html.j2" import button, security_notice, url_pill %}
 {% block body %}
-<p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.55;color:{{ colors.muted }};">Остался один шаг — подтвердите адрес почты, чтобы активировать аккаунт.</p>
+<p style="margin:0;font-family:{{ font_stack }};font-size:16px;line-height:1.55;color:{{ colors.muted }};">Остался один шаг — подтвердите адрес почты, чтобы активировать аккаунт.</p>
 {{ button("Подтвердить почту", verify_url) }}
-<p style="margin:8px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.5;color:{{ colors.muted }};word-break:break-all;">Или откройте ссылку:<br /><span style="color:{{ colors.ink }};">{{ verify_url }}</span></p>
+<p style="margin:14px 0 0;font-family:{{ font_stack }};font-size:13px;line-height:1.5;color:{{ colors.muted }};">Или откройте ссылку:</p>
+{{ url_pill(verify_url) }}
 {{ security_notice("Ссылка действует " ~ link_ttl ~ ". Если вы не регистрировались, просто проигнорируйте письмо.") }}
 {% endblock %}

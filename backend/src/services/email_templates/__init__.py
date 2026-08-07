@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 
+from src.core.config import settings
 from src.services.email_templates.render import render_email
 
 __all__ = [
@@ -51,6 +53,24 @@ def _fmt_int(value: int) -> str:
     return f"{value:,}".replace(",", " ")
 
 
+def _fmt_rub(credits: int) -> str:
+    """Rubles are the unit the cabinet shows, so balance emails lead with them.
+
+    Mirrors ``billing.usage_credits_to_rub`` without importing it - ``services.billing``
+    imports this module, so the dependency only goes one way.
+    """
+    value = Decimal(abs(credits)) / Decimal(settings.billing_credits_per_rub)
+    quantized = value.quantize(Decimal("0.01"))
+    whole = quantized.to_integral_value()
+    text = _fmt_int(int(whole)) if quantized == whole else f"{quantized:.2f}".replace(".", ",")
+    return f"{text} ₽"
+
+
+def _fmt_balance(credits: int) -> str:
+    """`12 ₽ (1 200 кредитов)` - the money first, the internal unit in brackets."""
+    return f"{_fmt_rub(credits)} ({_fmt_int(credits)} кредитов)"
+
+
 def login_code_email(*, code: str, minutes: int) -> EmailContent:
     return _content(
         "login_code",
@@ -89,14 +109,17 @@ def password_reset_email(*, reset_url: str) -> EmailContent:
 
 def low_credits_email(*, credits_balance: int, billing_url: str | None = None) -> EmailContent:
     label = _fmt_int(credits_balance)
+    rub_label = _fmt_rub(credits_balance)
     return _content(
         "low_credits",
-        subject="Кредиты почти закончились",
-        preheader=f"На балансе осталось {label} кредитов.",
-        title="Низкий баланс кредитов",
+        subject="Баланс почти закончился",
+        preheader=f"На балансе осталось {rub_label}.",
+        title="Низкий баланс",
         credits_balance=credits_balance,
         credits_balance_label=label,
-        summary_rows=[{"label": "Текущий остаток", "value": f"{label} кредитов"}],
+        balance_label=_fmt_balance(credits_balance),
+        rub_balance_label=rub_label,
+        summary_rows=[{"label": "Текущий остаток", "value": _fmt_balance(credits_balance)}],
         billing_url=billing_url,
         reason="Вы получили это письмо, потому что баланс кредитов опустился ниже порога.",
     )
@@ -105,11 +128,11 @@ def low_credits_email(*, credits_balance: int, billing_url: str | None = None) -
 def credits_exhausted_email(*, billing_url: str | None = None) -> EmailContent:
     return _content(
         "credits_exhausted",
-        subject="Кредиты закончились",
-        preheader="Баланс кредитов исчерпан — пополните его, чтобы продолжить работу с агентом.",
-        title="Кредиты закончились",
+        subject="Баланс закончился",
+        preheader="Баланс исчерпан — пополните его, чтобы продолжить работу с агентом.",
+        title="Баланс закончился",
         billing_url=billing_url,
-        reason="Вы получили это письмо, потому что баланс кредитов достиг нуля.",
+        reason="Вы получили это письмо, потому что баланс достиг нуля.",
     )
 
 
@@ -125,7 +148,7 @@ def period_ending_email(
     if plan_name:
         rows.append({"label": "Тариф", "value": plan_name})
     if credits_balance is not None:
-        rows.append({"label": "Остаток кредитов", "value": _fmt_int(credits_balance)})
+        rows.append({"label": "Текущий остаток", "value": _fmt_balance(credits_balance)})
     return _content(
         "period_ending",
         subject="Тарифный период скоро закончится",
@@ -134,6 +157,7 @@ def period_ending_email(
         period_end_label=date_str,
         plan_name=plan_name,
         credits_balance=credits_balance,
+        balance_label=_fmt_balance(credits_balance) if credits_balance is not None else None,
         summary_rows=rows,
         billing_url=billing_url,
         reason="Вы получили это письмо, потому что у вашего тарифа скоро закончится период.",
@@ -150,7 +174,7 @@ def period_renewed_email(
     period_end_label = period_end.strftime("%d.%m.%Y") if period_end else None
     rows = [
         {"label": "Тариф", "value": plan_name},
-        {"label": "Начислено", "value": f"{credits_label} кредитов"},
+        {"label": "Начислено", "value": _fmt_balance(credits)},
     ]
     if period_end_label:
         rows.append({"label": "Новый период до", "value": period_end_label})
@@ -162,6 +186,7 @@ def period_renewed_email(
         plan_name=plan_name,
         credits=credits,
         credits_label=credits_label,
+        granted_label=_fmt_balance(credits),
         period_end_label=period_end_label,
         summary_rows=rows,
         reason="Вы получили это письмо, потому что тарифный период был автоматически обновлён.",
@@ -182,7 +207,7 @@ def invoice_created_email(
     rows = [
         {"label": "Номер счёта", "value": short_id},
         {"label": "Сумма", "value": f"{amount_rub} ₽"},
-        {"label": "Кредиты", "value": credits_label},
+        {"label": "К зачислению", "value": f"{credits_label} кредитов"},
     ]
     if created_label:
         rows.append({"label": "Создан", "value": created_label})
@@ -210,10 +235,10 @@ def invoice_paid_email(
     billing_url: str | None = None,
 ) -> EmailContent:
     credits_label = _fmt_int(credits)
-    new_balance_label = _fmt_int(new_balance) if new_balance is not None else None
+    new_balance_label = _fmt_balance(new_balance) if new_balance is not None else None
     rows = [
-        {"label": "Сумма", "value": f"{amount_rub} ₽"},
-        {"label": "Начислено", "value": f"{credits_label} кредитов"},
+        {"label": "Оплачено", "value": f"{amount_rub} ₽"},
+        {"label": "Зачислено на баланс", "value": _fmt_balance(credits)},
     ]
     if new_balance_label:
         rows.append({"label": "Новый баланс", "value": new_balance_label})
@@ -224,6 +249,7 @@ def invoice_paid_email(
         title="Счёт оплачен",
         credits=credits,
         credits_label=credits_label,
+        granted_label=_fmt_balance(credits),
         amount_rub=amount_rub,
         new_balance=new_balance,
         new_balance_label=new_balance_label,
@@ -310,7 +336,7 @@ def plan_request_rejected_email(
         {"label": "Статус", "value": "Отклонена"},
     ]
     if admin_note:
-        rows.append({"label": "Причина", "value": admin_note})
+        rows.append({"label": "Причина", "value": admin_note, "block": True})
     return _content(
         "plan_request_rejected",
         subject="Заявка на смену тарифа отклонена",
@@ -366,7 +392,7 @@ def deploy_failed_email(
         summary=safe_summary,
         summary_rows=[
             {"label": "Время", "value": failed_label},
-            {"label": "Что произошло", "value": safe_summary},
+            {"label": "Что произошло", "value": safe_summary, "block": True},
         ],
         reason="Вы получили это письмо, потому что деплой вашего проекта завершился с ошибкой.",
     )

@@ -32,13 +32,15 @@ def test_login_code_email_contains_branding():
     assert 'alt="AIRuntime"' in content.html
     assert 'content="light only"' in content.html
     assert "color-scheme: light only" in content.html
-    assert 'class="email-header"' in content.html
+    assert 'class="email-masthead"' in content.html
     assert 'bgcolor="#FFFFFF"' in content.html
-    assert "email-logo-plate" in content.html
+    # Deep-space masthead: the gradient is progressive enhancement, the bgcolor is
+    # what Outlook actually paints, so the solid twin has to be there.
+    assert 'bgcolor="#070C17"' in content.html
     assert "Код для входа" in content.html
     assert "10 минут" in content.html
     assert "preheader" not in content.html.lower() or "482913" in content.html
-    assert "letter-spacing:8px" in content.html
+    assert "letter-spacing:10px" in content.html
     assert "Если вы не запрашивали вход" in content.html
 
 
@@ -95,6 +97,26 @@ def test_billing_and_deploy_templates_render():
         assert "AIRuntime" in content.html
         assert "<script>" not in content.html
         assert "table" in content.html
+
+
+def test_balance_emails_lead_with_rubles():
+    """The cabinet shows rubles, so the letters must not speak only in credits."""
+    low = low_credits_email(credits_balance=120, billing_url="https://airuntime.ru/app/profile")
+    assert "1,20 ₽ (120 кредитов)" in low.html
+    assert "1,20 ₽ (120 кредитов)" in low.plain
+
+    paid = invoice_paid_email(credits=1000, amount_rub=10, new_balance=1500)
+    assert "10 ₽ (1 000 кредитов)" in paid.html
+    assert "15 ₽ (1 500 кредитов)" in paid.html
+    assert "15 ₽ (1 500 кредитов)" in paid.plain
+
+    renewed = period_renewed_email(plan_name="Про", credits=70_000)
+    assert "700 ₽ (70 000 кредитов)" in renewed.html
+
+    # An optional balance stays optional - no "None ₽" leaking into the letter.
+    ending = period_ending_email(period_end=datetime(2026, 7, 24, 12, 0))
+    assert "None" not in ending.plain
+    assert "₽" not in ending.plain
 
 
 def test_all_preview_templates_have_html_and_text():
