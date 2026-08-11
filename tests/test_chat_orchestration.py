@@ -219,6 +219,22 @@ class TestOrchestrationEnabledHappyPath:
         )
 
 
+class TestChatDeploySuccessGate:
+    def test_completed_deploy_counts_even_if_project_still_deploying(self) -> None:
+        from types import SimpleNamespace
+
+        deployment = SimpleNamespace(status="completed")
+        project = SimpleNamespace(status="deploying", deployment_url="https://x.airuntime.ru")
+        assert chat_router._chat_deploy_succeeded(deployment, project)
+
+    def test_failed_deploy_never_counts(self) -> None:
+        from types import SimpleNamespace
+
+        deployment = SimpleNamespace(status="failed")
+        project = SimpleNamespace(status="live", deployment_url="https://x.airuntime.ru")
+        assert not chat_router._chat_deploy_succeeded(deployment, project)
+
+
 class TestOrchestrationWaitingForSecret:
     def test_stream_surfaces_the_requested_secret_and_stops_cleanly(
         self, client, db: Session, monkeypatch: pytest.MonkeyPatch

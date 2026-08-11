@@ -396,6 +396,99 @@ def _queue_deployment_or_notify_limit(
         return None, str(exc)
 
 
+async def _stream_chat_deploy(
+    db: Session,
+    *,
+    project: Project,
+    has_website: bool,
+    has_bot: bool,
+    append_visible,
+):
+    """Queue + wait for deploy using the same create_deployment_for_project as the Deployments tab."""
+    deployment, limit_message = _queue_deployment_or_notify_limit(db, project)
+    db.commit()
+    if limit_message:
+        yield _sse_status("limit", limit_message, "error")
+        yield append_visible(f"\n\n{limit_message}")
+        return
+    if deployment is None:
+        yield append_visible(_launch_failure_message(None, project))
+        yield _sse_status("error", "Запуск не удался", "error")
+        return
+
+    yield _sse_status("deploy", "Ставлю проект в очередь запуска", "running")
+    deadline = time.monotonic() + _DEPLOY_WAIT_SECONDS
+    last_label = ""
+    watched_id = deployment.id
+    deploy_ping = Ticker(15.0)
+    while time.monotonic() < deadline:
+        await asyncio.sleep(_DEPLOY_POLL_SECONDS)
+        if deploy_ping.due():
+            yield SSE_PING
+        db.expire_all()
+        deployment = db.get(Deployment, watched_id)
+        if deployment is None:
+            break
+        label = _deploy_status_label(deployment.status)
+        if label != last_label:
+            state = (
+                "done"
+                if deployment.status == "completed"
+                else "error"
+                if deployment.status == "failed"
+                else "running"
+            )
+            yield _sse_status("deploy", label, state)
+            last_label = label
+        if deployment.status in _DEPLOYMENT_TERMINAL:
+            break
+
+    if deployment is not None and deployment.status == "failed":
+        async for item in _follow_repair_redeploy(
+            db,
+            project=project,
+            failed_deployment=deployment,
+            deadline=deadline,
+            last_label=last_label,
+        ):
+            if isinstance(item, tuple):
+                _, deployment, last_label = item
+            else:
+                yield item
+
+    # Worker auto-check can flip project live→deploying right after a completed deploy.
+    if deployment is not None and deployment.status == "completed":
+        await asyncio.sleep(_DEPLOY_SETTLE_SECONDS)
+        db.expire_all()
+        db.refresh(project)
+        deployment = db.get(Deployment, deployment.id) or deployment
+        if project.status == "deploying":
+            async for item in _follow_repair_redeploy(
+                db,
+                project=project,
+                failed_deployment=deployment,
+                deadline=deadline,
+                last_label=last_label,
+            ):
+                if isinstance(item, tuple):
+                    _, deployment, last_label = item
+                else:
+                    yield item
+            db.expire_all()
+            db.refresh(project)
+
+    db.expire_all()
+    db.refresh(project)
+    if _chat_deploy_succeeded(deployment, project):
+        yield append_visible(
+            _launch_success_message(project, has_website=has_website, has_bot=has_bot)
+        )
+        yield _sse_status("done", "Проект запущен и работает", "done")
+    else:
+        yield append_visible(_launch_failure_message(deployment, project))
+        yield _sse_status("error", "Запуск не удался", "error")
+
+
 def _deploy_status_label(deployment_status: str) -> str:
     if deployment_status == "queued":
         return "В очереди на запуск"
@@ -440,6 +533,36 @@ def _launch_failure_message(deployment: Deployment | None, project: Project) -> 
     if detail:
         return f"\n\nНе удалось запустить проект: {detail}"
     return "\n\nНе удалось запустить проект. Подробности — во вкладках «Деплои» и «Логи»."
+
+
+def _workspace_is_deployable(project: Project, artifact_path: Path) -> bool:
+    """Same bar as Deployments tab: a Dockerfile is enough to queue a build from disk."""
+    return (artifact_path / "Dockerfile").exists() or workspace_has_agent_code(
+        artifact_path, project
+    )
+
+
+def _commit_workspace_snapshot(project: Project, artifact_path: Path, message: str) -> None:
+    try:
+        ensure_dockerfile(project, artifact_path)
+        commit_snapshot(artifact_path, message=message)
+    except ProjectGitError as git_exc:
+        logger.warning("Snapshot commit failed for project %s: %s", project.id, git_exc)
+    except Exception as exc:  # noqa: BLE001 - never block chat on snapshot plumbing
+        logger.warning("Snapshot prepare failed for project %s: %s", project.id, exc)
+
+
+def _chat_deploy_succeeded(deployment: Deployment | None, project: Project) -> bool:
+    """Chat used to require project.status==live, which races with the worker auto-check that
+    briefly flips live→deploying after a successful container start — users saw a hard error
+    even though Deployments already showed success."""
+    if deployment is None:
+        return False
+    if deployment.status != "completed":
+        return False
+    if project.status in {"live", "deploying", "ready"}:
+        return True
+    return bool(project.deployment_url)
 
 
 def _message_response(db: Session, message: Message) -> MessageResponse:
@@ -645,14 +768,12 @@ async def _orchestration_event_source(
     run = OrchestrationRunRepository(db).get(run_id)
 
     if terminal_event_type == "run_completed":
-        # Last-resort backstop before deploy, ported from the pre-engine event_source() path
-        # rather than trusted to always be redundant with per-task validation: a heuristic_simple
-        # single-task plan may never route through a QAReviewer/project_structure_review step,
-        # so this still catches a missing entrypoint file directly against the same
-        # WEBSITE_REQUIRED/TELEGRAM_REQUIRED contract deploy would enforce anyway.
+        # Deployability matches the Deployments tab (Dockerfile / agent code on disk).
+        # ensure_required_files is advisory here — a hard stop made chat refuse to queue while
+        # the same tree deployed fine from «Деплои».
         artifact_path = project_dir(project.id)
         yield _sse_status("verify", "Проверяю готовые файлы проекта")
-        files_ok = True
+        files_ok = _workspace_is_deployable(project, artifact_path)
         try:
             if reconcile_type_with_workspace(
                 project, artifact_path, has_bot_secret=bool(_telegram_token(db, project))
@@ -662,14 +783,13 @@ async def _orchestration_event_source(
                 db.refresh(project)
             ensure_required_files(project, artifact_path)
         except ArtifactError as verify_exc:
-            if workspace_has_agent_code(artifact_path, project):
+            if files_ok:
                 ensure_dockerfile(project, artifact_path)
                 yield append_visible(
-                    f"\n\nПроверка entrypoint неполная ({verify_exc}), но код агента сохранён. "
-                    "Если бот ведёт себя не так - напишите в чат, что поправить."
+                    f"\n\nПроверка entrypoint неполная ({verify_exc}), но код агента сохранён — "
+                    "ставлю в очередь запуска как во вкладке «Деплои»."
                 )
             else:
-                files_ok = False
                 yield _sse_status("verify", "Не хватает файлов проекта", "error")
                 yield append_visible(
                     f"\n\nАгент не создал обязательные файлы ({verify_exc}). "
@@ -681,10 +801,9 @@ async def _orchestration_event_source(
             if thin_arch:
                 yield _sse_status("verify", "Архитектура выглядит слишком тонкой", "error")
                 yield append_visible(f"\n\n{thin_arch}")
-            try:
-                commit_snapshot(artifact_path, message=f"{project.name}: {original_request}")
-            except ProjectGitError as git_exc:
-                logger.warning("Snapshot commit failed for project %s: %s", project.id, git_exc)
+            _commit_workspace_snapshot(
+                project, artifact_path, message=f"{project.name}: {original_request}"
+            )
 
             project.status = "ready"
             db.add(project)
@@ -715,82 +834,63 @@ async def _orchestration_event_source(
                 yield _sse_status("needs_configuration", "Нужен TELEGRAM_BOT_TOKEN", "error")
                 yield append_visible(f"\n\n{token_note}")
             elif has_website or has_bot:
-                deployment, limit_message = _queue_deployment_or_notify_limit(db, project)
-                db.commit()
-                if limit_message:
-                    yield _sse_status("limit", limit_message, "error")
-                    yield append_visible(f"\n\n{limit_message}")
-                elif deployment is not None:
-                    yield _sse_status("deploy", "Ставлю проект в очередь запуска", "running")
-                    deadline = time.monotonic() + _DEPLOY_WAIT_SECONDS
-                    last_label = ""
-                    watched_id = deployment.id
-                    deploy_ping = Ticker(15.0)
-                    while time.monotonic() < deadline:
-                        await asyncio.sleep(_DEPLOY_POLL_SECONDS)
-                        if deploy_ping.due():
-                            yield SSE_PING
-                        db.expire_all()
-                        deployment = db.get(Deployment, watched_id)
-                        if deployment is None:
-                            break
-                        label = _deploy_status_label(deployment.status)
-                        if label != last_label:
-                            state = (
-                                "done"
-                                if deployment.status == "completed"
-                                else "error"
-                                if deployment.status == "failed"
-                                else "running"
-                            )
-                            yield _sse_status("deploy", label, state)
-                            last_label = label
-                        if deployment.status in _DEPLOYMENT_TERMINAL:
-                            break
-
-                    if deployment is not None and deployment.status == "failed":
-                        async for item in _follow_repair_redeploy(
-                            db,
-                            project=project,
-                            failed_deployment=deployment,
-                            deadline=deadline,
-                            last_label=last_label,
-                        ):
-                            if isinstance(item, tuple):
-                                _, deployment, last_label = item
-                            else:
-                                yield item
-
-                    db.expire_all()
-                    db.refresh(project)
-                    if (
-                        deployment is not None
-                        and deployment.status == "completed"
-                        and project.status == "live"
-                    ):
-                        yield append_visible(
-                            _launch_success_message(
-                                project, has_website=has_website, has_bot=has_bot
-                            )
-                        )
-                        yield _sse_status("done", "Проект запущен и работает", "done")
-                    else:
-                        yield append_visible(_launch_failure_message(deployment, project))
-                        yield _sse_status("error", "Запуск не удался", "error")
+                async for item in _stream_chat_deploy(
+                    db,
+                    project=project,
+                    has_website=has_website,
+                    has_bot=has_bot,
+                    append_visible=append_visible,
+                ):
+                    yield item
             else:
                 yield _sse_status("done", "Готово", "done")
     elif terminal_event_type == "run_failed":
         detail = (run.error_message or "").strip() if run else ""
         friendly = _friendly_run_failure(detail)
         artifact_path = project_dir(project.id)
-        has_code = workspace_has_agent_code(artifact_path, project)
-        if has_code and detail in {"replan limit reached", "replan_limit_reached"}:
-            yield append_visible(
-                "\n\nНе удалось довести автопроверку до конца после нескольких попыток. "
-                "Файлы проекта уже есть — откройте «Деплои» и нажмите «Задеплоить», "
-                "или напишите в чат, что именно поправить."
+        has_code = _workspace_is_deployable(project, artifact_path)
+        if has_code:
+            # Persist whatever is on disk so «Файлы»/Versions light up even when auto-QA failed.
+            _commit_workspace_snapshot(
+                project,
+                artifact_path,
+                message=f"{project.name}: snapshot after failed run",
             )
-            yield _sse_status("error", "Автопроверка не завершилась", "error")
+            has_website = project.type in ("website", "mixed")
+            has_bot = project.type in ("telegram_bot", "mixed")
+            if reconcile_type_with_workspace(
+                project, artifact_path, has_bot_secret=bool(_telegram_token(db, project))
+            ):
+                has_website = project.type in ("website", "mixed")
+                has_bot = project.type in ("telegram_bot", "mixed")
+                db.add(project)
+            if has_bot and not _telegram_token(db, project):
+                ensure_secret_placeholder(
+                    db, project, "TELEGRAM_BOT_TOKEN", "Нужен для запуска Telegram-бота"
+                )
+                project.status = "needs_configuration"
+                db.add(project)
+                db.commit()
+                yield append_visible(
+                    f"\n\n{friendly}\n\nФайлы сохранены. Для запуска бота добавьте TELEGRAM_BOT_TOKEN "
+                    "в настройках."
+                )
+                yield _sse_status("needs_configuration", "Нужен TELEGRAM_BOT_TOKEN", "error")
+            elif has_website or has_bot:
+                yield append_visible(
+                    f"\n\n{friendly}\n\nФайлы уже на диске — запускаю деплой, как во вкладке «Деплои»."
+                )
+                async for item in _stream_chat_deploy(
+                    db,
+                    project=project,
+                    has_website=has_website,
+                    has_bot=has_bot,
+                    append_visible=append_visible,
+                ):
+                    yield item
+            else:
+                yield append_visible(f"\n\n{friendly}")
+                yield _sse_status("error", "Не удалось выполнить запрос", "error")
         else:
             yield append_visible(f"\n\n{friendly}")
             yield _sse_status("error", "Не удалось выполнить запрос", "error")

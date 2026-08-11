@@ -272,13 +272,11 @@ def _select_workspace_mode(
     policy = get_role_policy(role)
     if policy.write_scope_ceiling == WriteScope.NONE:
         return "parallel_read_only"
-    # Worktree isolation only pays for itself (a real git worktree + branch + merge step) when
-    # there's actually another independent write task it could run alongside - a lone
-    # dependency-free write task has nothing to contend with and is strictly better off in the
-    # plain shared workspace (see spec: "Parallel write включается только если planner и
-    # dependency analyzer доказали независимость scope").
-    if not planned_task.dependencies and concurrent_write_task_count > 1:
-        return "isolated_worktree"
+    # Always shared for writers until IntegrationAgent merges isolated worktrees
+    # (merge_worktree_branch exists but is never called). Isolated mode left accepted
+    # commits on side branches while Deploy built the shared disk tree — Versions empty,
+    # chat deploy flaky. concurrent_write_task_count kept for the future merge wiring.
+    _ = (planned_task, concurrent_write_task_count)
     return "shared_sequential"
 
 

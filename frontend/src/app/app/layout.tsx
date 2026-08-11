@@ -16,7 +16,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const isProjectRoute = Boolean(pathname?.match(/^\/app\/projects\/[^/]+/));
-  const isFullHeightRoute = isProjectRoute;
+  // Fixed viewport + overflow lock is only for chat (composer pinned). Settings/overview/etc.
+  // must scroll with the page — locking every project route clipped long forms.
+  const isFullHeightRoute = Boolean(pathname?.match(/^\/app\/projects\/[^/]+\/chat(?:\/|$)/));
   const [isChecking, setIsChecking] = useState(true);
   const [credits, setCredits] = useState(0);
   const [onboardingCompleted, setOnboardingCompleted] = useState(true);
