@@ -112,6 +112,63 @@ def test_list_ledger_filters_and_paginates(db: Session):
     assert len(page) == 1
 
 
+def test_summarize_project_generation_usage(db: Session):
+    from datetime import UTC, datetime, timedelta
+
+    from src.db.models.orchestration_run import OrchestrationRun
+    from src.db.models.chat import Chat
+    from src.services.billing import summarize_project_generation_usage
+
+    user = _user(db, email="usage-summary@airuntime.dev")
+    project = _project(db, user, name="Usage Project")
+    chat = Chat(project_id=project.id, title="Main")
+    db.add(chat)
+    db.commit()
+    db.refresh(chat)
+
+    record_usage(
+        db,
+        user,
+        project_id=project.id,
+        amount=250,
+        project_name=project.name,
+        input_tokens=1_000,
+        output_tokens=50,
+    )
+    record_usage(
+        db,
+        user,
+        project_id=project.id,
+        amount=100,
+        project_name=project.name,
+        input_tokens=200,
+        output_tokens=10,
+    )
+    started = datetime.now(UTC) - timedelta(minutes=5)
+    finished = started + timedelta(minutes=2, seconds=30)
+    db.add(
+        OrchestrationRun(
+            project_id=project.id,
+            chat_id=chat.id,
+            user_id=user.id,
+            status="completed",
+            started_at=started,
+            finished_at=finished,
+            credits_used=350,
+        )
+    )
+    db.commit()
+
+    summary = summarize_project_generation_usage(db, project.id)
+    assert summary["credits_spent"] == 350
+    assert summary["cost_rub"] == 3.5
+    assert summary["input_tokens"] == 1_200
+    assert summary["output_tokens"] == 60
+    assert summary["total_tokens"] == 1_260
+    assert summary["runs_count"] == 1
+    assert 149 <= summary["generation_seconds"] <= 151
+
+
 def test_billing_usage_api_pagination_and_project_name(client, db: Session):
     headers = auth_tokens(client, "ledger-api@airuntime.dev")
     me = client.get("/api/v1/auth/me", headers=headers)

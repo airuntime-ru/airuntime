@@ -45,6 +45,35 @@ def _strip_code_fence(text: str) -> str:
     return text.strip()
 
 
+def _extract_json_object(text: str) -> str:
+    """Pull the outermost JSON object out of model prose / fences / trailing junk."""
+    cleaned = _strip_code_fence(text)
+    if not cleaned:
+        return cleaned
+    if cleaned[0] == "{":
+        return cleaned
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start >= 0 and end > start:
+        return cleaned[start : end + 1]
+    return cleaned
+
+
+def _parse(raw: str, response_model: type[ModelT]) -> tuple[ModelT | None, str | None]:
+    """Returns (value, None) on success or (None, error_detail) otherwise - error_detail
+    feeds the repair-retry prompt, so it stays a plain string rather than an exception."""
+    if not raw or not raw.strip():
+        return None, "empty response"
+    try:
+        data = json.loads(_extract_json_object(raw))
+    except json.JSONDecodeError as exc:
+        return None, str(exc)
+    try:
+        return response_model.model_validate(data), None
+    except ValidationError as exc:
+        return None, str(exc)
+
+
 async def _raw_complete(
     *,
     provider_name: str,
@@ -95,21 +124,6 @@ async def _raw_complete(
                 logger.warning("pipeline_llm one-shot call failed: %s", event.error)
                 return ""
     return "".join(text_parts).strip()
-
-
-def _parse(raw: str, response_model: type[ModelT]) -> tuple[ModelT | None, str | None]:
-    """Returns (value, None) on success or (None, error_detail) otherwise - error_detail
-    feeds the repair-retry prompt, so it stays a plain string rather than an exception."""
-    if not raw:
-        return None, "empty response"
-    try:
-        data = json.loads(_strip_code_fence(raw))
-    except json.JSONDecodeError as exc:
-        return None, str(exc)
-    try:
-        return response_model.model_validate(data), None
-    except ValidationError as exc:
-        return None, str(exc)
 
 
 async def complete_structured(

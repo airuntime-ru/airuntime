@@ -54,3 +54,18 @@ class ProjectListResponse(BaseModel):
     items: list[ProjectResponse]
     total: int
     deployed_total: int
+
+
+class ProjectGenerationUsageResponse(BaseModel):
+    """Cumulative generation cost for the project overview card."""
+
+    credits_spent: int
+    cost_rub: float
+    input_tokens: int
+    cached_input_tokens: int
+    cache_write_input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    generation_seconds: float
+    runs_count: int
+    charge_events: int

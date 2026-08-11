@@ -617,6 +617,24 @@ async def _orchestration_event_source(
                     "(вкладка «Настройки») эти значения:\n" + "\n".join(lines)
                 )
             yield _sse_status("needs_configuration", "Нужны данные от вас", "error")
+        elif event_type == "waiting_for_user":
+            reason = str(payload.get("reason") or "").strip().lower()
+            detail = str(payload.get("detail") or "").strip()
+            if reason == "budget_exceeded" or "budget" in reason or "кредит" in detail.lower():
+                message = detail or (
+                    "Закончились кредиты — работа агента приостановлена. "
+                    "Пополните баланс в профиле или подключите свой API-ключ, затем продолжите в «Оркестрация»."
+                )
+                yield append_visible(f"\n\n{message}")
+                yield _sse_status("limit", "Закончились кредиты", "error")
+            elif detail:
+                yield append_visible(f"\n\n{detail}")
+                yield _sse_status("needs_configuration", "Нужен ответ от вас", "error")
+            else:
+                yield append_visible(
+                    "\n\nВыполнение приостановлено — нужно ваше действие, чтобы продолжить."
+                )
+                yield _sse_status("needs_configuration", "Нужен ответ от вас", "error")
 
         if event_type in _CHAT_STREAM_STOPPING_EVENT_TYPES:
             terminal_event_type = event_type

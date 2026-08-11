@@ -88,6 +88,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </main>
         <OnboardingTour
           completed={onboardingCompleted}
+          onLogout={onLogout}
           onComplete={async () => {
             try {
               const me = await completeOnboarding();

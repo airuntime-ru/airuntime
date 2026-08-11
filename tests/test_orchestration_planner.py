@@ -163,6 +163,38 @@ class TestPlannerOutputNormalization:
         assert task.execution_preference.value == "either"
         assert task.acceptance_criteria[0].id
 
+    def test_missing_reason_and_role_aliases_are_coerced(self) -> None:
+        task = PlannedTask.model_validate(
+            {
+                "local_id": "photos",
+                "role": "Developer",
+                "goal": "Добавить фото машин",
+                "acceptance_criteria": [
+                    {"description": "Фото на странице", "verification_method": "manual"}
+                ],
+            }
+        )
+        assert task.role == SpecialistRole.IMPLEMENTER
+        assert task.title == "Добавить фото машин"
+        assert task.reason == "Добавить фото машин"
+
+    def test_plan_complexity_aliases(self) -> None:
+        plan = ExecutionPlan.model_validate(
+            {
+                "complexity": "small",
+                "tasks": [
+                    {
+                        "local_id": "a",
+                        "role": "implementer",
+                        "goal": "Do it",
+                        "acceptance_criteria": [],
+                    }
+                ],
+            }
+        )
+        assert plan.complexity == "simple"
+        assert plan.goal == "Do it"
+
 
 @pytest.mark.asyncio
 class TestGeneratePlan:

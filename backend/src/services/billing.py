@@ -266,6 +266,84 @@ def usage_credits_to_rub(credits: int) -> Decimal:
     return Decimal(abs(credits)) / Decimal(settings.billing_credits_per_rub)
 
 
+def summarize_project_generation_usage(db: Session, project_id: uuid.UUID) -> dict:
+    """Totals for the project overview: tokens, platform charge, and generation wall time.
+
+    Money and tokens come from the credit ledger (platform key + BYOK rows). Duration is the
+    sum of orchestration run wall-clock intervals (finished or still running).
+    """
+    from sqlalchemy import case, func
+
+    from src.db.models.orchestration_run import OrchestrationRun
+
+    ledger = (
+        db.query(
+            func.coalesce(
+                func.sum(
+                    case(
+                        (CreditLedgerEntry.amount < 0, -CreditLedgerEntry.amount),
+                        else_=0,
+                    )
+                ),
+                0,
+            ),
+            func.coalesce(func.sum(CreditLedgerEntry.input_tokens), 0),
+            func.coalesce(func.sum(CreditLedgerEntry.cached_input_tokens), 0),
+            func.coalesce(func.sum(CreditLedgerEntry.cache_write_input_tokens), 0),
+            func.coalesce(func.sum(CreditLedgerEntry.output_tokens), 0),
+            func.count(CreditLedgerEntry.id),
+        )
+        .filter(
+            CreditLedgerEntry.project_id == project_id,
+            CreditLedgerEntry.reason.in_(("chat_message", "byok_usage")),
+        )
+        .one()
+    )
+    credits_spent = int(ledger[0] or 0)
+    input_tokens = int(ledger[1] or 0)
+    cached_input_tokens = int(ledger[2] or 0)
+    cache_write_input_tokens = int(ledger[3] or 0)
+    output_tokens = int(ledger[4] or 0)
+    charge_events = int(ledger[5] or 0)
+
+    now = datetime.now(UTC)
+    duration_row = (
+        db.query(
+            func.coalesce(
+                func.sum(
+                    func.extract(
+                        "epoch",
+                        func.coalesce(OrchestrationRun.finished_at, now)
+                        - OrchestrationRun.started_at,
+                    )
+                ),
+                0,
+            ),
+            func.count(OrchestrationRun.id),
+        )
+        .filter(
+            OrchestrationRun.project_id == project_id,
+            OrchestrationRun.started_at.is_not(None),
+        )
+        .one()
+    )
+    generation_seconds = max(0.0, float(duration_row[0] or 0))
+    runs_count = int(duration_row[1] or 0)
+
+    return {
+        "credits_spent": credits_spent,
+        "cost_rub": float(usage_credits_to_rub(credits_spent)),
+        "input_tokens": input_tokens,
+        "cached_input_tokens": cached_input_tokens,
+        "cache_write_input_tokens": cache_write_input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens,
+        "generation_seconds": round(generation_seconds, 1),
+        "runs_count": runs_count,
+        "charge_events": charge_events,
+    }
+
+
 def request_topup(db: Session, user: User, credits: int) -> CreditTopUp:
     invoice = CreditTopUp(
         user_id=user.id,

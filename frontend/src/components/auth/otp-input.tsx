@@ -91,8 +91,9 @@ export function OtpInput({ value, onChange, onComplete, disabled, autoFocus }: O
       return;
     }
 
-    if (event.key === "Enter" && value.length === LENGTH) {
-      onComplete?.(value);
+    if (event.key === "Enter") {
+      event.preventDefault();
+      if (value.length === LENGTH) onComplete?.(value);
     }
   };
 

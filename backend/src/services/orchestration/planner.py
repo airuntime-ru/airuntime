@@ -162,6 +162,38 @@ _PLANNING_SYSTEM_PROMPT_TEMPLATE = """Ты - планировщик платфо
   секретами и functional honesty. Автор реализации не может быть своим QA.
 - Mixed-проект требует ОБА контура, когда меняются обе поверхности: visual_preview_review для
   сайта и product_quality_review для бота/backend/интеграции.
+
+Минимальный пример валидного JSON (одна задача):
+{{
+  "goal": "Кратко цель",
+  "complexity": "simple",
+  "tasks": [
+    {{
+      "local_id": "implement",
+      "title": "Сделать запрошенное",
+      "role": "implementer",
+      "goal": "Реализовать запрос пользователя",
+      "reason": "Основная работа",
+      "execution_preference": "either",
+      "dependencies": [],
+      "relevant_paths": ["public/index.html"],
+      "suggested_skills": [],
+      "required_capabilities": [],
+      "acceptance_criteria": [
+        {{
+          "id": "done",
+          "description": "Изменения на месте и проверяемы",
+          "verification_method": "manual"
+        }}
+      ],
+      "risk_level": "low",
+      "write_scope": "scoped_paths"
+    }}
+  ],
+  "final_acceptance_criteria": [],
+  "risks": [],
+  "estimated_budget": {{}}
+}}
 """
 
 

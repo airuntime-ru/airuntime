@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from src.api.dependencies.auth import get_current_user
 from src.api.dto.project import (
     ProjectCreateRequest,
+    ProjectGenerationUsageResponse,
     ProjectListResponse,
     ProjectResponse,
     ProjectUpdateRequest,
@@ -23,7 +24,7 @@ from src.db.models.project import Project
 from src.db.models.secret import Secret
 from src.db.models.user import User
 from src.db.session import get_db
-from src.services.billing import total_project_limit
+from src.services.billing import summarize_project_generation_usage, total_project_limit
 from src.services.cloudflare_dns import delete_dns_for_website_deploy
 from src.services.custom_domain import (
     CustomDomainError,
@@ -413,6 +414,18 @@ def get_project(
         db.commit()
         db.refresh(project)
     return _to_response(project)
+
+
+@router.get("/{project_id}/generation-usage", response_model=ProjectGenerationUsageResponse)
+def get_project_generation_usage(
+    project_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ProjectGenerationUsageResponse:
+    _owned_project_or_404(db, project_id, current_user)
+    return ProjectGenerationUsageResponse.model_validate(
+        summarize_project_generation_usage(db, project_id)
+    )
 
 
 class CustomDomainPayload(BaseModel):

@@ -12,8 +12,10 @@ import { PageLoader } from "@/components/ui/loader";
 import {
   createDeployment,
   getProject,
+  getProjectGenerationUsage,
   getProjectRuntimeLimits,
   stopProject,
+  type ProjectGenerationUsageType,
   type ProjectRuntimeLimitsType,
   type ProjectType,
 } from "@/lib/api";
@@ -24,10 +26,44 @@ import {
   projectTypeLabel,
 } from "@/lib/project-status";
 
+function formatRub(value: number): string {
+  return value.toLocaleString("ru-RU", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function formatTokens(value: number): string {
+  return value.toLocaleString("ru-RU");
+}
+
+function formatGenerationDuration(totalSeconds: number): string {
+  const seconds = Math.max(0, Math.round(totalSeconds));
+  if (seconds < 60) return `${seconds} с`;
+  const minutes = Math.floor(seconds / 60);
+  const remSeconds = seconds % 60;
+  if (minutes < 60) {
+    return remSeconds > 0 ? `${minutes} мин ${remSeconds} с` : `${minutes} мин`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const remMinutes = minutes % 60;
+  if (remMinutes === 0) return `${hours} ч`;
+  return `${hours} ч ${remMinutes} мин`;
+}
+
+function pluralizeRuns(count: number): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return "запуск";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "запуска";
+  return "запусков";
+}
+
 export default function ProjectOverviewPage() {
   const params = useParams<{ id: string }>();
   const [project, setProject] = useState<ProjectType | null>(null);
   const [limits, setLimits] = useState<ProjectRuntimeLimitsType | null>(null);
+  const [usage, setUsage] = useState<ProjectGenerationUsageType | null>(null);
   const [error, setError] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
 
@@ -40,6 +76,11 @@ export default function ProjectOverviewPage() {
     setProject(row);
     setLimits(runtimeLimits);
     setError("");
+    try {
+      setUsage(await getProjectGenerationUsage(params.id));
+    } catch {
+      setUsage(null);
+    }
   }, [params.id]);
 
   useEffect(() => {
@@ -148,6 +189,54 @@ export default function ProjectOverviewPage() {
           </div>
         </dl>
       </Card>
+
+      {usage ? (
+        <Card hover={false} className="overflow-hidden p-0">
+          <div className="border-b border-black/[0.06] px-4 py-3 sm:px-5">
+            <p className="text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[var(--ar-stone)]">
+              Генерации по проекту
+            </p>
+            <p className="mt-1 text-sm text-[var(--ar-mist)]">
+              Суммарно по всем запускам агента в этом проекте
+            </p>
+          </div>
+          <dl className="grid divide-y divide-black/[0.06] sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 p-4 sm:block sm:p-5">
+              <dt className="text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[var(--ar-stone)]">
+                Токены
+              </dt>
+              <dd className="tabular-nums text-sm font-semibold text-[var(--ar-black)] sm:mt-2.5 sm:text-base">
+                {formatTokens(usage.total_tokens)}
+              </dd>
+              <p className="mt-1 w-full text-xs text-[var(--ar-mist)] sm:w-auto">
+                {formatTokens(usage.input_tokens)} вход · {formatTokens(usage.output_tokens)} выход
+              </p>
+            </div>
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 p-4 sm:block sm:p-5">
+              <dt className="text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[var(--ar-stone)]">
+                Стоимость
+              </dt>
+              <dd className="tabular-nums text-sm font-semibold text-[var(--ar-black)] sm:mt-2.5 sm:text-base">
+                {formatRub(usage.cost_rub)} ₽
+              </dd>
+              <p className="mt-1 w-full text-xs text-[var(--ar-mist)] sm:w-auto">
+                {usage.credits_spent.toLocaleString("ru-RU")} кредитов
+              </p>
+            </div>
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 p-4 sm:block sm:p-5">
+              <dt className="text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[var(--ar-stone)]">
+                Время
+              </dt>
+              <dd className="tabular-nums text-sm font-semibold text-[var(--ar-black)] sm:mt-2.5 sm:text-base">
+                {formatGenerationDuration(usage.generation_seconds)}
+              </dd>
+              <p className="mt-1 w-full text-xs text-[var(--ar-mist)] sm:w-auto">
+                {usage.runs_count.toLocaleString("ru-RU")} {pluralizeRuns(usage.runs_count)}
+              </p>
+            </div>
+          </dl>
+        </Card>
+      ) : null}
 
       {limits && atLimit && !isProjectRunning(project.status) ? (
         <Card hover={false} className="border-amber-200 bg-amber-50 p-4">

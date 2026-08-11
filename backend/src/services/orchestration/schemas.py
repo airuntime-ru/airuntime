@@ -128,9 +128,23 @@ class AcceptanceCriterion(BaseModel):
     @classmethod
     def _supply_missing_llm_id(cls, value: Any) -> Any:
         """Keep otherwise valid planner output usable when the model omits a criterion id."""
-        if not isinstance(value, dict) or str(value.get("id") or "").strip():
+        if not isinstance(value, dict):
             return value
         normalized = dict(value)
+        method = normalized.get("verification_method")
+        if isinstance(method, str):
+            key = method.strip().lower().replace(" ", "_").replace("-", "_")
+            aliases = {
+                "llm": "llm_review",
+                "review": "llm_review",
+                "visual": "preview",
+                "browser": "preview",
+                "unit": "test",
+                "compile": "build",
+            }
+            normalized["verification_method"] = aliases.get(key, key)
+        if str(normalized.get("id") or "").strip():
+            return normalized
         description = str(normalized.get("description") or "criterion")
         digest = hashlib.sha256(description.encode("utf-8")).hexdigest()[:12]
         normalized["id"] = f"criterion_{digest}"
@@ -141,6 +155,21 @@ class Risk(BaseModel):
     description: str
     severity: RiskLevel = RiskLevel.MEDIUM
     mitigation: str | None = None
+
+    @field_validator("severity", mode="before")
+    @classmethod
+    def _normalize_severity(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        key = value.strip().lower()
+        aliases = {
+            "низкий": "low",
+            "средний": "medium",
+            "высокий": "high",
+            "критический": "critical",
+            "med": "medium",
+        }
+        return aliases.get(key, key)
 
 
 class ExecutionBudget(BaseModel):
@@ -165,6 +194,62 @@ class PlannedTask(BaseModel):
     risk_level: RiskLevel = RiskLevel.MEDIUM
     write_scope: WriteScope = WriteScope.SCOPED_PATHS
 
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_llm_quirks(cls, value: Any) -> Any:
+        """Economy models often omit reason/title or invent role casing - keep the plan usable."""
+        if not isinstance(value, dict):
+            return value
+        data = dict(value)
+        local_id = str(data.get("local_id") or data.get("id") or "task").strip() or "task"
+        data["local_id"] = local_id
+        title = str(data.get("title") or "").strip()
+        goal = str(data.get("goal") or "").strip()
+        reason = str(data.get("reason") or "").strip()
+        if not title:
+            title = goal or local_id
+        if not goal:
+            goal = title
+        if not reason:
+            reason = title
+        data["title"] = title
+        data["goal"] = goal
+        data["reason"] = reason
+        role = data.get("role")
+        if isinstance(role, str):
+            normalized = role.strip().lower().replace(" ", "_").replace("-", "_")
+            aliases = {
+                "implementer": "implementer",
+                "implementation": "implementer",
+                "coder": "implementer",
+                "developer": "implementer",
+                "ui_ux_specialist": "ui_ux_specialist",
+                "uiux": "ui_ux_specialist",
+                "designer": "ui_ux_specialist",
+                "qa": "qa_reviewer",
+                "qa_reviewer": "qa_reviewer",
+                "reviewer": "qa_reviewer",
+                "architect": "solution_architect",
+                "solution_architect": "solution_architect",
+                "planner": "product_planner",
+                "product_planner": "product_planner",
+                "build_fixer": "build_fixer",
+                "deploy_fixer": "deploy_fixer",
+                "security_reviewer": "security_reviewer",
+                "integration_agent": "integration_agent",
+                "integrator": "integration_agent",
+            }
+            data["role"] = aliases.get(normalized, normalized)
+        criteria = data.get("acceptance_criteria")
+        if criteria is None:
+            data["acceptance_criteria"] = [
+                {
+                    "description": f"{title} выполнен",
+                    "verification_method": "manual",
+                }
+            ]
+        return data
+
     @field_validator("execution_preference", mode="before")
     @classmethod
     def _normalize_scheduling_aliases(cls, value: Any) -> Any:
@@ -172,6 +257,37 @@ class PlannedTask(BaseModel):
         if isinstance(value, str) and value.strip().lower() in {"parallel", "sequential"}:
             return ExecutionPreference.EITHER
         return value
+
+    @field_validator("risk_level", mode="before")
+    @classmethod
+    def _normalize_risk_level(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        key = value.strip().lower()
+        aliases = {
+            "низкий": "low",
+            "средний": "medium",
+            "высокий": "high",
+            "критический": "critical",
+            "med": "medium",
+        }
+        return aliases.get(key, key)
+
+    @field_validator("write_scope", mode="before")
+    @classmethod
+    def _normalize_write_scope(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        key = value.strip().lower().replace(" ", "_").replace("-", "_")
+        aliases = {
+            "scoped": "scoped_paths",
+            "paths": "scoped_paths",
+            "full": "full_workspace",
+            "workspace": "full_workspace",
+            "readonly": "none",
+            "read_only": "none",
+        }
+        return aliases.get(key, key)
 
     @field_validator("local_id")
     @classmethod
@@ -196,6 +312,32 @@ class ExecutionPlan(BaseModel):
     final_acceptance_criteria: list[AcceptanceCriterion] = Field(default_factory=list)
     risks: list[Risk] = Field(default_factory=list)
     estimated_budget: ExecutionBudget = Field(default_factory=ExecutionBudget)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_plan_quirks(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        data = dict(value)
+        complexity = data.get("complexity")
+        if isinstance(complexity, str):
+            key = complexity.strip().lower()
+            aliases = {
+                "trivial": "simple",
+                "small": "simple",
+                "medium": "compound",
+                "multi": "compound",
+                "big": "large",
+                "complex": "large",
+            }
+            data["complexity"] = aliases.get(key, key)
+        if not str(data.get("goal") or "").strip():
+            tasks = data.get("tasks") or []
+            if isinstance(tasks, list) and tasks and isinstance(tasks[0], dict):
+                data["goal"] = str(tasks[0].get("title") or tasks[0].get("goal") or "Запрос")
+            else:
+                data["goal"] = "Запрос"
+        return data
 
     @field_validator("tasks")
     @classmethod

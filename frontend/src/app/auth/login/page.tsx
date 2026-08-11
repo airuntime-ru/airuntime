@@ -95,7 +95,13 @@ export default function LoginPage() {
             </Button>
           </div>
         ) : (
-          <div className="space-y-4">
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void onSubmitCode();
+            }}
+          >
             <OtpInput
               value={code}
               onChange={setCode}
@@ -104,9 +110,9 @@ export default function LoginPage() {
               autoFocus
             />
             <Button
+              type="submit"
               variant="accent"
               className="w-full"
-              onClick={() => void onSubmitCode()}
               disabled={loading || code.length !== 6}
             >
               {loading ? "Входим..." : "Войти"}
@@ -132,7 +138,7 @@ export default function LoginPage() {
                 {resendIn > 0 ? `Повтор через ${resendIn}с` : "Отправить снова"}
               </button>
             </div>
-          </div>
+          </form>
         )}
 
         {error ? (

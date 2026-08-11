@@ -57,10 +57,12 @@ from src.db.models.project import Project
 from src.db.models.user import User
 from src.db.session import SessionLocal
 from src.services import project_git
+from src.services.byok import has_valid_key
 from src.services.model_access import reasoning_effort_for_user
 from src.services.model_pricing import estimate_model_usage_cost
 from src.services.orchestration import events_bus
 from src.services.orchestration.budget import (
+    BudgetCheckResult,
     BudgetLimits,
     BudgetStatus,
     BudgetTracker,
@@ -650,6 +652,19 @@ async def _run_one_task(
             return _TaskAttemptOutcome("run_should_stop")
 
         budget_check = budget.check()
+        if budget_check.status != BudgetStatus.EXCEEDED and user is not None:
+            # Run credit_budget alone is not enough: ledger can hit zero while the run budget
+            # still has headroom (charges clamp to 0 and only an email fires). Stop visibly.
+            db.refresh(user)
+            if user.credits_balance <= 0 and not has_valid_key(db, user, provider_name):
+                budget_check = BudgetCheckResult(
+                    status=BudgetStatus.EXCEEDED,
+                    dimension="account_balance",
+                    message=(
+                        "Закончились кредиты — работа агента приостановлена. "
+                        "Пополните баланс в профиле или подключите свой API-ключ."
+                    ),
+                )
         if budget_check.status == BudgetStatus.EXCEEDED:
             # "waiting_for_user", not "skipped"/"failed": this task never got a chance to run,
             # and the thing it is waiting on (the user topping up credits) is recoverable. Both
@@ -1440,7 +1455,11 @@ async def _run_orchestration_inner(
                         run,
                         "waiting_for_user",
                         error_code="budget_exceeded",
-                        error_message=stopped[1].detail or "Бюджет запуска исчерпан",
+                        error_message=stopped[1].detail
+                        or (
+                            "Закончились кредиты — работа агента приостановлена. "
+                            "Пополните баланс в профиле или подключите свой API-ключ."
+                        ),
                     )
                     events_bus.emit(
                         db,

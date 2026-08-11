@@ -29,7 +29,7 @@ export function AppTopBar({ credits, onLogout }: { credits: number; onLogout: ()
   const pathname = usePathname();
 
   return (
-    <header className="fixed inset-x-0 top-0 z-30 px-3 pt-3 sm:px-4 lg:px-6">
+    <header className="fixed inset-x-0 top-0 z-[60] px-3 pt-3 sm:px-4 lg:px-6">
       <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 rounded-full border border-black/[0.06] bg-white/80 px-3 shadow-[0_10px_34px_-18px_rgba(15,23,42,0.5)] backdrop-blur-xl sm:px-4">
         <Logo href="/app" variant="full" theme="dark" size="sm" />
 

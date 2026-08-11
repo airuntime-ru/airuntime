@@ -53,9 +53,11 @@ type HighlightRect = {
 export function OnboardingTour({
   completed,
   onComplete,
+  onLogout,
 }: {
   completed: boolean;
   onComplete: () => void | Promise<void>;
+  onLogout?: () => void | Promise<void>;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -120,6 +122,11 @@ export function OnboardingTour({
     void onComplete();
   };
 
+  const leaveAccount = () => {
+    setActive(false);
+    void onLogout?.();
+  };
+
   const goTo = (nextIndex: number) => {
     const next = Math.max(0, Math.min(steps.length - 1, nextIndex));
     setIndex(next);
@@ -134,12 +141,13 @@ export function OnboardingTour({
   if (completed || !active) return null;
 
   return (
-    <div className="fixed inset-0 z-50 pointer-events-none">
+    <div className="fixed inset-0 z-50">
+      {/* Blocks the workspace, but not the top bar (z-60) so «Выйти» stays clickable. */}
       <div className="absolute inset-0 bg-slate-950/38 backdrop-blur-[2px]" />
 
       {rect ? (
         <div
-          className="absolute rounded-[var(--ar-radius-sm)] border-2 border-white shadow-[0_0_0_9999px_rgba(8,20,38,0.42),0_18px_70px_rgba(35,136,255,0.35)] transition-all duration-300"
+          className="pointer-events-none absolute rounded-[var(--ar-radius-sm)] border-2 border-white shadow-[0_0_0_9999px_rgba(8,20,38,0.42),0_18px_70px_rgba(35,136,255,0.35)] transition-all duration-300"
           style={{
             top: rect.top,
             left: rect.left,
@@ -151,7 +159,7 @@ export function OnboardingTour({
 
       <div
         className={cn(
-          "pointer-events-auto absolute left-1/2 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 rounded-[var(--ar-radius-sm)] border border-[var(--ar-border)] bg-white p-5 shadow-[0_28px_90px_rgba(8,20,38,0.22)]",
+          "absolute left-1/2 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 rounded-[var(--ar-radius-sm)] border border-[var(--ar-border)] bg-white p-5 shadow-[0_28px_90px_rgba(8,20,38,0.22)]",
           step.placement === "center" ? "top-1/2 -translate-y-1/2" : "bottom-[calc(1rem+env(safe-area-inset-bottom))] lg:bottom-8"
         )}
       >
@@ -190,7 +198,18 @@ export function OnboardingTour({
         </div>
 
         <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-xs font-medium text-[var(--ar-stone)]">{progress}</p>
+          <div className="flex items-center gap-3">
+            <p className="text-xs font-medium text-[var(--ar-stone)]">{progress}</p>
+            {onLogout ? (
+              <button
+                type="button"
+                onClick={leaveAccount}
+                className="text-xs font-medium text-[var(--ar-mist)] underline-offset-2 hover:text-[var(--ar-black)] hover:underline"
+              >
+                Выйти
+              </button>
+            ) : null}
+          </div>
           <div className="flex items-center justify-between gap-2 sm:justify-end">
             <Button variant="ghost" size="sm" onClick={finish}>
               Пропустить

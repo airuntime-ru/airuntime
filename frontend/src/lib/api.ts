@@ -260,12 +260,13 @@ export async function refreshSession(): Promise<boolean> {
 
 export async function logout(): Promise<void> {
   const refreshToken = getRefreshToken();
+  // Clear locally first so UI can leave even if the revoke request hangs or fails.
+  clearTokens();
+  if (!refreshToken) return;
   try {
-    if (refreshToken) {
-      await rawRequest("/auth/logout", { method: "POST", body: JSON.stringify({ refresh_token: refreshToken }) }, false);
-    }
-  } finally {
-    clearTokens();
+    await rawRequest("/auth/logout", { method: "POST", body: JSON.stringify({ refresh_token: refreshToken }) }, false);
+  } catch {
+    // Session is already gone on this device.
   }
 }
 
@@ -294,6 +295,25 @@ export async function startProject(projectId: string): Promise<ProjectType> {
 
 export async function getProject(projectId: string): Promise<ProjectType> {
   return requestJson<ProjectType>(`/projects/${projectId}`);
+}
+
+export type ProjectGenerationUsageType = {
+  credits_spent: number;
+  cost_rub: number;
+  input_tokens: number;
+  cached_input_tokens: number;
+  cache_write_input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  generation_seconds: number;
+  runs_count: number;
+  charge_events: number;
+};
+
+export async function getProjectGenerationUsage(
+  projectId: string
+): Promise<ProjectGenerationUsageType> {
+  return requestJson<ProjectGenerationUsageType>(`/projects/${projectId}/generation-usage`);
 }
 
 export async function deleteProject(projectId: string): Promise<void> {
