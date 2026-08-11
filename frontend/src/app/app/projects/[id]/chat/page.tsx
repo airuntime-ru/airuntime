@@ -482,17 +482,42 @@ export default function ProjectChatPage() {
   const selectedModelOption = providers?.models?.[selectedProvider]?.find(
     (option) => option.id === selectedModel
   );
+  const modelButtonLabel =
+    selectedProvider && selectedModel
+      ? (selectedModelOption?.label ?? selectedModel)
+      : "Авто";
   const currentTitle = filteredChats.find((chat) => chat.id === chatId)?.title ?? "Диалог";
   const streamingMessage = messages[messages.length - 1];
   const liveStreamChars =
     loading && streamingMessage?.role === "assistant" ? streamingMessage.content.length : 0;
+  // One chat and nothing to search - the sidebar is just noise next to an empty first message.
+  const showChatSidebar =
+    mobilePanel === "list" || filteredChats.length > 1 || search.trim().length > 0;
+
+  const onPickPrompt = (prompt: string) => {
+    if (!chatId || bootstrapping) {
+      setInput(prompt);
+      return;
+    }
+    if (loading) {
+      setInput(prompt);
+      return;
+    }
+    setInput("");
+    void runTurn(prompt, []);
+  };
 
   return (
-    <div className="grid min-h-0 flex-1 gap-0 overflow-hidden rounded-[0.95rem] border border-black/[0.07] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04),0_12px_32px_-18px_rgba(15,23,42,0.24)] lg:grid-cols-[220px_1fr]">
+    <div
+      className={cn(
+        "grid min-h-0 flex-1 gap-0 overflow-hidden rounded-[0.95rem] border border-black/[0.07] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04),0_12px_32px_-18px_rgba(15,23,42,0.24)]",
+        showChatSidebar ? "lg:grid-cols-[220px_1fr]" : "lg:grid-cols-1"
+      )}
+    >
       <aside
         className={cn(
           "flex min-h-0 flex-col border-black/[0.08] bg-[#f7f8fa] lg:border-r",
-          mobilePanel === "chat" ? "hidden lg:flex" : "flex"
+          showChatSidebar ? (mobilePanel === "chat" ? "hidden lg:flex" : "flex") : "hidden"
         )}
       >
         <div className="flex items-center justify-between border-b border-black/8 px-3 py-3">
@@ -565,7 +590,17 @@ export default function ProjectChatPage() {
           >
             <ArrowLeft size={16} aria-hidden />
           </button>
-          <p className="truncate text-sm font-medium">{currentTitle}</p>
+          <p className="min-w-0 flex-1 truncate text-sm font-medium">{currentTitle}</p>
+          {!showChatSidebar ? (
+            <button
+              type="button"
+              onClick={() => void onNewChat()}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-[0.5rem] text-[var(--ar-stone)] hover:bg-black/5 hover:text-[var(--ar-black)]"
+              aria-label="Новый чат"
+            >
+              <Plus size={16} aria-hidden />
+            </button>
+          ) : null}
         </div>
 
         <MessageList
@@ -573,7 +608,7 @@ export default function ProjectChatPage() {
           loading={loading}
           stickToBottom={stickToBottom}
           onStickChange={setStickToBottom}
-          onPickPrompt={setInput}
+          onPickPrompt={onPickPrompt}
           bottomSlot={
             <div className="space-y-3 pt-2">
               {loading && toolActivity.length > 0 ? <ToolActivityFeed items={toolActivity} /> : null}
@@ -713,13 +748,10 @@ export default function ProjectChatPage() {
                   <button
                     type="button"
                     onClick={() => setProviderMenuOpen((prev) => !prev)}
-                    className="inline-flex min-h-10 max-w-[14rem] items-center gap-1 truncate rounded-[0.5rem] border border-black/10 bg-[#fafafa] px-2.5 text-xs font-medium text-[var(--ar-mist)] hover:bg-black/5"
+                    className="inline-flex min-h-10 max-w-[12rem] items-center gap-1 truncate rounded-[0.5rem] px-2 text-xs font-medium text-[var(--ar-mist)] hover:bg-black/5 hover:text-[var(--ar-black)]"
+                    aria-label="Выбор модели"
                   >
-                    {selectedProvider && selectedModel
-                      ? (selectedModelOption?.label ?? selectedModel)
-                      : providers?.auto_model
-                        ? `Авто · ${providers.auto_model}`
-                        : "Авто"}
+                    {modelButtonLabel}
                     <ChevronDown size={12} className="opacity-50" aria-hidden />
                   </button>
                   {providerMenuOpen ? (
@@ -794,9 +826,6 @@ export default function ProjectChatPage() {
                   ) : null}
                 </div>
                 <div className="flex items-center gap-1">
-                  <p className="mr-1 hidden text-[11px] text-[var(--ar-stone)] sm:block">
-                    Enter — отправить · Shift+Enter — строка
-                  </p>
                   <button
                     type="button"
                     onClick={onPickFiles}

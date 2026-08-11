@@ -21,7 +21,7 @@ type MessageListProps = {
   stickToBottom: boolean;
   onStickChange: (nearBottom: boolean) => void;
   bottomSlot?: React.ReactNode;
-  /** Drops a starter prompt into the composer from the empty state. */
+  /** Starts a turn from the empty-state starter chips (or fills the composer if busy). */
   onPickPrompt?: (prompt: string) => void;
 };
 
@@ -81,11 +81,11 @@ export function MessageList({
           </span>
           <p className="mt-4 text-lg font-medium text-[var(--ar-black)]">Чем помочь?</p>
           <p className="mt-2 max-w-sm text-sm text-[var(--ar-stone)]">
-            Опишите сайт или бота — AIRuntime соберёт и задеплоит проект.
+            Напишите задачу или выберите пример — соберём и задеплоим проект.
           </p>
 
           {/* This is the screen a brand-new project lands on, and the blocker is not knowing
-              what to type. Tapping a prompt drops it into the composer to edit. */}
+              what to type. Tapping a prompt starts the turn immediately. */}
           {onPickPrompt ? (
             <ul className="mt-7 flex flex-wrap justify-center gap-2 pb-2">
               {STARTER_PROMPTS.map((prompt, index) => (
