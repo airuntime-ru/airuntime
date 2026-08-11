@@ -1,11 +1,11 @@
-import { Boxes, Database, History, Rocket, ShieldCheck } from "lucide-react";
+import { Boxes, Database, Globe2, History, Rocket, ShieldCheck } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import { LandingSection, SectionHeading } from "@/components/landing/section";
 import { Reveal } from "@/components/ui/reveal";
 import { trustCopy, trustPoints } from "@/lib/landing/content";
 
-const icons: LucideIcon[] = [Boxes, Rocket, Database, ShieldCheck, History];
+const icons: LucideIcon[] = [Boxes, Rocket, Database, ShieldCheck, History, Globe2];
 
 export function TrustSection() {
   return (

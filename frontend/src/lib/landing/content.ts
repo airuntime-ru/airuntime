@@ -126,6 +126,10 @@ export const trustPoints: TrustPoint[] = [
     title: "Версии и rollback",
     detail: "История изменений сохраняется, к прошлой версии можно вернуться.",
   },
+  {
+    title: "Рабочая ссылка сразу",
+    detail: "После запуска проект доступен по публичному URL на поддомене платформы.",
+  },
 ];
 
 export const faqs: FaqItem[] = [
