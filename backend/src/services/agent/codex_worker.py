@@ -212,6 +212,14 @@ def iter_codex_events(job: dict) -> Iterator[dict]:
             yield {"type": "infra_error", "message": "OpenAI API key is not configured"}
             return
 
+        old_cwd = job.get("cwd")
+        logger.info(
+            "Codex container starting image=%s network=%s model=%s cwd=%s",
+            settings.codex_image,
+            settings.codex_network,
+            job.get("model") or settings.default_model_openai,
+            old_cwd,
+        )
         client = docker.from_env()
         try:
             client.images.get(settings.codex_image)
@@ -225,7 +233,6 @@ def iter_codex_events(job: dict) -> Iterator[dict]:
             }
             return
 
-        old_cwd = job.get("cwd")
         project_id = str(job.get("project_id") or "") or None
         workspace_host_path = _resolve_workspace_mount(client, str(old_cwd)) if old_cwd else None
 
@@ -301,6 +308,7 @@ def iter_codex_events(job: dict) -> Iterator[dict]:
                 nano_cpus=int(float(settings.codex_cpu_limit) * 1_000_000_000),
                 working_dir=effective_cwd,
             )
+            logger.info("Codex container started name=%s id=%s", container_name, container.id[:12])
         except DockerException as exc:
             # Docker creates the container before attaching its network. A missing network (or
             # another start-stage failure) can therefore raise from `run()` while leaving an

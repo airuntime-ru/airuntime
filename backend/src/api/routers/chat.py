@@ -461,6 +461,28 @@ def _sse_status(phase: str, label: str, state: str = "running") -> str:
     return f"data: {json.dumps({'status': {'phase': phase, 'label': label, 'state': state}})}\n\n"
 
 
+def _friendly_run_failure(detail: str) -> str:
+    """Map engine error_message strings to something a non-technical user can act on."""
+    key = detail.strip().lower()
+    if not key:
+        return "Не удалось выполнить запрос. Подробности — в панели «Оркестрация»."
+    if key in {"replan limit reached", "replan_limit_reached"}:
+        return (
+            "Агент несколько раз пытался исправить проверку и остановился. "
+            "Напишите, что поправить, или задеплойте текущие файлы во вкладке «Деплои»."
+        )
+    if key.startswith("budget") or "budget_exceeded" in key or "бюджет" in key:
+        if "₽" in detail or "кредит" in detail.lower():
+            return detail
+        return "Закончился бюджет запуска. Пополните баланс или подключите свой API-ключ."
+    if "deadlock" in key:
+        return "План задач зашёл в тупик. Отправьте запрос ещё раз чуть конкретнее."
+    # English/machine-looking strings get a Russian wrapper; already-localized text passes through.
+    if detail == key or re.fullmatch(r"[a-z0-9][a-z0-9_ ./-]*", key):
+        return f"Не удалось выполнить запрос ({detail}). Попробуйте отправить задачу снова."
+    return f"Не удалось выполнить запрос: {detail}"
+
+
 # A run_orchestration() call returns as soon as it hits waiting_for_user (see engine.py) - no
 # further RunEvents will ever arrive for it until something calls resume_task_after_user_input
 # and re-launches the engine. events_bus.TERMINAL_EVENT_TYPES only covers the three truly-final
@@ -741,12 +763,19 @@ async def _orchestration_event_source(
                 yield _sse_status("done", "Готово", "done")
     elif terminal_event_type == "run_failed":
         detail = (run.error_message or "").strip() if run else ""
-        yield append_visible(
-            f"\n\nНе удалось выполнить запрос: {detail}"
-            if detail
-            else "\n\nНе удалось выполнить запрос. Подробности — в панели задач."
-        )
-        yield _sse_status("error", "Не удалось выполнить запрос", "error")
+        friendly = _friendly_run_failure(detail)
+        artifact_path = project_dir(project.id)
+        has_code = workspace_has_agent_code(artifact_path, project)
+        if has_code and detail in {"replan limit reached", "replan_limit_reached"}:
+            yield append_visible(
+                "\n\nНе удалось довести автопроверку до конца после нескольких попыток. "
+                "Файлы проекта уже есть — откройте «Деплои» и нажмите «Задеплоить», "
+                "или напишите в чат, что именно поправить."
+            )
+            yield _sse_status("error", "Автопроверка не завершилась", "error")
+        else:
+            yield append_visible(f"\n\n{friendly}")
+            yield _sse_status("error", "Не удалось выполнить запрос", "error")
     elif terminal_event_type == "run_cancelled":
         yield append_visible("\n\nВыполнение остановлено.")
         yield _sse_status("error", "Остановлено", "error")

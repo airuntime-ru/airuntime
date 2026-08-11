@@ -70,14 +70,22 @@ def process_image_sweep() -> None:
 def _run_codex_job(job: dict) -> None:
     from src.services.agent.codex_worker import execute_codex_run
 
+    job_id = job.get("job_id")
+    logger.info(
+        "Codex job starting id=%s project=%s model=%s",
+        job_id,
+        job.get("project_id"),
+        job.get("model"),
+    )
     try:
         execute_codex_run(job)
+        logger.info("Codex job finished id=%s", job_id)
     except Exception:  # noqa: BLE001 - execute_codex_run already reports failure via Redis
         # Only reachable if relaying to Redis itself failed (execute_codex_run's own finally
         # already turns a Codex/Docker-side failure into an infra_error event, not an
         # exception) - the chat stream got no error frame in that case, so this is the one
         # place a run_id's fate is otherwise unrecoverable after the fact.
-        logger.exception("Codex job %s failed to relay events", job.get("job_id"))
+        logger.exception("Codex job %s failed to relay events", job_id)
 
 
 def _spawn_codex_run(job: dict) -> None:
@@ -85,7 +93,8 @@ def _spawn_codex_run(job: dict) -> None:
     # popping other control/deployment jobs instead of stalling behind it. Not routed through
     # run_control_action: that returns one dict for a Redis RPC result key nobody polls here -
     # codex_run's caller (agent/codex_runtime.py) polls a live events list instead.
-    threading.Thread(target=_run_codex_job, args=(job,), daemon=True).start()
+    logger.info("Codex job queued on worker thread id=%s", job.get("job_id"))
+    threading.Thread(target=_run_codex_job, args=(job,), daemon=True, name=f"codex-{job.get('job_id', '')[:12]}").start()
 
 
 def process_control_job(job: dict) -> None:

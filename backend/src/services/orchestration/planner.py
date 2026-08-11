@@ -539,10 +539,13 @@ async def generate_plan(
     model: str,
     api_key: str,
     max_tasks: int | None = None,
-    timeout_seconds: int = 90,
+    timeout_seconds: int | None = None,
     usage_sink: Callable[[dict[str, Any]], None] | None = None,
 ) -> PlanGenerationResult:
     max_tasks = max_tasks or settings.orchestration_max_plan_tasks
+    # Codex cold-starts a container per planning call - 90s was cutting off before any JSON
+    # arrived, which forced endless single-task fallbacks and then "replan limit reached".
+    timeout_seconds = timeout_seconds or settings.codex_simple_timeout_seconds
     project_type = _project_type_from_context(project_context_summary)
     website_quality = _is_visual_website_request(user_message, project_context_summary)
     product_quality = _is_product_build_request(user_message, project_context_summary)
