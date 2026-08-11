@@ -124,7 +124,7 @@ function ensureSession(projectId: string, chatId: string): InternalSession {
   return session;
 }
 
-function notify(session: InternalSession) {
+function notify(session: InternalSession, options?: { project?: boolean }) {
   session.listeners.forEach((listener) => {
     try {
       listener();
@@ -132,6 +132,9 @@ function notify(session: InternalSession) {
       // subscriber errors must not break the stream loop
     }
   });
+  // Text chunks fire dozens of times per second - the project layout only needs loading/status
+  // for its "agent working" banner, so skip that fan-out on pure content flushes.
+  if (options?.project === false) return;
   const projectSet = projectListeners.get(session.projectId);
   projectSet?.forEach((listener) => {
     try {
@@ -165,10 +168,17 @@ function snapshotOf(session: InternalSession): ChatStreamSnapshot {
 // change; any other tab mirrors that into its own local session so the existing
 // notify()/subscribeChatStream() rendering path in chat/page.tsx needs no changes at all. A tab
 // that mounts fresh asks the others for current state in case a turn is already mid-flight.
+//
+// Mid-stream text uses `assistant-content` (only the growing last reply) instead of cloning the
+// full transcript on every throttle tick - otherwise clone+transfer cost grows with history×tokens.
 type ChatBroadcastMessage =
   | { type: "state"; projectId: string; chatId: string; snapshot: ChatStreamSnapshot }
+  | { type: "assistant-content"; projectId: string; chatId: string; content: string }
   | { type: "request-state"; projectId: string; chatId: string }
   | { type: "abort-request"; projectId: string; chatId: string };
+
+const CHUNK_FLUSH_MS = 80;
+const CHUNK_BROADCAST_MS = 250;
 
 let broadcastChannel: BroadcastChannel | null = null;
 
@@ -212,6 +222,21 @@ function handleBroadcastMessage(message: ChatBroadcastMessage) {
     return;
   }
 
+  if (message.type === "assistant-content") {
+    const session = ensureSession(message.projectId, message.chatId);
+    if (session.isLeader) return;
+    if (!session.messages?.length) return;
+    const lastIndex = session.messages.length - 1;
+    const last = session.messages[lastIndex];
+    if (last?.role !== "assistant") return;
+    if (last.content === message.content) return;
+    const next = session.messages.slice();
+    next[lastIndex] = { ...last, content: message.content };
+    session.messages = next;
+    notify(session, { project: false });
+    return;
+  }
+
   // message.type === "state"
   const session = ensureSession(message.projectId, message.chatId);
   if (session.isLeader) return; // this tab owns the real fetch - it's authoritative, not a mirror
@@ -228,6 +253,10 @@ function handleBroadcastMessage(message: ChatBroadcastMessage) {
 
 function broadcastState(projectId: string, chatId: string, session: InternalSession) {
   postToOtherTabs({ type: "state", projectId, chatId, snapshot: snapshotOf(session) });
+}
+
+function broadcastAssistantContent(projectId: string, chatId: string, content: string) {
+  postToOtherTabs({ type: "assistant-content", projectId, chatId, content });
 }
 
 function requestRemoteState(projectId: string, chatId: string) {
@@ -382,33 +411,16 @@ async function runStreamLoop(projectId: string, chatId: string, handlers: Stream
   handlers.onStart(session);
   writePersistedStatus(projectId, chatId, session.agentStatus);
 
-  // This tab owns the fetch below - every state change also goes out to any other tab with the
-  // same chat open (see the cross-tab sync section above snapshotOf/broadcastState).
-  let chunkFlushRaf = 0;
-  let broadcastThrottleTimer = 0;
-  let pendingBroadcast = false;
+  // This tab owns the fetch below - status changes go out as full snapshots; growing assistant
+  // text uses a compact assistant-content broadcast (see CHUNK_* constants above).
+  let chunkFlushTimer = 0;
+  let chunkBroadcastTimer = 0;
+  let pendingChunkBroadcast = false;
 
-  const flushBroadcast = () => {
-    broadcastThrottleTimer = 0;
-    if (!pendingBroadcast) return;
-    pendingBroadcast = false;
-    broadcastState(projectId, chatId, session);
-  };
-
-  const syncSession = (options?: { immediateBroadcast?: boolean }) => {
-    notify(session);
+  const syncSession = (options?: { immediateBroadcast?: boolean; project?: boolean }) => {
+    notify(session, { project: options?.project });
     if (options?.immediateBroadcast) {
-      if (broadcastThrottleTimer) {
-        window.clearTimeout(broadcastThrottleTimer);
-        broadcastThrottleTimer = 0;
-      }
-      pendingBroadcast = false;
       broadcastState(projectId, chatId, session);
-      return;
-    }
-    pendingBroadcast = true;
-    if (!broadcastThrottleTimer) {
-      broadcastThrottleTimer = window.setTimeout(flushBroadcast, 120);
     }
   };
   syncSession({ immediateBroadcast: true });
@@ -440,7 +452,7 @@ async function runStreamLoop(projectId: string, chatId: string, handlers: Stream
 
   let pendingChunk = "";
   const flushAssistantChunks = () => {
-    chunkFlushRaf = 0;
+    chunkFlushTimer = 0;
     if (!pendingChunk || !session.messages?.length) {
       pendingChunk = "";
       return;
@@ -455,13 +467,26 @@ async function runStreamLoop(projectId: string, chatId: string, handlers: Stream
     next[lastIndex] = { ...last, content: last.content + pendingChunk };
     pendingChunk = "";
     session.messages = next;
-    syncSession();
+    // Text-only: chat page updates, project banner does not, and other tabs get content only.
+    notify(session, { project: false });
+    pendingChunkBroadcast = true;
+    if (!chunkBroadcastTimer) {
+      chunkBroadcastTimer = window.setTimeout(() => {
+        chunkBroadcastTimer = 0;
+        if (!pendingChunkBroadcast) return;
+        pendingChunkBroadcast = false;
+        const latest = session.messages?.[session.messages.length - 1];
+        if (latest?.role === "assistant") {
+          broadcastAssistantContent(projectId, chatId, latest.content);
+        }
+      }, CHUNK_BROADCAST_MS);
+    }
   };
 
   const appendAssistant = (chunk: string) => {
     pendingChunk += chunk;
-    if (!chunkFlushRaf) {
-      chunkFlushRaf = window.requestAnimationFrame(flushAssistantChunks);
+    if (!chunkFlushTimer) {
+      chunkFlushTimer = window.setTimeout(flushAssistantChunks, CHUNK_FLUSH_MS);
     }
   };
 
@@ -542,15 +567,14 @@ async function runStreamLoop(projectId: string, chatId: string, handlers: Stream
     }
     syncSession({ immediateBroadcast: true });
   } finally {
-    if (chunkFlushRaf) {
-      window.cancelAnimationFrame(chunkFlushRaf);
-      chunkFlushRaf = 0;
+    if (chunkFlushTimer) {
+      window.clearTimeout(chunkFlushTimer);
+      chunkFlushTimer = 0;
       if (pendingChunk) flushAssistantChunks();
     }
-    if (broadcastThrottleTimer) {
-      window.clearTimeout(broadcastThrottleTimer);
-      broadcastThrottleTimer = 0;
-      if (pendingBroadcast) broadcastState(projectId, chatId, session);
+    if (chunkBroadcastTimer) {
+      window.clearTimeout(chunkBroadcastTimer);
+      chunkBroadcastTimer = 0;
     }
     if (session.controller === controller) {
       session.controller = null;

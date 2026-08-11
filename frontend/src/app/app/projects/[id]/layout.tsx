@@ -107,7 +107,21 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
 
   useEffect(() => {
     if (!projectId) return undefined;
-    const refresh = () => setChatStream(getActiveProjectChatStream(projectId));
+    // Banner is hidden on the chat tab - no need to re-render the whole layout on every chunk.
+    if (pathname?.includes("/chat")) {
+      setChatStream(null);
+      return undefined;
+    }
+    let lastKey = "";
+    const refresh = () => {
+      const snap = getActiveProjectChatStream(projectId);
+      const key = snap
+        ? `${snap.loading}:${snap.agentStatus?.phase}:${snap.agentStatus?.label}:${snap.agentStatus?.state}`
+        : "";
+      if (key === lastKey) return;
+      lastKey = key;
+      setChatStream(snap);
+    };
     refresh();
     return subscribeProjectStreams(projectId, refresh);
   }, [projectId, pathname]);

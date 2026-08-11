@@ -1,13 +1,41 @@
 "use client";
 
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useState, type ComponentType } from "react";
 import { Activity, CheckCircle2, Loader2, Sparkles } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import rehypeHighlight from "rehype-highlight";
 
 import { ExecutionReportShell } from "@/components/chat/execution-report";
 import { cn } from "@/lib/cn";
 import type { AgentStatus, ChatMessage } from "@/lib/chat-stream-runtime";
+
+type RichMarkdownProps = { children: string };
+let richMarkdownPromise: Promise<ComponentType<RichMarkdownProps>> | null = null;
+
+function loadRichMarkdown() {
+  if (!richMarkdownPromise) {
+    richMarkdownPromise = import("@/components/chat/rich-markdown").then((mod) => mod.RichMarkdown);
+  }
+  return richMarkdownPromise;
+}
+
+function AssistantMarkdown({ content }: { content: string }) {
+  const [RichMarkdown, setRichMarkdown] = useState<ComponentType<RichMarkdownProps> | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void loadRichMarkdown().then((Comp) => {
+      if (active) setRichMarkdown(() => Comp);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Keep the finished turn readable while highlight.js is still loading - plain text, no freeze.
+  if (!RichMarkdown) {
+    return <div className="whitespace-pre-wrap text-[15px] leading-[1.55] text-[var(--ar-black)]">{content}</div>;
+  }
+  return <RichMarkdown>{content}</RichMarkdown>;
+}
 
 export const REPORT_HEADING = "### Отчёт о выполнении";
 
@@ -54,11 +82,11 @@ export const MessageBody = memo(function MessageBody({
     }
     return (
       <div className="cursor-chat-assistant prose-chat prose-chat-cursor text-[15px] text-[var(--ar-black)]">
-        <ReactMarkdown rehypePlugins={[rehypeHighlight]}>{main}</ReactMarkdown>
+        <AssistantMarkdown content={main} />
         {report ? (
           <ExecutionReportShell collapsible>
             <div className="prose-chat prose-chat-compact scrollbar-airy max-h-64 overflow-y-auto px-3 py-2 text-[var(--ar-mist)]">
-              <ReactMarkdown rehypePlugins={[rehypeHighlight]}>{report}</ReactMarkdown>
+              <AssistantMarkdown content={report} />
             </div>
           </ExecutionReportShell>
         ) : null}
@@ -104,7 +132,14 @@ export const MessageItem = memo(function MessageItem({
   }
 
   return (
-    <div className="w-full" style={{ contentVisibility: "auto", containIntrinsicSize: "auto 96px" }}>
+    <div
+      className="w-full"
+      style={
+        isStreaming
+          ? undefined
+          : { contentVisibility: "auto", containIntrinsicSize: "auto 96px" }
+      }
+    >
       {/* Assistant turns are full-width plain text (no bubble), so without an author line it
           is hard to see where the agent stops and the next user message starts. */}
       <div className="mb-1.5 flex items-center gap-2">

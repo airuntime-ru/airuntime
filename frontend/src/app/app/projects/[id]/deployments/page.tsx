@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Pause, Rocket, RotateCcw, ShieldCheck } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -102,9 +102,12 @@ export default function ProjectDeploymentsPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
+  const loadInFlightRef = useRef(false);
 
   const loadPage = useCallback(async (options?: { silent?: boolean; limit?: number }) => {
     if (!projectId) return;
+    if (options?.silent && loadInFlightRef.current) return;
+    loadInFlightRef.current = true;
     const limit = options?.limit ?? visibleCount;
     if (!options?.silent) setLoading(true);
     try {
@@ -133,6 +136,7 @@ export default function ProjectDeploymentsPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось загрузить деплои");
     } finally {
+      loadInFlightRef.current = false;
       if (!options?.silent) setLoading(false);
     }
   }, [projectId, visibleCount]);

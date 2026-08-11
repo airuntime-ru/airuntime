@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, startTransition } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -162,7 +162,10 @@ export default function ProjectChatPage() {
     setOutOfCredits(snap.outOfCredits ?? null);
     if (snap.messages) {
       messagesRef.current = snap.messages;
-      setMessages(snap.messages);
+      // Streaming text is high-frequency - keep the input/sidebar responsive while the list catches up.
+      startTransition(() => {
+        setMessages(snap.messages ?? []);
+      });
     }
   }, [projectId, chatId]);
 

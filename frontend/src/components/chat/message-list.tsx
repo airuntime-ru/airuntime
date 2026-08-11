@@ -39,7 +39,7 @@ export function MessageList({
     count: messages.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => ESTIMATE_PX,
-    overscan: 8,
+    overscan: 4,
     measureElement:
       typeof window !== "undefined" && !navigator.userAgent.includes("Firefox")
         ? (element) => element.getBoundingClientRect().height
@@ -61,17 +61,12 @@ export function MessageList({
 
   useEffect(() => {
     if (!stickToBottom || messages.length === 0) return;
-    const scrollToEnd = () => {
+    // Streaming used to scroll on every content length change with a double rAF + layout read;
+    // throttle so measure/scroll work stays off the hot path while text is pouring in.
+    const timer = window.setTimeout(() => {
       virtualizer.scrollToIndex(messages.length - 1, { align: "end" });
-      const node = parentRef.current;
-      if (node) node.scrollTop = node.scrollHeight;
-    };
-    // Virtualizer needs a frame after layout/measure before scrollToIndex sticks.
-    const frame = window.requestAnimationFrame(() => {
-      scrollToEnd();
-      window.requestAnimationFrame(scrollToEnd);
-    });
-    return () => window.cancelAnimationFrame(frame);
+    }, 120);
+    return () => window.clearTimeout(timer);
   }, [stickToBottom, messages.length, lastContentLen, loading, virtualizer]);
 
   if (messages.length === 0) {

@@ -39,7 +39,7 @@ export default function ProjectsPage() {
         setLimits(null);
       }
     })();
-  }, [projects]);
+  }, []);
 
   const running =
     limits?.running ??
