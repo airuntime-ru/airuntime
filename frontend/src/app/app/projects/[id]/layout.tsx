@@ -1,25 +1,31 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import Link from "next/link";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import {
   ArrowLeft,
   BookOpen,
   Bot,
+  FolderOpen,
+  GitBranch,
   Globe,
   KeyRound,
   Layers,
+  LayoutDashboard,
   Loader2,
+  Menu,
   MessageSquare,
+  Rocket,
+  ScrollText,
   Settings,
+  X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import { ProjectStatusChip } from "@/components/app/project-status-chip";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
-import { Tabs } from "@/components/ui/tabs";
 import { PageLoader } from "@/components/ui/loader";
 import { getProject, type ProjectType } from "@/lib/api";
 import {
@@ -66,14 +72,58 @@ const STATUS_GUIDANCE: Record<
   }),
 };
 
+type NavItem = { href: string; label: string; icon: LucideIcon; exact?: boolean };
+
+function navActive(pathname: string | null, item: NavItem) {
+  if (!pathname) return false;
+  if (item.exact) return pathname === item.href;
+  return pathname === item.href || pathname.startsWith(`${item.href}/`);
+}
+
+function ProjectNavLinks({
+  items,
+  pathname,
+  onNavigate,
+}: {
+  items: NavItem[];
+  pathname: string | null;
+  onNavigate?: () => void;
+}) {
+  return (
+    <nav aria-label="Разделы проекта" className="flex flex-col gap-0.5">
+      {items.map((item) => {
+        const active = navActive(pathname, item);
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            onClick={onNavigate}
+            className={cn(
+              "flex min-h-10 items-center gap-2.5 rounded-[0.7rem] px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ar-sky)]/35",
+              active
+                ? "bg-[var(--ar-black)] text-white"
+                : "text-[var(--ar-mist)] hover:bg-black/[0.04] hover:text-[var(--ar-black)]"
+            )}
+          >
+            <item.icon size={16} aria-hidden />
+            {item.label}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+
 export default function ProjectLayout({ children }: { children: React.ReactNode }) {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const pathname = usePathname();
   const projectId = params.id;
   const pageVisible = usePageVisible();
+  const menuId = useId();
   const [project, setProject] = useState<ProjectType | null>(null);
   const [statusModalOpen, setStatusModalOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [chatStream, setChatStream] = useState<ChatStreamSnapshot | null>(null);
 
   useEffect(() => {
@@ -126,95 +176,175 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
     return subscribeProjectStreams(projectId, refresh);
   }, [projectId, pathname]);
 
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!mobileNavOpen) return undefined;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileNavOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
+  }, [mobileNavOpen]);
+
   if (!project) {
     return <PageLoader />;
   }
 
   const base = `/app/projects/${projectId}`;
   const onChatTab = pathname?.includes("/chat") ?? false;
-  const tabs = [
-    { href: base, label: "Обзор" },
-    { href: `${base}/chat`, label: "Чат" },
-    { href: `${base}/orchestration`, label: "Оркестрация" },
-    { href: `${base}/deployments`, label: "Деплои" },
-    { href: `${base}/versions`, label: "Файлы" },
-    { href: `${base}/logs`, label: "Логи" },
-    { href: `${base}/settings`, label: "Настройки" },
+  const tabs: NavItem[] = [
+    { href: base, label: "Обзор", icon: LayoutDashboard, exact: true },
+    { href: `${base}/chat`, label: "Чат", icon: MessageSquare },
+    { href: `${base}/orchestration`, label: "Оркестрация", icon: GitBranch },
+    { href: `${base}/deployments`, label: "Деплои", icon: Rocket },
+    { href: `${base}/versions`, label: "Файлы", icon: FolderOpen },
+    { href: `${base}/logs`, label: "Логи", icon: ScrollText },
+    { href: `${base}/settings`, label: "Настройки", icon: Settings },
   ];
+  const currentTab = tabs.find((item) => navActive(pathname, item)) ?? tabs[0];
 
   const guidance = STATUS_GUIDANCE[project.status]?.(project);
   const showStreamBanner = Boolean(chatStream?.loading && chatStream.agentStatus && !onChatTab);
   const TypeIcon = TYPE_ICONS[project.type] ?? Globe;
 
-  return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
-      <header className="space-y-3 border-b border-[var(--ar-border)] pb-4">
-        <Link
-          href="/app"
-          className="inline-flex min-h-9 items-center gap-1.5 rounded-full px-2 text-sm text-[var(--ar-stone)] transition-colors hover:bg-black/[0.04] hover:text-[var(--ar-black)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ar-sky)]/35"
+  const sidebarBody = (
+    <>
+      <Link
+        href="/app"
+        className="inline-flex min-h-9 items-center gap-1.5 rounded-[0.7rem] px-2 text-sm text-[var(--ar-stone)] transition-colors hover:bg-black/[0.04] hover:text-[var(--ar-black)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ar-sky)]/35"
+      >
+        <ArrowLeft size={15} aria-hidden />
+        Все проекты
+      </Link>
+
+      <div className="mt-4 flex items-start gap-3 px-1">
+        <span
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[0.7rem] bg-[image:var(--ar-accent-gradient-soft)] text-[var(--ar-sky)]"
+          aria-hidden
         >
-          <ArrowLeft size={15} aria-hidden />
-          Все проекты
-        </Link>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-3">
-          <span
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[0.7rem] bg-[image:var(--ar-accent-gradient-soft)] text-[var(--ar-sky)]"
-            aria-hidden
-          >
-            <TypeIcon size={19} />
-          </span>
-          <div className="min-w-0 flex-1 basis-[12rem]">
-            {/* Wraps rather than truncates - a project name is the one thing you must be
-                able to read on a 390px screen. */}
-            <h1 className="text-xl font-semibold leading-tight tracking-[-0.025em] text-[var(--ar-black)] sm:text-2xl">
-              {project.name}
-            </h1>
-            <div className="mt-1.5 flex flex-wrap items-center gap-2">
-              {guidance ? (
-                <button type="button" onClick={() => setStatusModalOpen(true)}>
-                  <ProjectStatusChip status={project.status} className="cursor-pointer" />
-                </button>
-              ) : (
-                <ProjectStatusChip status={project.status} />
-              )}
-              <span className="rounded-full border border-black/[0.07] bg-black/[0.02] px-2.5 py-1 text-xs text-[var(--ar-stone)]">
-                {projectTypeLabel(project.type)}
-              </span>
-            </div>
+          <TypeIcon size={18} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h1 className="text-base font-semibold leading-snug tracking-[-0.02em] text-[var(--ar-black)]">
+            {project.name}
+          </h1>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            {guidance ? (
+              <button type="button" onClick={() => setStatusModalOpen(true)}>
+                <ProjectStatusChip status={project.status} className="cursor-pointer" />
+              </button>
+            ) : (
+              <ProjectStatusChip status={project.status} />
+            )}
+            <span className="rounded-full border border-black/[0.07] bg-black/[0.02] px-2 py-0.5 text-[11px] text-[var(--ar-stone)]">
+              {projectTypeLabel(project.type)}
+            </span>
           </div>
-          {/* Pointless while you are already looking at the chat. */}
-          {onChatTab ? null : (
-            <Link
-              href={`${base}/chat`}
-              className="btn-glow inline-flex min-h-10 items-center gap-2 rounded-[0.7rem] px-4 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ar-sky)]/40"
-            >
-              <MessageSquare size={15} aria-hidden />
-              Чат
-            </Link>
-          )}
         </div>
-      </header>
+      </div>
 
-      <Tabs items={tabs} sticky />
+      <div className="mt-5 flex-1">
+        <ProjectNavLinks
+          items={tabs}
+          pathname={pathname}
+          onNavigate={() => setMobileNavOpen(false)}
+        />
+      </div>
+    </>
+  );
 
-      {showStreamBanner && chatStream?.agentStatus ? (
+  return (
+    <div className="flex min-h-0 flex-1 flex-col lg:flex-row lg:gap-4">
+      <aside className="hidden w-[15.5rem] shrink-0 flex-col lg:flex">
+        <div className="flex min-h-0 flex-1 flex-col rounded-[0.95rem] border border-black/[0.07] bg-white/80 p-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)] backdrop-blur-sm">
+          {sidebarBody}
+        </div>
+      </aside>
+
+      {/* Mobile: one slim bar instead of the old header+tabs stack. */}
+      <div className="mb-3 flex items-center gap-2 lg:hidden">
         <button
           type="button"
-          onClick={() => router.push(`${base}/chat`)}
-          className="flex w-full min-h-11 items-center gap-3 rounded-[var(--ar-radius-md)] border border-sky-200 bg-sky-50 px-4 py-2.5 text-left transition hover:bg-sky-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ar-sky)]/35"
+          onClick={() => setMobileNavOpen(true)}
+          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[0.7rem] border border-black/[0.08] bg-white text-[var(--ar-graphite)]"
+          aria-expanded={mobileNavOpen}
+          aria-controls={menuId}
+          aria-label="Меню проекта"
         >
-          <Loader2 size={16} className="shrink-0 animate-spin text-[var(--ar-sky)]" aria-hidden />
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium text-[var(--ar-black)]">
-              {chatStream.agentStatus.label}
-            </span>
-            <span className="block text-xs text-[var(--ar-stone)]">Агент работает — открыть чат</span>
-          </span>
-          <MessageSquare size={16} className="shrink-0 text-[var(--ar-sky)]" aria-hidden />
+          <Menu size={18} aria-hidden />
         </button>
+        <div className="min-w-0 flex-1 rounded-[0.7rem] border border-black/[0.08] bg-white px-3 py-2">
+          <p className="truncate text-sm font-semibold text-[var(--ar-black)]">{project.name}</p>
+          <p className="truncate text-xs text-[var(--ar-stone)]">{currentTab.label}</p>
+        </div>
+        {!onChatTab ? (
+          <Link
+            href={`${base}/chat`}
+            className="btn-glow inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[0.7rem]"
+            aria-label="Чат"
+          >
+            <MessageSquare size={16} aria-hidden />
+          </Link>
+        ) : null}
+      </div>
+
+      {mobileNavOpen ? (
+        <div className="fixed inset-0 z-40 lg:hidden">
+          <button
+            type="button"
+            className="absolute inset-0 bg-[rgba(4,8,20,0.45)] backdrop-blur-[3px]"
+            aria-label="Закрыть меню"
+            onClick={() => setMobileNavOpen(false)}
+          />
+          <div
+            id={menuId}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Меню проекта"
+            className="absolute inset-y-0 left-0 flex w-[min(20rem,88vw)] flex-col bg-white p-4 shadow-xl"
+          >
+            <div className="mb-2 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setMobileNavOpen(false)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full text-[var(--ar-stone)] hover:bg-black/[0.05]"
+                aria-label="Закрыть"
+              >
+                <X size={18} aria-hidden />
+              </button>
+            </div>
+            {sidebarBody}
+          </div>
+        </div>
       ) : null}
 
-      <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
+        {showStreamBanner && chatStream?.agentStatus ? (
+          <button
+            type="button"
+            onClick={() => router.push(`${base}/chat`)}
+            className="flex w-full min-h-11 items-center gap-3 rounded-[var(--ar-radius-md)] border border-sky-200 bg-sky-50 px-4 py-2.5 text-left transition hover:bg-sky-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ar-sky)]/35"
+          >
+            <Loader2 size={16} className="shrink-0 animate-spin text-[var(--ar-sky)]" aria-hidden />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-medium text-[var(--ar-black)]">
+                {chatStream.agentStatus.label}
+              </span>
+              <span className="block text-xs text-[var(--ar-stone)]">Агент работает — открыть чат</span>
+            </span>
+            <MessageSquare size={16} className="shrink-0 text-[var(--ar-sky)]" aria-hidden />
+          </button>
+        ) : null}
+
+        <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+      </div>
 
       {guidance ? (
         <Modal open={statusModalOpen} onClose={() => setStatusModalOpen(false)} title={guidance.title}>

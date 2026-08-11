@@ -15,7 +15,8 @@ import { cn } from "@/lib/cn";
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const isFullHeightRoute = pathname?.includes("/chat") ?? false;
+  const isProjectRoute = Boolean(pathname?.match(/^\/app\/projects\/[^/]+/));
+  const isFullHeightRoute = isProjectRoute;
   const [isChecking, setIsChecking] = useState(true);
   const [credits, setCredits] = useState(0);
   const [onboardingCompleted, setOnboardingCompleted] = useState(true);
@@ -76,7 +77,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         >
           {/* min-h-0 on every level of the chain: a flex item defaults to min-height:auto and
               refuses to shrink below its content, which is what lets the chat overflow. */}
-          <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col">{children}</div>
+          <div
+            className={cn(
+              "mx-auto flex min-h-0 w-full flex-1 flex-col",
+              isProjectRoute ? "max-w-[96rem]" : "max-w-6xl"
+            )}
+          >
+            {children}
+          </div>
         </main>
         <OnboardingTour
           completed={onboardingCompleted}
