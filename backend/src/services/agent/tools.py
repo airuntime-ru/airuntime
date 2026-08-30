@@ -98,6 +98,56 @@ TOOL_DEFS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "generate_image",
+        "description": (
+            "Generate a PNG image with RouterAI (DALL-E / GPT-Image) and save it into the "
+            "project workspace. Use for logos, hero photos, product mockups, bot avatars, "
+            "Open Graph images, and other visual assets a website or bot needs. After saving, "
+            "reference the relative path from HTML/CSS/Telegram assets."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Relative output path, e.g. static/images/hero.png",
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": "Detailed art direction for the image.",
+                },
+                "size": {
+                    "type": "string",
+                    "description": "1024x1024 (default), 1536x1024, or 1024x1536",
+                },
+            },
+            "required": ["path", "prompt"],
+        },
+    },
+    {
+        "name": "generate_pdf",
+        "description": (
+            "Generate a simple PDF document from plain text/markdown-ish content and save it "
+            "into the project workspace. Use for downloadable brochures, price lists, bot "
+            "attachments, invoices, or static site assets."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Relative output path, e.g. static/docs/price-list.pdf",
+                },
+                "title": {"type": "string", "description": "Document title shown on the first page."},
+                "content": {
+                    "type": "string",
+                    "description": "Body text. Use blank lines between sections.",
+                },
+            },
+            "required": ["path", "title", "content"],
+        },
+    },
+    {
         "name": "build_project",
         "description": (
             "Build a real Docker image from the project's current files right now, so you can "
@@ -277,9 +327,10 @@ class ServiceRequest:
 class WorkspaceTools:
     """Executes agent tool calls against one project's workspace directory."""
 
-    def __init__(self, root: Path, *, project_id: str | None = None) -> None:
+    def __init__(self, root: Path, *, project_id: str | None = None, api_key: str | None = None) -> None:
         self.root = root
         self.project_id = project_id
+        self.api_key = api_key
         self.touched_files: set[str] = set()
         self.requested_secrets: list[tuple[str, str]] = []
         self.requested_services: list[ServiceRequest] = []
@@ -311,6 +362,18 @@ class WorkspaceTools:
                 )
             if name == "delete_file":
                 return self._delete_file(str(arguments.get("path", "")))
+            if name == "generate_image":
+                return self._generate_image(
+                    str(arguments.get("path", "")),
+                    str(arguments.get("prompt", "")),
+                    str(arguments.get("size", "") or "1024x1024"),
+                )
+            if name == "generate_pdf":
+                return self._generate_pdf(
+                    str(arguments.get("path", "")),
+                    str(arguments.get("title", "")),
+                    str(arguments.get("content", "")),
+                )
             if name == "build_project":
                 return self._build_project()
             if name == "preview_project":
@@ -599,6 +662,52 @@ class WorkspaceTools:
                 f"Requested service '{normalized_kind}' - will be reachable at host "
                 f"'{hostname}' once deployed"
             ),
+        )
+
+    def _generate_image(self, path: str, prompt: str, size: str) -> ToolExecutionResult:
+        from src.services.media_generation import generate_image_bytes
+
+        if not prompt.strip():
+            return ToolExecutionResult(ok=False, summary="prompt is required")
+        target = resolve_in_workspace(self.root, path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            data, content_type = generate_image_bytes(
+                prompt=prompt,
+                api_key=self.api_key,
+                size=size or "1024x1024",
+            )
+        except Exception as exc:
+            return ToolExecutionResult(ok=False, summary=f"Image generation failed: {exc}")
+        if len(data) > MAX_FILE_BYTES:
+            return ToolExecutionResult(ok=False, summary="Generated image exceeds workspace file limit")
+        target.write_bytes(data)
+        rel = target.relative_to(self.root).as_posix()
+        self.touched_files.add(rel)
+        return ToolExecutionResult(
+            ok=True,
+            summary=f"Generated image saved to {rel} ({content_type}, {len(data)} bytes)",
+            content=rel,
+        )
+
+    def _generate_pdf(self, path: str, title: str, content: str) -> ToolExecutionResult:
+        from src.services.media_generation import generate_pdf_bytes
+
+        target = resolve_in_workspace(self.root, path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            data = generate_pdf_bytes(title=title, content=content)
+        except Exception as exc:
+            return ToolExecutionResult(ok=False, summary=f"PDF generation failed: {exc}")
+        if len(data) > MAX_FILE_BYTES:
+            return ToolExecutionResult(ok=False, summary="Generated PDF exceeds workspace file limit")
+        target.write_bytes(data)
+        rel = target.relative_to(self.root).as_posix()
+        self.touched_files.add(rel)
+        return ToolExecutionResult(
+            ok=True,
+            summary=f"Generated PDF saved to {rel} ({len(data)} bytes)",
+            content=rel,
         )
 
     def _delete_file(self, path: str) -> ToolExecutionResult:

@@ -21,8 +21,11 @@ _READ_TOOLS = frozenset({"list_files", "read_file"})
 _WRITE_TOOLS = frozenset({"write_file", "edit_file"})
 _DESTRUCTIVE_TOOLS = frozenset({"delete_file"})
 _BUILD_TOOLS = frozenset({"build_project", "preview_project"})
+_MEDIA_TOOLS = frozenset({"generate_image", "generate_pdf"})
 _PROVISION_TOOLS = frozenset({"request_secret", "request_service"})
-_ALL_TOOLS = _READ_TOOLS | _WRITE_TOOLS | _DESTRUCTIVE_TOOLS | _BUILD_TOOLS | _PROVISION_TOOLS
+_ALL_TOOLS = (
+    _READ_TOOLS | _WRITE_TOOLS | _DESTRUCTIVE_TOOLS | _BUILD_TOOLS | _MEDIA_TOOLS | _PROVISION_TOOLS
+)
 
 
 @dataclass(frozen=True)
@@ -58,7 +61,8 @@ _DESIGN_FACTORY_RULES = """
 3. Копирайт должен продавать конкретную ценность и звучать как этот продукт. Запрещены lorem,
    «Добро пожаловать», метатекст о создании сайта, generic SaaS copy и недоказанные обещания.
 4. Изображения должны принадлежать одному art direction и предметной области. Если подходящих
-   ассетов нет, используй сильную типографику, CSS/SVG-графику и текстуру; случайный stock хуже
+   ассетов нет, вызови generate_image и сохрани PNG в репозиторий; PDF/брошюры — generate_pdf.
+   Сильная типографика и CSS/SVG-графика допустимы, если генерация не нужна; случайный stock хуже
    осмысленного image-free решения.
 5. Избегай AI-шаблонов: purple/indigo glow, одинаковая сетка из трёх карточек в каждой секции,
    pill-cloud, emoji-иконки, карточка вокруг каждого абзаца, Inter/Roboto/system-ui как
@@ -194,7 +198,7 @@ ROLE_REGISTRY: dict[SpecialistRole, RolePolicy] = {
         role=SpecialistRole.UI_UX_SPECIALIST,
         title="UI/UX Specialist",
         system_prompt=_UIUX_PROMPT,
-        allowed_tools=_READ_TOOLS | _WRITE_TOOLS | _BUILD_TOOLS,
+        allowed_tools=_READ_TOOLS | _WRITE_TOOLS | _BUILD_TOOLS | _MEDIA_TOOLS,
         allowed_skill_ids=frozenset({"visual_preview_review", "accessibility_review"}),
         write_scope_ceiling=WriteScope.SCOPED_PATHS,
         default_execution_kind=ExecutionKind.CODEX_TASK,
@@ -210,7 +214,7 @@ ROLE_REGISTRY: dict[SpecialistRole, RolePolicy] = {
         role=SpecialistRole.BUILD_FIXER,
         title="Build Fixer",
         system_prompt=_BUILD_FIXER_PROMPT,
-        allowed_tools=_READ_TOOLS | _WRITE_TOOLS | _BUILD_TOOLS,
+        allowed_tools=_READ_TOOLS | _WRITE_TOOLS | _BUILD_TOOLS | _MEDIA_TOOLS,
         allowed_skill_ids=frozenset({"build_repair", "dependency_health_check"}),
         write_scope_ceiling=WriteScope.SCOPED_PATHS,
         default_execution_kind=ExecutionKind.CODEX_TASK,
@@ -227,7 +231,7 @@ ROLE_REGISTRY: dict[SpecialistRole, RolePolicy] = {
         role=SpecialistRole.DEPLOY_FIXER,
         title="Deploy Fixer",
         system_prompt=_DEPLOY_FIXER_PROMPT,
-        allowed_tools=_READ_TOOLS | _WRITE_TOOLS | _BUILD_TOOLS,
+        allowed_tools=_READ_TOOLS | _WRITE_TOOLS | _BUILD_TOOLS | _MEDIA_TOOLS,
         allowed_skill_ids=frozenset({"deploy_repair", "runtime_health_check"}),
         write_scope_ceiling=WriteScope.SCOPED_PATHS,
         default_execution_kind=ExecutionKind.CODEX_TASK,
@@ -279,7 +283,7 @@ ROLE_REGISTRY: dict[SpecialistRole, RolePolicy] = {
         role=SpecialistRole.INTEGRATION_AGENT,
         title="Integration Agent",
         system_prompt=_INTEGRATION_AGENT_PROMPT,
-        allowed_tools=_READ_TOOLS | _WRITE_TOOLS | _BUILD_TOOLS,
+        allowed_tools=_READ_TOOLS | _WRITE_TOOLS | _BUILD_TOOLS | _MEDIA_TOOLS,
         allowed_skill_ids=frozenset({"build_repair", "project_structure_review"}),
         write_scope_ceiling=WriteScope.FULL_WORKSPACE,
         default_execution_kind=ExecutionKind.INTEGRATION,

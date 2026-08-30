@@ -11,9 +11,11 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
-from django.db.models import Avg, Count, Sum
+from django.db.models import Avg, Count, Q, Sum
+from django.db.models.functions import TruncDate
 from django.utils import timezone
 
+from core.models import Project
 from orchestration_section.models import AgentTask, OrchestrationRun, RunEvent
 
 RUN_TERMINAL = frozenset({"completed", "failed", "cancelled"})
@@ -266,6 +268,182 @@ def project_metrics(project_id: UUID | str, window_hours: int = 24) -> dict:
         "tasks_by_execution_kind": tasks_by_kind,
         "events_by_type": events,
     }
+
+
+def fleet_summary(days: int = 30) -> dict:
+    """Fleet-wide orchestration KPIs for the admin analytics page."""
+    start, now = _window(days)
+    runs = OrchestrationRun.objects.filter(created_at__gte=start, created_at__lt=now)
+    by_status = dict(runs.values("status").annotate(c=Count("id")).values_list("status", "c"))
+    total = sum(by_status.values())
+    completed = by_status.get("completed", 0)
+    failed = by_status.get("failed", 0)
+    decided = completed + failed
+    stuck = _stuck_qs(runs).count()
+    active = runs.exclude(status__in=RUN_TERMINAL | frozenset({"waiting_for_user"})).count()
+
+    credits = runs.aggregate(total=Sum("credits_used"))["total"] or 0
+    avg_credits = runs.filter(status="completed").aggregate(v=Avg("credits_used"))["v"]
+
+    completed_runs = runs.filter(
+        status="completed", started_at__isnull=False, finished_at__isnull=False
+    )
+    durations = [
+        (finished - started).total_seconds()
+        for started, finished in completed_runs.values_list("started_at", "finished_at")
+        if started and finished
+    ]
+
+    return {
+        "days": days,
+        "runs_total": total,
+        "runs_completed": completed,
+        "runs_failed": failed,
+        "runs_active": active,
+        "runs_stuck": stuck,
+        "success_rate": _rate(completed, decided),
+        "credits_total": credits,
+        "credits_avg_successful": round(float(avg_credits), 2) if avg_credits is not None else None,
+        "average_run_seconds": round(sum(durations) / len(durations), 2) if durations else None,
+        "by_status": by_status,
+    }
+
+
+def daily_runs_series(days: int = 30) -> list[dict]:
+    start, now = _window(days)
+    rows = (
+        OrchestrationRun.objects.filter(created_at__gte=start, created_at__lt=now)
+        .annotate(day=TruncDate("created_at"))
+        .values("day")
+        .annotate(
+            total=Count("id"),
+            completed=Count("id", filter=Q(status="completed")),
+            failed=Count("id", filter=Q(status="failed")),
+            credits=Sum("credits_used"),
+        )
+        .order_by("day")
+    )
+    return [
+        {
+            "day": row["day"].isoformat() if row["day"] else "",
+            "total": row["total"],
+            "completed": row["completed"],
+            "failed": row["failed"],
+            "credits": row["credits"] or 0,
+        }
+        for row in rows
+    ]
+
+
+def runs_by_status(days: int = 30) -> list[dict]:
+    start, now = _window(days)
+    rows = (
+        OrchestrationRun.objects.filter(created_at__gte=start, created_at__lt=now)
+        .values("status")
+        .annotate(count=Count("id"))
+        .order_by("-count")
+    )
+    return [{"status": row["status"], "count": row["count"]} for row in rows]
+
+
+def tasks_by_role_fleet(days: int = 30) -> list[dict]:
+    start, now = _window(days)
+    rows = (
+        AgentTask.objects.filter(run__created_at__gte=start, run__created_at__lt=now)
+        .values("role")
+        .annotate(count=Count("id"))
+        .order_by("-count")
+    )
+    return [{"role": row["role"] or "unknown", "count": row["count"]} for row in rows]
+
+
+def fleet_health_metrics(window_hours: int = 24) -> dict:
+    """Aggregate health metrics across all projects."""
+    start, now = _window_hours(window_hours)
+    runs = OrchestrationRun.objects.filter(created_at__gte=start, created_at__lt=now)
+    by_status = dict(runs.values("status").annotate(c=Count("id")).values_list("status", "c"))
+    runs_total = sum(by_status.values())
+    runs_completed = by_status.get("completed", 0)
+    runs_failed = by_status.get("failed", 0)
+    decided = runs_completed + runs_failed
+    replanned = runs.filter(plan_version__gt=1).count()
+
+    task_qs = AgentTask.objects.filter(run__created_at__gte=start)
+    tasks_total = task_qs.count()
+    tasks_completed = task_qs.filter(status="completed").count()
+    tasks_failed = task_qs.filter(status="failed").count()
+    first_try = task_qs.filter(status="completed", attempt__lte=1).count()
+
+    event_qs = RunEvent.objects.filter(run__created_at__gte=start)
+    events = dict(
+        event_qs.values("event_type").annotate(c=Count("id")).values_list("event_type", "c")
+    )
+
+    return {
+        "window_hours": window_hours,
+        "run_success_rate": _rate(runs_completed, decided),
+        "task_acceptance_rate": _rate(tasks_completed, tasks_completed + tasks_failed),
+        "first_attempt_success_rate": _rate(first_try, tasks_completed),
+        "replan_rate": _rate(replanned, runs_total),
+        "build_success_rate": _rate(events.get("run_completed", 0), events.get("build_started", 0)),
+        "deploy_success_rate": _rate(
+            events.get("run_completed", 0), events.get("deploy_started", 0)
+        ),
+        "events_by_type": events,
+        "tasks_by_execution_kind": dict(
+            task_qs.values("execution_kind")
+            .annotate(c=Count("id"))
+            .values_list("execution_kind", "c")
+        ),
+    }
+
+
+def active_runs(limit: int = 50) -> list[dict]:
+    """Non-terminal runs with current task context for live admin monitoring."""
+    terminal = RUN_TERMINAL | frozenset({"waiting_for_user", "created"})
+    rows = (
+        OrchestrationRun.objects.exclude(status__in=terminal)
+        .select_related("project")
+        .order_by("-updated_at")[:limit]
+    )
+    task_ids = [run.current_task_id for run in rows if run.current_task_id]
+    tasks_by_id = {
+        str(task.id): task
+        for task in AgentTask.objects.filter(id__in=task_ids)
+    }
+    active: list[dict] = []
+    for run in rows:
+        task = tasks_by_id.get(str(run.current_task_id)) if run.current_task_id else None
+        if task is None:
+            task = (
+                AgentTask.objects.filter(run_id=run.id, status="running")
+                .order_by("-started_at")
+                .first()
+            )
+        project_name = getattr(run.project, "name", None)
+        if project_name is None:
+            project_name = (
+                Project.objects.filter(id=run.project_id).values_list("name", flat=True).first()
+            )
+        active.append(
+            {
+                "run_id": str(run.id),
+                "project_id": str(run.project_id),
+                "project_name": project_name or "—",
+                "status": run.status,
+                "goal": (run.goal or run.original_request or "")[:160],
+                "provider": run.provider,
+                "model": run.model,
+                "credits_used": run.credits_used,
+                "credit_budget": run.credit_budget,
+                "updated_at": run.updated_at,
+                "started_at": run.started_at,
+                "task_title": task.title if task else None,
+                "task_status": task.status if task else None,
+                "task_local_id": task.local_id if task else None,
+            }
+        )
+    return active
 
 
 def decimal_default(value):

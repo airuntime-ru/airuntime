@@ -58,6 +58,7 @@ from src.db.models.user import User
 from src.db.session import SessionLocal
 from src.services import project_git
 from src.services.byok import has_valid_key
+from src.services.file_context import ImageAttachment, extract_image_attachments, load_run_attachment_ids
 from src.services.model_access import reasoning_effort_for_user
 from src.services.model_pricing import estimate_model_usage_cost
 from src.services.orchestration import events_bus
@@ -632,6 +633,7 @@ async def _run_one_task(
     provider_name: str,
     model: str,
     api_key: str,
+    run_images: list[ImageAttachment],
     cancellation: CancellationToken,
     loop_detector: LoopDetector,
     budget: BudgetTracker,
@@ -789,6 +791,7 @@ async def _run_one_task(
             api_key=api_key,
             db=db,
             reasoning_effort=_reasoning_effort_for_project(db, project),
+            images=run_images,
         )
         # Granular per-capability audit trail (spec section 11's "каждый вызов записывается в
         # audit log"): task_started alone doesn't say WHICH skill/MCP capability ran, and after
@@ -1085,6 +1088,7 @@ async def _run_task_wave_member(
     provider_name: str,
     model: str,
     api_key: str,
+    run_images: list[ImageAttachment],
     cancellation: CancellationToken,
     loop_detector: LoopDetector,
     budget: BudgetTracker,
@@ -1121,6 +1125,7 @@ async def _run_task_wave_member(
             provider_name=provider_name,
             model=model,
             api_key=api_key,
+            run_images=run_images,
             cancellation=cancellation,
             loop_detector=loop_detector,
             budget=budget,
@@ -1230,6 +1235,7 @@ async def _run_orchestration_inner(
 
     credit_budget: int | None = None
     credits_used_seed = 0
+    run_images: list[ImageAttachment] = []
 
     db = db_factory()
     try:
@@ -1237,6 +1243,7 @@ async def _run_orchestration_inner(
         if run is None:
             logger.error("run_orchestration: OrchestrationRun %s not found", run_id)
             return
+        run_images = extract_image_attachments(db, load_run_attachment_ids(run.metadata_json))
         project = db.query(Project).filter(Project.id == run.project_id).one_or_none()
         if project is None:
             OrchestrationRunRepository(db).transition(
@@ -1439,6 +1446,7 @@ async def _run_orchestration_inner(
                         provider_name=provider_name,
                         model=model,
                         api_key=api_key,
+                        run_images=run_images,
                         cancellation=cancellation,
                         loop_detector=loop_detector,
                         budget=budget,

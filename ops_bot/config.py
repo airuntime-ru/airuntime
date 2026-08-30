@@ -57,10 +57,15 @@ class Settings:
     log_check_interval_sec: int
     health_check_interval_sec: int
     stuck_check_interval_sec: int
+    routerai_balance_check_interval_sec: int
     error_alert_threshold: int
     stuck_run_after_hours: int
     monitor_containers: tuple[str, ...]
     health_check_urls: tuple[str, ...]
+    routerai_api_key: str
+    routerai_base_url: str
+    routerai_balance_report_hour: int
+    routerai_low_balance_rub: float
     state_path: Path
 
 
@@ -89,6 +94,9 @@ def load_settings() -> Settings:
         stuck_check_interval_sec=int(
             _first_env("STUCK_CHECK_INTERVAL_SEC") or "600"
         ),
+        routerai_balance_check_interval_sec=int(
+            _first_env("ROUTERAI_BALANCE_CHECK_INTERVAL_SEC") or "3600"
+        ),
         error_alert_threshold=int(_first_env("ERROR_ALERT_THRESHOLD") or "20"),
         stuck_run_after_hours=int(_first_env("STUCK_RUN_AFTER_HOURS") or "2"),
         monitor_containers=_csv_strs(
@@ -99,5 +107,11 @@ def load_settings() -> Settings:
             "https://api.airuntime.ru/health,https://admin.airuntime.ru/,https://airuntime.ru/",
             "HEALTH_CHECK_URLS",
         ),
+        routerai_api_key=_first_env("ROUTERAI_API_KEY", "OPENAI_API_KEY"),
+        routerai_base_url=_first_env("OPENAI_BASE_URL") or "https://routerai.ru/api/v1",
+        routerai_balance_report_hour=int(
+            _first_env("ROUTERAI_BALANCE_REPORT_HOUR") or "20"
+        ),
+        routerai_low_balance_rub=float(_first_env("ROUTERAI_LOW_BALANCE_RUB") or "100"),
         state_path=state_dir / "state.json",
     )

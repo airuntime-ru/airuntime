@@ -258,5 +258,10 @@ CURATED_TOP_MODELS: dict[str, list[str]] = {
         "openai/gpt-5.6-sol",
         "openai/gpt-5.6-terra",
         "openai/gpt-5.6-luna",
+        "anthropic/claude-sonnet-5",
+        "anthropic/claude-opus-5",
+        "google/gemini-2.5-pro",
+        "google/gemini-3.1-pro-preview",
+        "google/gemini-3.5-flash",
     ],
 }

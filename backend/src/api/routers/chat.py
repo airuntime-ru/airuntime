@@ -635,6 +635,7 @@ async def _orchestration_event_source(
     provider_name: str,
     model: str,
     api_key: str,
+    attachment_ids: list[UUID] | None = None,
     moderation_text: str = "",
 ):
     """The (only) chat-turn path: a persisted, DB-backed multi-task orchestration run. Ported the
@@ -690,6 +691,15 @@ async def _orchestration_event_source(
         original_request=original_request,
         provider=provider_name,
         model=model,
+        metadata_json=json.dumps(
+            {
+                "triggered_by": "chat",
+                "attachment_ids": [str(item) for item in (attachment_ids or [])],
+            },
+            ensure_ascii=False,
+        )
+        if attachment_ids
+        else json.dumps({"triggered_by": "chat"}, ensure_ascii=False),
     )
     db.commit()
     run_id = run.id
@@ -1168,6 +1178,7 @@ async def _stream_events(
                 provider_name=provider_name,
                 model=model,
                 api_key=api_key,
+                attachment_ids=attachment_ids,
                 moderation_text=content,
             )
         ),

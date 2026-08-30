@@ -47,6 +47,7 @@ def main() -> None:
     last_health_check = now
     last_stuck_check = now
     last_business_poll = now
+    last_routerai_balance_check = now
 
     try:
         while not stop:
@@ -79,6 +80,17 @@ def main() -> None:
                 except Exception:
                     logger.exception("Stuck runs check failed")
                 last_stuck_check = now
+
+            if (
+                settings.routerai_api_key
+                and now - last_routerai_balance_check
+                >= settings.routerai_balance_check_interval_sec
+            ):
+                try:
+                    monitor.check_routerai_balance()
+                except Exception:
+                    logger.exception("RouterAI balance check failed")
+                last_routerai_balance_check = now
 
             time.sleep(min(settings.poll_interval_sec, 5))
     finally:

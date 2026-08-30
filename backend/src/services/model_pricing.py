@@ -106,7 +106,106 @@ _OPENAI_PRICES = (
     ),
 )
 
-_PRICES = {(row.provider, row.model): row for row in _OPENAI_PRICES}
+
+def _routerai_usd_per_million(rub_per_million: str) -> Decimal:
+    """Convert RouterAI list prices (₽/1M tokens) into USD/1M for ledger math."""
+    return Decimal(rub_per_million) / Decimal(settings.billing_usd_to_rub)
+
+
+# RouterAI wallet prices (₽/1M), fetched from their public /models/{author}/{slug}/endpoints API.
+# Using real RouterAI rates here keeps user charges and admin margin closer to actual spend.
+_ROUTERAI_PRICES = (
+    ModelPrice(
+        provider="routerai",
+        model="openai/gpt-5.6-sol",
+        label="GPT-5.6 Sol",
+        description="Максимальное качество для сложной разработки",
+        tier="quality",
+        input_usd_per_million=_routerai_usd_per_million("222.56"),
+        cached_input_usd_per_million=_routerai_usd_per_million("22.26"),
+        output_usd_per_million=_routerai_usd_per_million("1112.81"),
+        cache_write_usd_per_million=_routerai_usd_per_million("278.2"),
+    ),
+    ModelPrice(
+        provider="routerai",
+        model="openai/gpt-5.6-terra",
+        label="GPT-5.6 Terra",
+        description="Баланс качества, скорости и стоимости",
+        tier="balanced",
+        input_usd_per_million=_routerai_usd_per_million("222.56"),
+        cached_input_usd_per_million=_routerai_usd_per_million("22.26"),
+        output_usd_per_million=_routerai_usd_per_million("1335.37"),
+        cache_write_usd_per_million=_routerai_usd_per_million("278.2"),
+    ),
+    ModelPrice(
+        provider="routerai",
+        model="openai/gpt-5.6-luna",
+        label="GPT-5.6 Luna",
+        description="Экономичный режим для простых и массовых задач",
+        tier="economy",
+        input_usd_per_million=_routerai_usd_per_million("22.26"),
+        cached_input_usd_per_million=_routerai_usd_per_million("2.23"),
+        output_usd_per_million=_routerai_usd_per_million("133.54"),
+        cache_write_usd_per_million=_routerai_usd_per_million("27.82"),
+    ),
+    ModelPrice(
+        provider="routerai",
+        model="anthropic/claude-sonnet-5",
+        label="Claude Sonnet 5",
+        description="Сильная модель Anthropic для кода и агентных задач",
+        tier="quality",
+        input_usd_per_million=_routerai_usd_per_million("222.56"),
+        cached_input_usd_per_million=_routerai_usd_per_million("22.26"),
+        output_usd_per_million=_routerai_usd_per_million("1112.81"),
+        cache_write_usd_per_million=_routerai_usd_per_million("278.2"),
+    ),
+    ModelPrice(
+        provider="routerai",
+        model="anthropic/claude-opus-5",
+        label="Claude Opus 5",
+        description="Топовая модель Anthropic для сложных задач",
+        tier="quality",
+        input_usd_per_million=_routerai_usd_per_million("556.4"),
+        cached_input_usd_per_million=_routerai_usd_per_million("55.64"),
+        output_usd_per_million=_routerai_usd_per_million("2782.02"),
+        cache_write_usd_per_million=_routerai_usd_per_million("695.51"),
+    ),
+    ModelPrice(
+        provider="routerai",
+        model="google/gemini-2.5-pro",
+        label="Gemini 2.5 Pro",
+        description="Флагман Google для кода и рассуждений",
+        tier="balanced",
+        input_usd_per_million=_routerai_usd_per_million("153.01"),
+        cached_input_usd_per_million=_routerai_usd_per_million("15.3"),
+        output_usd_per_million=_routerai_usd_per_million("1224.09"),
+        cache_write_usd_per_million=_routerai_usd_per_million("45.9"),
+    ),
+    ModelPrice(
+        provider="routerai",
+        model="google/gemini-3.1-pro-preview",
+        label="Gemini 3.1 Pro",
+        description="Новейший Gemini Pro с большим контекстом",
+        tier="quality",
+        input_usd_per_million=_routerai_usd_per_million("222.56"),
+        cached_input_usd_per_million=_routerai_usd_per_million("22.26"),
+        output_usd_per_million=_routerai_usd_per_million("1335.37"),
+        cache_write_usd_per_million=_routerai_usd_per_million("41.73"),
+    ),
+    ModelPrice(
+        provider="routerai",
+        model="google/gemini-3.5-flash",
+        label="Gemini 3.5 Flash",
+        description="Быстрая и экономичная модель Google",
+        tier="economy",
+        input_usd_per_million=_routerai_usd_per_million("166.92"),
+        cached_input_usd_per_million=_routerai_usd_per_million("16.69"),
+        output_usd_per_million=_routerai_usd_per_million("1001.53"),
+        cache_write_usd_per_million=_routerai_usd_per_million("9.27"),
+    ),
+)
+
+_PRICES = {(row.provider, row.model): row for row in (*_OPENAI_PRICES, *_ROUTERAI_PRICES)}
 _ALIASES = {("openai", "gpt-5.6"): ("openai", "gpt-5.6-sol")}
 
 
@@ -122,6 +221,7 @@ def get_model_price(provider: str, model: str) -> ModelPrice | None:
         return found
     name = provider.strip().lower()
     if name == "routerai":
+        # Legacy fallback: OpenAI slugs routed through RouterAI before explicit catalog rows existed.
         slug = model.rsplit("/", 1)[-1].strip().lower()
         openai_price = _PRICES.get(canonical_model("openai", slug))
         if openai_price is not None:

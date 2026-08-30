@@ -13,6 +13,8 @@
 - Алерт при многих ERROR/Exception в логах контейнеров (~каждые 10 мин)
 - Алерт при падении HTTP health-check (`HEALTH_CHECK_URLS`)
 - Алерт при зависших orchestration runs (без обновления &gt; 2 ч)
+- Ежедневный отчёт баланса RouterAI вечером (MSK, default 20:00)
+- Одноразовый алерт, если баланс RouterAI &lt; 100 ₽ (повтор только после пополнения)
 
 ## Настройка
 
@@ -53,3 +55,8 @@ docker compose -f docker-compose.prod.yml up -d --build ops-bot
 | `HEALTH_CHECK_URLS` | CSV URL для HTTP-проверок |
 | `MONITOR_CONTAINERS` | CSV имён Docker-контейнеров |
 | `DATABASE_URL` | Postgres для stuck-run мониторинга |
+| `ROUTERAI_API_KEY` / `OPENAI_API_KEY` | Ключ RouterAI для проверки баланса (пусто = выключено) |
+| `OPENAI_BASE_URL` | Base URL RouterAI (default `https://routerai.ru/api/v1`) |
+| `ROUTERAI_BALANCE_REPORT_HOUR` | Час ежедневного отчёта по MSK (default 20) |
+| `ROUTERAI_LOW_BALANCE_RUB` | Порог одноразового алерта в ₽ (default 100) |
+| `ROUTERAI_BALANCE_CHECK_INTERVAL_SEC` | Интервал опроса баланса (default 3600) |

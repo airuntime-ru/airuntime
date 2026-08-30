@@ -93,6 +93,16 @@ urlpatterns = [
         name="admin_orchestration_run_detail",
     ),
     path(
+        "orchestration/analytics/",
+        admin.site.admin_view(orchestration_admin.fleet_analytics_dashboard_view),
+        name="admin_orchestration_analytics",
+    ),
+    path(
+        "orchestration/analytics/live.json",
+        admin.site.admin_view(orchestration_admin.fleet_analytics_live_view),
+        name="admin_orchestration_analytics_live",
+    ),
+    path(
         "product-analytics/",
         admin.site.admin_view(_product_analytics_redirect),
         name="admin_product_analytics",

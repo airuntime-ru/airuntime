@@ -34,6 +34,7 @@ from src.services.agent.codex_runtime import CodexAgentSession, resolve_codex_ba
 from src.services.agent.events import AgentDone, TextDelta, ToolCallRequested, ToolCallResult
 from src.services.agent.loop import CodingAgentSession
 from src.services.agent.tools import ToolExecutionResult, WorkspaceTools
+from src.services.file_context import ImageAttachment
 from src.services.orchestration.cancellation import CancellationToken
 from src.services.orchestration.capability_provider import (
     McpCapabilityProvider,
@@ -66,6 +67,7 @@ class TaskContext:
     db: Session | None = None
     # Plan-scoped Codex reasoning effort; None keeps the global default.
     reasoning_effort: str | None = None
+    images: list[ImageAttachment] = field(default_factory=list)
 
 
 @dataclass
@@ -335,7 +337,9 @@ class CodexContainerExecutor(_BaseAgentTurnExecutor):
     async def execute(
         self, contract: TaskContract, context: TaskContext, cancellation: CancellationToken
     ) -> AgentExecutionResult:
-        inner = WorkspaceTools(context.workspace_root, project_id=context.project_id)
+        inner = WorkspaceTools(
+            context.workspace_root, project_id=context.project_id, api_key=context.api_key
+        )
         scoped = ScopedWorkspaceTools(inner, contract=contract)
         session = CodexAgentSession(
             model=context.model,
@@ -353,6 +357,7 @@ class CodexContainerExecutor(_BaseAgentTurnExecutor):
         events = session.run(
             history=context.history,
             user_message=_contract_to_user_message(contract),
+            images=context.images or None,
             cancellation=cancellation,
         )
         return await self._drive(events, workspace=scoped)
@@ -368,7 +373,9 @@ class HttpProviderExecutor(_BaseAgentTurnExecutor):
     async def execute(
         self, contract: TaskContract, context: TaskContext, cancellation: CancellationToken
     ) -> AgentExecutionResult:
-        inner = WorkspaceTools(context.workspace_root, project_id=context.project_id)
+        inner = WorkspaceTools(
+            context.workspace_root, project_id=context.project_id, api_key=context.api_key
+        )
         scoped = ScopedWorkspaceTools(inner, contract=contract)
         session = CodingAgentSession(
             provider_name=context.provider_name,
@@ -381,6 +388,7 @@ class HttpProviderExecutor(_BaseAgentTurnExecutor):
         events = session.run(
             history=context.history,
             user_message=_contract_to_user_message(contract),
+            images=context.images or None,
             cancellation=cancellation,
         )
         return await self._drive(events, workspace=scoped)

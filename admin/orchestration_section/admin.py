@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 
 from django.contrib import admin
-from django.http import Http404
+from django.http import Http404, JsonResponse
 from django.template.response import TemplateResponse
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.html import format_html
 
 from core.models import Project
@@ -75,6 +76,34 @@ def run_detail_view(request, run_id):
         "run_json": _json(data),
     }
     return TemplateResponse(request, "admin/orchestration/run_detail.html", context)
+
+
+def fleet_analytics_dashboard_view(request):
+    days = _days(request)
+    hours = _window_hours(request)
+    context = {
+        **admin.site.each_context(request),
+        "title": "Аналитика оркестратора",
+        "days": days,
+        "hours": hours,
+        "summary_json": _json(reporting.fleet_summary(days=days)),
+        "daily_runs_json": _json(reporting.daily_runs_series(days=days)),
+        "status_json": _json(reporting.runs_by_status(days=days)),
+        "tasks_by_role_json": _json(reporting.tasks_by_role_fleet(days=days)),
+        "health_json": _json(reporting.fleet_health_metrics(window_hours=hours)),
+        "active_runs_json": _json(reporting.active_runs()),
+        "runs_changelist_url": reverse("admin:orchestration_section_domainorchestrationrun_changelist"),
+    }
+    return TemplateResponse(request, "admin/orchestration/fleet_analytics.html", context)
+
+
+def fleet_analytics_live_view(request):
+    return JsonResponse(
+        {
+            "active_runs": reporting.active_runs(),
+            "generated_at": timezone.now().isoformat(),
+        }
+    )
 
 
 @admin.register(DomainOrchestrationRun)

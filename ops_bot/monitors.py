@@ -7,6 +7,7 @@ import re
 import time
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import docker
 import httpx
@@ -15,6 +16,7 @@ from docker.errors import DockerException, NotFound
 
 from ops_bot.config import Settings
 from ops_bot.db import SupportEvent, UserEvent, fetch_support_messages_since, fetch_users_since
+from ops_bot.routerai_balance import fetch_balance_rub, format_rub
 from ops_bot.state import StateStore
 from ops_bot.telegram_api import TelegramClient
 
@@ -300,3 +302,44 @@ class OpsMonitor:
         self.send_code("\n".join(lines))
         self.state.set("last_stuck_alert_at", now.isoformat())
         self.state.set("last_stuck_alert_fp", fingerprint)
+
+    def check_routerai_balance(self) -> None:
+        if not self.settings.routerai_api_key:
+            return
+
+        balance = fetch_balance_rub(
+            self._http,
+            api_key=self.settings.routerai_api_key,
+            base_url=self.settings.routerai_base_url,
+        )
+        if balance is None:
+            return
+
+        now_msk = datetime.now(ZoneInfo("Europe/Moscow"))
+        today = now_msk.date().isoformat()
+        if (
+            now_msk.hour >= self.settings.routerai_balance_report_hour
+            and self.state.get("routerai_last_balance_report_date") != today
+        ):
+            self.send_code(
+                "<b>RouterAI: баланс</b>\n"
+                f"Остаток: <b>{esc(format_rub(balance))}</b>\n"
+                f"<i>{esc(now_msk.strftime('%Y-%m-%d %H:%M MSK'))}</i>"
+            )
+            self.state.set("routerai_last_balance_report_date", today)
+
+        threshold = self.settings.routerai_low_balance_rub
+        low_alerted = bool(self.state.get("routerai_low_balance_alerted"))
+        if balance < threshold:
+            if not low_alerted:
+                self.send_code(
+                    "<b>Алерт: низкий баланс RouterAI</b>\n"
+                    f"Остаток <b>{esc(format_rub(balance))}</b> "
+                    f"(порог {esc(format_rub(threshold))})\n"
+                    "Пополните аккаунт, иначе LLM-запросы начнут падать."
+                )
+                self.state.set("routerai_low_balance_alerted", True)
+        elif low_alerted:
+            self.state.set("routerai_low_balance_alerted", False)
+
+        self.state.set("routerai_last_balance_rub", round(balance, 2))
