@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 import {
@@ -16,7 +16,7 @@ import {
 } from "@/lib/api";
 import { cn } from "@/lib/cn";
 
-const POLL_MS = 3000;
+const POLL_MS = 2000;
 
 export default function SupportStaffChatPage() {
   const searchParams = useSearchParams();
@@ -30,22 +30,27 @@ export default function SupportStaffChatPage() {
   const [draft, setDraft] = useState("");
   const [filter, setFilter] = useState<"all" | "open" | "closed">("open");
   const [unreadOnly, setUnreadOnly] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (bridgeToken) {
       setAccessToken(bridgeToken);
-      setReady(true);
-      return;
     }
     setReady(true);
   }, [bridgeToken]);
 
   const loadInbox = useCallback(async () => {
-    const data = await fetchStaffConversations({
-      status: filter,
-      unreadOnly,
-    });
-    setInbox(data.items);
+    try {
+      const data = await fetchStaffConversations({
+        status: filter,
+        unreadOnly,
+      });
+      setInbox(data.items);
+    } catch {
+      // ignore transient poll errors
+    }
   }, [filter, unreadOnly]);
 
   const loadThread = useCallback(async (conversationId: string) => {
@@ -76,11 +81,15 @@ export default function SupportStaffChatPage() {
   }, [ready, customerUserId]);
 
   useEffect(() => {
-    if (!activeId || customerUserId) return;
+    if (!activeId) return;
     void loadThread(activeId);
     const timer = window.setInterval(() => loadThread(activeId), POLL_MS);
     return () => window.clearInterval(timer);
-  }, [activeId, customerUserId, loadThread]);
+  }, [activeId, loadThread]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [thread?.messages.length, activeId]);
 
   const activeSummary = useMemo(
     () => inbox.find((item) => item.id === activeId) ?? null,
@@ -88,13 +97,21 @@ export default function SupportStaffChatPage() {
   );
 
   const onSend = async () => {
-    if (!activeId || !draft.trim()) return;
-    const message = await sendStaffMessage(activeId, draft.trim());
-    setDraft("");
-    setThread((prev) =>
-      prev ? { ...prev, messages: [...prev.messages, message] } : prev
-    );
-    void loadInbox();
+    if (!activeId || !draft.trim() || sending) return;
+    setSending(true);
+    setSendError(null);
+    try {
+      const message = await sendStaffMessage(activeId, draft.trim());
+      setDraft("");
+      setThread((prev) =>
+        prev ? { ...prev, messages: [...prev.messages, message] } : prev
+      );
+      void loadInbox();
+    } catch {
+      setSendError("Не удалось отправить сообщение. Проверьте авторизацию и попробуйте снова.");
+    } finally {
+      setSending(false);
+    }
   };
 
   if (!ready) {
@@ -102,8 +119,8 @@ export default function SupportStaffChatPage() {
   }
 
   return (
-    <div className="mx-auto flex min-h-[70dvh] max-w-6xl flex-col gap-4 p-4 lg:flex-row">
-      <aside className="w-full shrink-0 rounded-2xl border border-black/10 bg-white lg:w-80">
+    <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col gap-4 lg:flex-row lg:min-h-[calc(100dvh-8rem)]">
+      <aside className="flex max-h-[40dvh] w-full shrink-0 flex-col overflow-hidden rounded-2xl border border-black/10 bg-white lg:max-h-none lg:w-80">
         <div className="border-b border-black/5 p-3">
           <h1 className="text-lg font-semibold">Поддержка</h1>
           <div className="mt-2 flex flex-wrap gap-2 text-xs">
@@ -132,7 +149,7 @@ export default function SupportStaffChatPage() {
             </button>
           </div>
         </div>
-        <ul className="max-h-[60dvh] overflow-y-auto">
+        <ul className="min-h-0 flex-1 overflow-y-auto">
           {inbox.map((item) => (
             <li key={item.id}>
               <button
@@ -160,10 +177,10 @@ export default function SupportStaffChatPage() {
         </ul>
       </aside>
 
-      <section className="flex min-h-[60dvh] flex-1 flex-col rounded-2xl border border-black/10 bg-white">
+      <section className="flex min-h-0 min-h-[50dvh] flex-1 flex-col overflow-hidden rounded-2xl border border-black/10 bg-white lg:min-h-0">
         {activeId && thread ? (
           <>
-            <div className="flex items-center justify-between border-b border-black/5 px-4 py-3">
+            <div className="flex shrink-0 items-center justify-between border-b border-black/5 px-4 py-3">
               <div>
                 <p className="font-semibold">{activeSummary?.user_email ?? "Диалог"}</p>
                 <p className="text-xs text-[var(--ar-mist)]">Статус: {thread.status}</p>
@@ -178,7 +195,7 @@ export default function SupportStaffChatPage() {
                 </button>
               ) : null}
             </div>
-            <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
               {thread.messages.map((message) => (
                 <div
                   key={message.id}
@@ -186,7 +203,7 @@ export default function SupportStaffChatPage() {
                 >
                   <div
                     className={cn(
-                      "max-w-[85%] rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap",
+                      "max-w-[85%] rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap break-words",
                       message.sender_party === "staff"
                         ? "bg-[var(--ar-black)] text-white"
                         : "bg-black/[0.06]"
@@ -196,22 +213,33 @@ export default function SupportStaffChatPage() {
                   </div>
                 </div>
               ))}
+              <div ref={bottomRef} />
             </div>
-            <div className="flex gap-2 border-t border-black/5 p-3">
-              <textarea
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                rows={2}
-                className="min-h-[44px] flex-1 resize-none rounded-xl border border-black/10 px-3 py-2 text-sm"
-                placeholder="Ответ пользователю…"
-              />
-              <button
-                type="button"
-                onClick={() => void onSend()}
-                className="rounded-xl bg-[var(--ar-black)] px-4 text-sm text-white"
-              >
-                Отправить
-              </button>
+            <div className="shrink-0 border-t border-black/5 p-3">
+              {sendError ? <p className="mb-2 text-xs text-red-600">{sendError}</p> : null}
+              <div className="flex gap-2">
+                <textarea
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  rows={2}
+                  className="min-h-[44px] flex-1 resize-none rounded-xl border border-black/10 px-3 py-2 text-sm outline-none focus:border-[var(--ar-sky)]"
+                  placeholder="Ответ пользователю…"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      void onSend();
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  disabled={sending || !draft.trim()}
+                  onClick={() => void onSend()}
+                  className="self-end rounded-xl bg-[var(--ar-black)] px-4 py-2 text-sm text-white disabled:opacity-40"
+                >
+                  {sending ? "…" : "Отправить"}
+                </button>
+              </div>
             </div>
           </>
         ) : (

@@ -9,8 +9,8 @@ import { CreateProjectProvider } from "@/components/app/create-project-context";
 import { OnboardingTour } from "@/components/app/onboarding-tour";
 import { SupportUserChat } from "@/components/support/support-user-chat";
 import { PageLoader } from "@/components/ui/loader";
-import { getAccessToken } from "@/lib/auth";
 import { completeOnboarding, getMe, logout, refreshSession } from "@/lib/api";
+import { getAccessToken, setAccessToken } from "@/lib/auth";
 import { cn } from "@/lib/cn";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -27,6 +27,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const verifySession = async () => {
+      if (typeof window !== "undefined") {
+        const bridgeToken = new URLSearchParams(window.location.search).get("bridge_token");
+        if (bridgeToken) {
+          setAccessToken(bridgeToken);
+          setIsChecking(false);
+          return;
+        }
+      }
+
       const token = getAccessToken();
       if (!token) {
         const refreshed = await refreshSession();
