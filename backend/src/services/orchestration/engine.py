@@ -1272,10 +1272,13 @@ async def _run_orchestration_inner(
         if run.status == "waiting_for_user":
             OrchestrationRunRepository(db).transition(run, "running")
             db.commit()
-        if run.status == "analyzing":
-            OrchestrationRunRepository(db).transition(run, "planning")
-            events_bus.emit(db, run_id=run.id, event_type="planning_started", payload={})
-            db.commit()
+
+        plan_repo = OrchestrationPlanRepository(db)
+        if plan_repo.get_active(run.id) is None and run.status in ("analyzing", "planning"):
+            if run.status == "analyzing":
+                OrchestrationRunRepository(db).transition(run, "planning")
+                events_bus.emit(db, run_id=run.id, event_type="planning_started", payload={})
+                db.commit()
             context_engine = ContextEngine(db)
             await _ensure_planned(
                 db,
@@ -1340,6 +1343,7 @@ async def _run_orchestration_inner(
                 return
 
             task_repo = AgentTaskRepository(db)
+            task_repo.reset_stale_running(plan.id)
             before_ready = {t.id for t in task_repo.list_by_plan(plan.id) if t.status == "ready"}
             task_repo.refresh_readiness(plan.id)
             plan_tasks = task_repo.list_by_plan(plan.id)
@@ -1373,6 +1377,11 @@ async def _run_orchestration_inner(
                         )
                         db.commit()
                     return
+                running = [t for t in non_terminal if t.status == "running"]
+                if running:
+                    db.commit()
+                    await asyncio.sleep(2)
+                    continue
                 if non_terminal:
                     OrchestrationRunRepository(db).transition(
                         run,
@@ -1662,6 +1671,22 @@ def recover_stranded_runs(db_factory: Callable[[], Session] | None = None) -> in
                     provider_name,
                 )
                 continue
+            try:
+                db = factory()
+                try:
+                    run = OrchestrationRunRepository(db).get(run_id)
+                    if run is not None:
+                        plan = OrchestrationPlanRepository(db).get_active(run.id)
+                        if plan is not None:
+                            AgentTaskRepository(db).reset_stale_running(plan.id, stale_seconds=60)
+                            AgentTaskRepository(db).refresh_readiness(plan.id)
+                            db.commit()
+                finally:
+                    db.close()
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "orchestration restart recovery: stale-task reset failed for run %s", run_id
+                )
             launch_run_in_background(
                 run_id, provider_name=provider_name, model=model, api_key=api_key
             )

@@ -79,12 +79,16 @@ def send_email(
                     filename="email-logo.png",
                 )
 
-    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as smtp:
-        if settings.smtp_use_tls:
-            smtp.starttls()
-        if settings.smtp_username and settings.smtp_password:
-            smtp.login(settings.smtp_username, settings.smtp_password)
-        smtp.send_message(message)
+    try:
+        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as smtp:
+            if settings.smtp_use_tls:
+                smtp.starttls()
+            if settings.smtp_username and settings.smtp_password:
+                smtp.login(settings.smtp_username, settings.smtp_password)
+            smtp.send_message(message)
+    except Exception:
+        logger.exception("Transactional email failed to=%s subject=%s", parseaddr(to)[1], subject[:80])
+        return False
     logger.info("Transactional email sent to=%s subject=%s", parseaddr(to)[1], subject[:80])
     return True
 

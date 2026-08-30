@@ -116,7 +116,7 @@ class Settings(BaseSettings):
     orchestration_max_plan_tasks: int = 16
     # Loop-detection ceiling (failure_policy.py) - a run that would need more replans than this
     # to converge stops and asks the user instead of grinding forever.
-    orchestration_max_replans: int = 3
+    orchestration_max_replans: int = 5
     orchestration_max_task_attempts: int = 3
     # None = no per-run cap beyond the user's own credit balance (billing.py still gates that).
     orchestration_default_credit_budget: int | None = None

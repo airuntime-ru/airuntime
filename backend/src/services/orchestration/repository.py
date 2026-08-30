@@ -243,6 +243,29 @@ class AgentTaskRepository:
         self.db.flush()
         return task
 
+    def reset_stale_running(
+        self, plan_id: uuid.UUID | str, *, stale_seconds: int = 300
+    ) -> list[AgentTask]:
+        """Tasks left in `running` after a process crash never finish on their own."""
+        now = datetime.now(UTC)
+        reset: list[AgentTask] = []
+        for task in self.list_by_plan(plan_id):
+            if task.status != "running":
+                continue
+            anchor = task.started_at or task.updated_at or task.created_at
+            if anchor is None:
+                continue
+            age = (now - anchor).total_seconds()
+            if age < stale_seconds:
+                continue
+            self.transition(
+                task,
+                "ready",
+                error_message="recovered after stale running state",
+            )
+            reset.append(task)
+        return reset
+
     def refresh_readiness(self, plan_id: uuid.UUID | str) -> list[AgentTask]:
         """Move `pending`/`blocked` tasks to `ready` once every local_id in their
         depends_on_json is `completed`; move them to `skipped` (terminal) if a dependency has

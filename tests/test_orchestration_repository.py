@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import Session
@@ -357,6 +358,33 @@ class TestRunEventRepository:
 
         assert event_repo.latest_seq(run_a.id) == 2
         assert event_repo.latest_seq(run_b.id) == 1
+
+
+class TestStaleRunningRecovery:
+    def test_reset_stale_running_moves_task_back_to_ready(
+        self, db: Session, project: Project, chat: Chat
+    ) -> None:
+        run_repo = OrchestrationRunRepository(db)
+        plan_repo = OrchestrationPlanRepository(db)
+        task_repo = AgentTaskRepository(db)
+        run = run_repo.create(project_id=project.id, chat_id=chat.id, user_id=project.user_id)
+        plan = plan_repo.create_version(run_id=run.id, version=1, graph_json="{}")
+        task = task_repo.create(
+            run_id=run.id,
+            plan_id=plan.id,
+            local_id="a",
+            title="A",
+            role="implementer",
+            execution_kind="specialist_agent",
+            status="running",
+            depends_on_json="[]",
+        )
+        task.started_at = datetime.now(UTC) - timedelta(minutes=10)
+        db.commit()
+
+        reset = task_repo.reset_stale_running(plan.id, stale_seconds=300)
+        assert [t.local_id for t in reset] == ["a"]
+        assert task_repo.get(task.id).status == "ready"
 
 
 class TestMcpServerRepository:

@@ -234,10 +234,22 @@ async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> 
 }
 
 export async function requestAuthCode(email: string): Promise<void> {
-  await requestJson<{ message: string }>("/auth/request-code", {
-    method: "POST",
-    body: JSON.stringify({ email }),
-  });
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 25_000);
+  try {
+    await requestJson<{ message: string }>("/auth/request-code", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error("Сервер долго не отвечает. Код мог уже уйти на почту — проверьте входящие.");
+    }
+    throw err;
+  } finally {
+    window.clearTimeout(timer);
+  }
 }
 
 export async function verifyAuthCode(email: string, code: string): Promise<void> {

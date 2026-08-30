@@ -1,4 +1,6 @@
 from datetime import UTC, datetime, timedelta
+import asyncio
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from jose import JWTError, jwt
@@ -43,7 +45,25 @@ from src.services.email_templates import (
 )
 from src.services.otp import otp_service
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+async def _send_email_background(*, to: str, subject: str, plain: str, html: str) -> None:
+    try:
+        await asyncio.wait_for(
+            asyncio.to_thread(
+                send_branded_email,
+                to=to,
+                subject=subject,
+                plain=plain,
+                html=html,
+            ),
+            timeout=20,
+        )
+    except Exception:
+        logger.exception("Background email delivery failed for to=%s subject=%s", to, subject[:80])
 
 
 def _store_refresh_token(db: Session, user_id: str, refresh_token: str) -> None:
@@ -73,19 +93,21 @@ def _issue_tokens(db: Session, user: User) -> TokenPairResponse:
 
 
 @router.post("/request-code", response_model=RequestCodeResponse)
-def request_code(payload: RequestCodeRequest) -> RequestCodeResponse:
+async def request_code(payload: RequestCodeRequest) -> RequestCodeResponse:
     hit_email_send_rate_limit(payload.email)
     code = otp_service.issue_code()
     ttl_seconds = settings.otp_expire_minutes * 60
     otp_service.store(payload.email, code, ttl_seconds)
     content = login_code_email(code=code, minutes=settings.otp_expire_minutes)
-    sent = send_branded_email(
-        to=payload.email,
-        subject=content.subject,
-        plain=content.plain,
-        html=content.html,
+    asyncio.create_task(
+        _send_email_background(
+            to=payload.email,
+            subject=content.subject,
+            plain=content.plain,
+            html=content.html,
+        )
     )
-    dev_code = code if settings.debug or not sent else None
+    dev_code = code if settings.debug else None
     return RequestCodeResponse(
         message="Если почта зарегистрирована, код отправлен",
         dev_code=dev_code,
@@ -216,7 +238,7 @@ def logout(payload: LogoutRequest, db: Session = Depends(get_db)) -> AuthMessage
 
 
 @router.post("/forgot-password", response_model=AuthMessageResponse)
-def forgot_password(
+async def forgot_password(
     payload: ForgotPasswordRequest, db: Session = Depends(get_db)
 ) -> AuthMessageResponse:
     user = db.query(User).filter(User.email == payload.email).first()
@@ -225,11 +247,13 @@ def forgot_password(
         token = create_purpose_token(str(user.id), "password_reset", timedelta(minutes=15))
         reset_url = f"{settings.resolved_frontend_url}/auth/reset?token={token}"
         content = password_reset_email(reset_url=reset_url)
-        send_branded_email(
-            to=user.email,
-            subject=content.subject,
-            plain=content.plain,
-            html=content.html,
+        asyncio.create_task(
+            _send_email_background(
+                to=user.email,
+                subject=content.subject,
+                plain=content.plain,
+                html=content.html,
+            )
         )
     return AuthMessageResponse(
         message="Если аккаунт существует, инструкции по сбросу пароля отправлены на почту"
