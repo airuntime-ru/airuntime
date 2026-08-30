@@ -87,7 +87,9 @@ def send_email(
                 smtp.login(settings.smtp_username, settings.smtp_password)
             smtp.send_message(message)
     except Exception:
-        logger.exception("Transactional email failed to=%s subject=%s", parseaddr(to)[1], subject[:80])
+        logger.exception(
+            "Transactional email failed to=%s subject=%s", parseaddr(to)[1], subject[:80]
+        )
         return False
     logger.info("Transactional email sent to=%s subject=%s", parseaddr(to)[1], subject[:80])
     return True
