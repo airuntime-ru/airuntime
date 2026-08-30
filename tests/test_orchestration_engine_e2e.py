@@ -762,7 +762,7 @@ class TestRestartRecoverySweep:
             lambda run_id, **kwargs: launched.append(run_id),
         )
         monkeypatch.setattr(engine.settings, "anthropic_api_key", "")
-        monkeypatch.setattr(engine, "resolve_api_key_for_provider", lambda _p: "")
+        monkeypatch.setattr(engine, "resolve_platform_api_key", lambda _p: "")
 
         assert _real_recover_stranded_runs(db_factory=db_factory) == 0
         assert launched == []
