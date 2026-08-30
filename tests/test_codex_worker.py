@@ -38,14 +38,18 @@ class _FakeCleanupClient:
         self.containers = _FakeContainers(container)
 
 
-def test_resolve_workspace_mount_preserves_shared_project_path() -> None:
+def test_resolve_workspace_mount_preserves_shared_project_path(monkeypatch) -> None:
+    # CI/conftest override GENERATED_PROJECTS_DIR to a temp path; pin the production layout
+    # these tests describe so they do not depend on the host.
+    monkeypatch.setattr(settings, "generated_projects_dir", "/data/airruntime-projects")
     result = codex_worker._resolve_workspace_mount(
         _FakeClient(), "/data/airruntime-projects/project-1"
     )
     assert result == "/var/lib/docker/volumes/airuntime/_data/project-1"
 
 
-def test_resolve_workspace_mount_preserves_isolated_worktree_path() -> None:
+def test_resolve_workspace_mount_preserves_isolated_worktree_path(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "generated_projects_dir", "/data/airruntime-projects")
     result = codex_worker._resolve_workspace_mount(
         _FakeClient(),
         "/data/airruntime-projects/project-1__worktrees/task-1",
