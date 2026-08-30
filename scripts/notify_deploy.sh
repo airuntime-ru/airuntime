@@ -38,7 +38,7 @@ set_deploy_grace() {
     echo "notify_deploy: ops_bot volume missing — skip grace"
     return 0
   fi
-  docker run --rm -v "${vol}:/var/lib/ops-bot" python:3.12-slim python - <<PY || true
+  docker run --rm -v "${vol}:/var/lib/ops-bot" python:3.12-slim python - <<PY
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import json
@@ -64,7 +64,9 @@ if clear_health:
 
 p.parent.mkdir(parents=True, exist_ok=True)
 p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+print("deploy_grace_until=", data.get("deploy_grace_until"))
 PY
+  echo "notify_deploy: grace set (${minutes} min)"
 }
 
 send_telegram() {

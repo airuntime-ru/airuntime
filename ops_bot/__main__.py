@@ -42,10 +42,11 @@ def main() -> None:
         len(settings.health_check_urls),
     )
 
-    last_log_check = 0.0
-    last_health_check = 0.0
-    last_stuck_check = 0.0
-    last_business_poll = 0.0
+    now = time.monotonic()
+    last_log_check = now
+    last_health_check = now
+    last_stuck_check = now
+    last_business_poll = now
 
     try:
         while not stop:
