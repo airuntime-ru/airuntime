@@ -24,11 +24,23 @@ class StateStore:
             return {}
 
     def save(self) -> None:
+        # Merge with on-disk state so external writers (e.g. deploy notify script) are not
+        # clobbered when this process saves its in-memory cursor keys.
+        disk = self._load() if self.path.exists() else {}
+        merged = {**disk, **self._data}
         tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self._data, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(self.path)
+        self._data = merged
 
     def get(self, key: str, default: Any = None) -> Any:
+        if key not in self._data and self.path.exists():
+            try:
+                disk = self._load()
+                if key in disk:
+                    self._data[key] = disk[key]
+            except Exception:
+                pass
         return self._data.get(key, default)
 
     def set(self, key: str, value: Any) -> None:
