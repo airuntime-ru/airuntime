@@ -38,34 +38,36 @@ set_deploy_grace() {
     echo "notify_deploy: ops_bot volume missing — skip grace"
     return 0
   fi
-  docker run --rm -v "${vol}:/var/lib/ops-bot" python:3.12-slim python - <<PY
-from datetime import UTC, datetime, timedelta
+  docker run --rm \
+    -e "GRACE_MIN=${minutes}" \
+    -e "CLEAR_HEALTH=${clear_health_alerts}" \
+    -v "${vol}:/var/lib/ops-bot" \
+    python:3.12-slim \
+    python -c 'import json, os
 from pathlib import Path
-import json
+from datetime import UTC, datetime, timedelta
 
-minutes = float("${minutes}")
-clear_health = ${clear_health_alerts}
 p = Path("/var/lib/ops-bot/state.json")
-data: dict = {}
+data = {}
 if p.exists():
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
     except Exception:
         data = {}
 
+minutes = float(os.environ["GRACE_MIN"])
 if minutes > 0:
     data["deploy_grace_until"] = (datetime.now(UTC) + timedelta(minutes=minutes)).isoformat()
 else:
     data.pop("deploy_grace_until", None)
 
-if clear_health:
+if os.environ.get("CLEAR_HEALTH") == "1":
     data.pop("last_health_alert_fp", None)
     data.pop("last_health_alert_at", None)
 
 p.parent.mkdir(parents=True, exist_ok=True)
 p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-print("deploy_grace_until=", data.get("deploy_grace_until"))
-PY
+print(data.get("deploy_grace_until", ""))'
   echo "notify_deploy: grace set (${minutes} min)"
 }
 
