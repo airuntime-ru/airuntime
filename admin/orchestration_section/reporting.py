@@ -381,6 +381,7 @@ def fleet_health_metrics(window_hours: int = 24) -> dict:
 
     return {
         "window_hours": window_hours,
+        "tasks_total": tasks_total,
         "run_success_rate": _rate(runs_completed, decided),
         "task_acceptance_rate": _rate(tasks_completed, tasks_completed + tasks_failed),
         "first_attempt_success_rate": _rate(first_try, tasks_completed),
@@ -407,10 +408,7 @@ def active_runs(limit: int = 50) -> list[dict]:
         .order_by("-updated_at")[:limit]
     )
     task_ids = [run.current_task_id for run in rows if run.current_task_id]
-    tasks_by_id = {
-        str(task.id): task
-        for task in AgentTask.objects.filter(id__in=task_ids)
-    }
+    tasks_by_id = {str(task.id): task for task in AgentTask.objects.filter(id__in=task_ids)}
     active: list[dict] = []
     for run in rows:
         task = tasks_by_id.get(str(run.current_task_id)) if run.current_task_id else None

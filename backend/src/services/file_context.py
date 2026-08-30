@@ -115,9 +115,7 @@ def build_attachment_context(db: Session, attachment_ids: list[UUID], *, max_cha
     return "\n\n".join(parts)
 
 
-def extract_pdf_text(
-    db: Session, attachment_ids: list[UUID], *, max_chars: int = 8000
-) -> str:
+def extract_pdf_text(db: Session, attachment_ids: list[UUID], *, max_chars: int = 8000) -> str:
     if not attachment_ids or max_chars <= 0:
         return ""
     rows = (

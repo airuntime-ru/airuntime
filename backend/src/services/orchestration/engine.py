@@ -58,7 +58,11 @@ from src.db.models.user import User
 from src.db.session import SessionLocal
 from src.services import project_git
 from src.services.byok import has_valid_key
-from src.services.file_context import ImageAttachment, extract_image_attachments, load_run_attachment_ids
+from src.services.file_context import (
+    ImageAttachment,
+    extract_image_attachments,
+    load_run_attachment_ids,
+)
 from src.services.model_access import reasoning_effort_for_user
 from src.services.model_pricing import estimate_model_usage_cost
 from src.services.orchestration import events_bus

@@ -138,7 +138,10 @@ TOOL_DEFS: list[dict[str, Any]] = [
                     "type": "string",
                     "description": "Relative output path, e.g. static/docs/price-list.pdf",
                 },
-                "title": {"type": "string", "description": "Document title shown on the first page."},
+                "title": {
+                    "type": "string",
+                    "description": "Document title shown on the first page.",
+                },
                 "content": {
                     "type": "string",
                     "description": "Body text. Use blank lines between sections.",
@@ -327,7 +330,9 @@ class ServiceRequest:
 class WorkspaceTools:
     """Executes agent tool calls against one project's workspace directory."""
 
-    def __init__(self, root: Path, *, project_id: str | None = None, api_key: str | None = None) -> None:
+    def __init__(
+        self, root: Path, *, project_id: str | None = None, api_key: str | None = None
+    ) -> None:
         self.root = root
         self.project_id = project_id
         self.api_key = api_key
@@ -680,7 +685,9 @@ class WorkspaceTools:
         except Exception as exc:
             return ToolExecutionResult(ok=False, summary=f"Image generation failed: {exc}")
         if len(data) > MAX_FILE_BYTES:
-            return ToolExecutionResult(ok=False, summary="Generated image exceeds workspace file limit")
+            return ToolExecutionResult(
+                ok=False, summary="Generated image exceeds workspace file limit"
+            )
         target.write_bytes(data)
         rel = target.relative_to(self.root).as_posix()
         self.touched_files.add(rel)
@@ -700,7 +707,9 @@ class WorkspaceTools:
         except Exception as exc:
             return ToolExecutionResult(ok=False, summary=f"PDF generation failed: {exc}")
         if len(data) > MAX_FILE_BYTES:
-            return ToolExecutionResult(ok=False, summary="Generated PDF exceeds workspace file limit")
+            return ToolExecutionResult(
+                ok=False, summary="Generated PDF exceeds workspace file limit"
+            )
         target.write_bytes(data)
         rel = target.relative_to(self.root).as_posix()
         self.touched_files.add(rel)

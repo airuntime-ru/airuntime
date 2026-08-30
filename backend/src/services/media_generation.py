@@ -56,7 +56,9 @@ def generate_image_bytes(
         timeout=180.0,
     )
     if response.status_code >= 400:
-        logger.warning("image generation failed: HTTP %s %s", response.status_code, response.text[:300])
+        logger.warning(
+            "image generation failed: HTTP %s %s", response.status_code, response.text[:300]
+        )
         response.raise_for_status()
     payload = response.json()
     items = payload.get("data") or []
@@ -133,5 +135,7 @@ def generate_pdf_bytes(*, title: str, content: str) -> bytes:
     pages.append(img)
 
     buf = BytesIO()
-    pages[0].save(buf, format="PDF", save_all=True, append_images=pages[1:] if len(pages) > 1 else [])
+    pages[0].save(
+        buf, format="PDF", save_all=True, append_images=pages[1:] if len(pages) > 1 else []
+    )
     return buf.getvalue()

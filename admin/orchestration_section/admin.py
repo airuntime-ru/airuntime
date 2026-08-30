@@ -92,7 +92,9 @@ def fleet_analytics_dashboard_view(request):
         "tasks_by_role_json": _json(reporting.tasks_by_role_fleet(days=days)),
         "health_json": _json(reporting.fleet_health_metrics(window_hours=hours)),
         "active_runs_json": _json(reporting.active_runs()),
-        "runs_changelist_url": reverse("admin:orchestration_section_domainorchestrationrun_changelist"),
+        "runs_changelist_url": reverse(
+            "admin:orchestration_section_domainorchestrationrun_changelist"
+        ),
     }
     return TemplateResponse(request, "admin/orchestration/fleet_analytics.html", context)
 

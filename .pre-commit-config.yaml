@@ -14,5 +14,6 @@ repos:
     rev: v0.11.13
     hooks:
       - id: ruff
-        args: [--fix]
+        args: [--fix, backend/src, tests, admin]
       - id: ruff-format
+        args: [backend/src, tests, admin]

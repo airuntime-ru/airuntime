@@ -7,7 +7,6 @@ from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
-
 from ops_bot.config import Settings
 from ops_bot.monitors import OpsMonitor
 from ops_bot.routerai_balance import fetch_balance_rub, format_rub, parse_balance_rub
@@ -97,9 +96,7 @@ def test_check_routerai_balance_daily_and_low_alert_once(tmp_path: Path, monkeyp
     assert state.get("routerai_low_balance_alerted") is True
 
 
-def test_check_routerai_balance_skips_daily_before_report_hour(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_check_routerai_balance_skips_daily_before_report_hour(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr("ops_bot.monitors.docker.from_env", lambda: None)
     settings = _settings(tmp_path)
     tg = MagicMock()
