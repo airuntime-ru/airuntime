@@ -155,6 +155,52 @@ class TestCollectMetrics:
         assert metrics.tasks_by_execution_kind == {"skill": 1, "specialist_agent": 1}
         assert metrics.skill_match_rate == 0.5
 
+    def test_project_id_filter_scopes_run_counts(self, db: Session) -> None:
+        project_a = _project(db)
+        project_b = _project(db)
+        _run(db, project_a, status_chain=["analyzing", "planning", "running", "failed"])
+        for _ in range(2):
+            _run(
+                db,
+                project_a,
+                status_chain=[
+                    "analyzing",
+                    "planning",
+                    "running",
+                    "validating",
+                    "integrating",
+                    "building",
+                    "deploying",
+                    "verifying_runtime",
+                    "completed",
+                ],
+            )
+        _run(
+            db,
+            project_b,
+            status_chain=[
+                "analyzing",
+                "planning",
+                "running",
+                "validating",
+                "integrating",
+                "building",
+                "deploying",
+                "verifying_runtime",
+                "completed",
+            ],
+        )
+        db.commit()
+
+        scoped = collect_metrics(db, window_hours=24, project_id=project_a.id)
+        global_metrics = collect_metrics(db, window_hours=24)
+
+        assert scoped.runs_total == 3
+        assert scoped.runs_completed == 2
+        assert scoped.runs_failed == 1
+        assert global_metrics.runs_total == 4
+        assert global_metrics.runs_completed == 3
+
     def test_payload_is_json_safe_and_carries_no_free_text(self, db: Session) -> None:
         """The admin view must be safe to expose: counts/rates only, never model output or
         secrets."""

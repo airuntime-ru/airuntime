@@ -18,6 +18,8 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
+from sqlalchemy.orm import Session
+
 from src.services.agent.codex_runtime import CODEX_ELIGIBLE_PROVIDERS, codex_simple_complete
 from src.services.agent.events import TextDelta, TurnFinished
 from src.services.agent.providers import get_agent_provider
@@ -141,6 +143,9 @@ async def complete_structured(
     codex_workspace_root: str | Path | None = None,
     codex_project_id: str | None = None,
     usage_sink: Callable[[dict[str, Any]], None] | None = None,
+    trace_db: Session | None = None,
+    trace_run_id: object | None = None,
+    trace_category: str = "llm",
 ) -> ModelT | None:
     """Ask the model for one JSON object matching response_model. Never raises - on any
     failure (empty response, malformed JSON, schema mismatch) tries exactly one repair
@@ -172,6 +177,20 @@ async def complete_structured(
     logger.info(
         "pipeline_llm structured output needed a repair retry: %s", (error_detail or "")[:300]
     )
+    if trace_db is not None and trace_run_id is not None:
+        from src.services.orchestration.trace import emit_trace
+
+        emit_trace(
+            trace_db,
+            run_id=trace_run_id,
+            category=trace_category,
+            action="repair_retry",
+            summary=f"structured output repair for {response_model.__name__}",
+            details={
+                "response_model": response_model.__name__,
+                "validation_error": (error_detail or "")[:500],
+            },
+        )
     repair_text = (
         f"{user_text}\n\n--- Твой предыдущий ответ не прошёл валидацию ---\n"
         f"{raw[:4000]}\n--- Ошибка ---\n{(error_detail or '')[:1000]}\n"

@@ -1,4 +1,5 @@
 from django.contrib import admin, messages
+from django.urls import reverse
 from django.utils.html import format_html
 
 from core.models import ModerationEvent
@@ -27,13 +28,14 @@ class DomainAppUserAdmin(admin.ModelAdmin):
         "billing_period_end",
         "is_verified",
         "is_banned",
+        "support_chat_link",
         "flagged_count",
         "deleted_count",
         "created_at",
     )
     search_fields = ("email",)
     list_filter = ("role", "plan", "is_verified", "is_banned")
-    readonly_fields = ("id", "password_hash", "created_at", "updated_at")
+    readonly_fields = ("id", "password_hash", "created_at", "updated_at", "support_open_link")
     actions = ["ban_users", "unban_users"]
 
     def flagged_count(self, obj) -> int:
@@ -45,6 +47,20 @@ class DomainAppUserAdmin(admin.ModelAdmin):
         return ModerationEvent.objects.filter(user_id=obj.id, action="deleted").count()
 
     deleted_count.short_description = "Раз удалено"
+
+    def support_chat_link(self, obj) -> str:
+        url = reverse("admin_support_open_user", args=[obj.id])
+        return format_html('<a href="{}">Поддержка</a>', url)
+
+    support_chat_link.short_description = "Чат"
+
+    def support_open_link(self, obj) -> str:
+        if not obj or not obj.id:
+            return "—"
+        url = reverse("admin_support_open_user", args=[obj.id])
+        return format_html('<a class="button" href="{}">Открыть чат поддержки</a>', url)
+
+    support_open_link.short_description = "Поддержка"
 
     @admin.action(description="Забанить выбранных пользователей")
     def ban_users(self, request, queryset):
@@ -59,13 +75,30 @@ class DomainAppUserAdmin(admin.ModelAdmin):
 
 @admin.register(DomainProject)
 class DomainProjectAdmin(admin.ModelAdmin):
-    list_display = ("name", "type", "status", "user", "created_at")
+    list_display = ("name", "type", "status", "user", "orchestration_link", "created_at")
     search_fields = ("name", "description")
     list_filter = ("type", "status")
-    readonly_fields = ("id", "created_at", "updated_at")
+    readonly_fields = ("id", "created_at", "updated_at", "orchestration_dashboard_link")
 
     def get_queryset(self, request):
         return super().get_queryset(request).exclude(status="blocked")
+
+    @admin.display(description="Оркестрация")
+    def orchestration_link(self, obj) -> str:
+        url = reverse("admin_orchestration_project_dashboard", args=[obj.id])
+        return format_html('<a href="{}">Дашборд</a>', url)
+
+    @admin.display(description="Дашборд оркестрации")
+    def orchestration_dashboard_link(self, obj) -> str:
+        if obj is None:
+            return "—"
+        url = reverse("admin_orchestration_project_dashboard", args=[obj.id])
+        return format_html('<a class="button" href="{}">Открыть дашборд оркестрации</a>', url)
+
+    def change_view(self, request, object_id, form_url="", extra_context=None):
+        extra_context = extra_context or {}
+        extra_context["show_orchestration_link"] = True
+        return super().change_view(request, object_id, form_url, extra_context=extra_context)
 
 
 @admin.register(BlockedProject)

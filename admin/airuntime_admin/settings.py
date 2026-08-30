@@ -23,6 +23,8 @@ INSTALLED_APPS = [
     "domain.apps.DomainConfig",
     "chats_section.apps.ChatsSectionConfig",
     "platform_settings.apps.PlatformSettingsConfig",
+    "orchestration_section.apps.OrchestrationSectionConfig",
+    "product_analytics.apps.ProductAnalyticsConfig",
 ]
 
 MIDDLEWARE = [

@@ -3,6 +3,38 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+NOTIFY_SCRIPT="$(cd "$(dirname "$0")" && pwd)/scripts/notify_deploy.sh"
+DID_DEPLOY=0
+
+notify_deploy() {
+  local phase="$1"
+  local detail="${2:-}"
+  if [[ ! -f "$NOTIFY_SCRIPT" ]]; then
+    echo "WARN notify_deploy: script not found — skip $phase"
+    return 0
+  fi
+  if ! bash "$NOTIFY_SCRIPT" "$phase" "$detail"; then
+    echo "WARN notify_deploy $phase failed (ignored)"
+  fi
+}
+
+on_exit() {
+  local code=$?
+  if [[ "$DID_DEPLOY" -eq 0 ]]; then
+    return
+  fi
+  if [[ "$code" -eq 0 ]]; then
+    notify_deploy finished "deploy.sh exit 0"
+  else
+    notify_deploy failed "deploy.sh exit ${code}"
+  fi
+}
+
+trap on_exit EXIT
+
+notify_deploy started "git pull + compose rebuild"
+DID_DEPLOY=1
+
 echo "==> Pull from git"
 git pull --ff-only origin main
 

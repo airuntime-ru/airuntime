@@ -18,6 +18,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from sqlalchemy.orm import Session
+
 from src.db.models.agent_task import AgentTask
 from src.services.orchestration.failure_policy import FailureEvaluation
 from src.services.orchestration.planner import PlanGenerationResult, generate_plan
@@ -98,6 +100,8 @@ async def generate_replan(
     api_key: str,
     max_tasks: int,
     usage_sink: Callable[[dict[str, Any]], None] | None = None,
+    db: Session | None = None,
+    run_id: object | None = None,
 ) -> PlanGenerationResult:
     user_message = build_replan_user_message(
         original_request=original_request,
@@ -114,4 +118,6 @@ async def generate_replan(
         api_key=api_key,
         max_tasks=max_tasks,
         usage_sink=usage_sink,
+        db=db,
+        run_id=run_id,
     )

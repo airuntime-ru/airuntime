@@ -7,6 +7,8 @@ import { AppMobileNav } from "@/components/app/app-mobile-nav";
 import { AppTopBar } from "@/components/app/app-topbar";
 import { CreateProjectProvider } from "@/components/app/create-project-context";
 import { OnboardingTour } from "@/components/app/onboarding-tour";
+import { ProductAnalytics } from "@/components/product-analytics";
+import { SupportUserChat } from "@/components/support/support-user-chat";
 import { PageLoader } from "@/components/ui/loader";
 import { getAccessToken } from "@/lib/auth";
 import { completeOnboarding, getMe, logout, refreshSession } from "@/lib/api";
@@ -19,6 +21,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // Fixed viewport + overflow lock is only for chat (composer pinned). Settings/overview/etc.
   // must scroll with the page — locking every project route clipped long forms.
   const isFullHeightRoute = Boolean(pathname?.match(/^\/app\/projects\/[^/]+\/chat(?:\/|$)/));
+  const isSupportStaffRoute = pathname === "/app/support-chat";
   const [isChecking, setIsChecking] = useState(true);
   const [credits, setCredits] = useState(0);
   const [onboardingCompleted, setOnboardingCompleted] = useState(true);
@@ -63,6 +66,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     // Deliberately static decoration: this shell mounts on every authenticated page, so the
     // backdrop is a gradient plus a tiled dust texture - one paint, no running animation.
     <CreateProjectProvider>
+      <ProductAnalytics />
+      <SupportUserChat hidden={isSupportStaffRoute} />
       <div className="app-shell stardust isolate min-h-screen text-[var(--ar-black)]">
         <AppTopBar credits={credits} onLogout={onLogout} />
         <AppMobileNav onLogout={onLogout} />

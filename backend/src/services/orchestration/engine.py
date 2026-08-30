@@ -530,6 +530,8 @@ async def _ensure_planned(
         api_key=api_key,
         max_tasks=settings.orchestration_max_plan_tasks,
         usage_sink=planning_usage.append,
+        db=db,
+        run_id=run.id,
     )
     user = db.query(User).filter(User.id == run.user_id).one_or_none()
     for usage in planning_usage:
@@ -1523,6 +1525,8 @@ async def _run_orchestration_inner(
                     api_key=api_key,
                     max_tasks=settings.orchestration_max_plan_tasks,
                     usage_sink=replanning_usage.append,
+                    db=db,
+                    run_id=run.id,
                 )
                 user = db.query(User).filter(User.id == run.user_id).one_or_none()
                 for usage in replanning_usage:

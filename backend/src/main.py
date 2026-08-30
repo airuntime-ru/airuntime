@@ -12,6 +12,7 @@ configure_logging()
 
 from src.api.dependencies.rate_limit import enforce_rate_limit  # noqa: E402
 from src.api.routers import (  # noqa: E402
+    analytics,
     auth,
     billing,
     byok,
@@ -24,6 +25,8 @@ from src.api.routers import (  # noqa: E402
     projects,
     providers,
     secrets,
+    support,
+    support_staff,
     telegram,
 )
 from src.core.config import settings  # noqa: E402
@@ -91,6 +94,9 @@ app.include_router(billing.router, prefix=settings.api_prefix)
 app.include_router(byok.router, prefix=settings.api_prefix)
 app.include_router(orchestration.router, prefix=settings.api_prefix)
 app.include_router(orchestration_admin.router, prefix=settings.api_prefix)
+app.include_router(analytics.router, prefix=settings.api_prefix)
+app.include_router(support.router, prefix=settings.api_prefix)
+app.include_router(support_staff.router, prefix=settings.api_prefix)
 
 
 @app.get("/health")

@@ -635,6 +635,7 @@ async def _orchestration_event_source(
     provider_name: str,
     model: str,
     api_key: str,
+    moderation_text: str = "",
 ):
     """The (only) chat-turn path: a persisted, DB-backed multi-task orchestration run. Ported the
     pre-engine event_source()'s required-files/Dockerfile-self-heal/thin-architecture/Telegram-
@@ -651,6 +652,36 @@ async def _orchestration_event_source(
         return _sse_chunk(text)
 
     yield _sse_status("thinking", "AIRuntime осмысляет задачу")
+
+    if moderation_text.strip():
+        verdict = await check_project_safety(
+            text=moderation_text,
+            provider_name=provider_name,
+            model=model,
+            api_key=api_key,
+        )
+        if verdict.blocked:
+            reason = f"{verdict.category}: {verdict.reason}" if verdict.reason else verdict.category
+            block_project(db, project, reason=reason)
+            db.add(
+                ModerationEvent(
+                    project_id=project.id,
+                    project_name=project.name,
+                    user_id=current_user.id,
+                    action="flagged",
+                    category=verdict.category,
+                    reason=verdict.reason,
+                )
+            )
+            db.commit()
+            yield _sse_status(
+                "error",
+                f"Проект заблокирован модерацией: {reason}",
+                "error",
+            )
+            return
+
+    yield _sse_status("thinking", "Составляю план работ")
 
     run = OrchestrationRunRepository(db).create(
         project_id=project.id,
@@ -676,7 +707,9 @@ async def _orchestration_event_source(
         if ping.due():
             yield SSE_PING
 
-        if event_type in ("plan_created", "plan_revised"):
+        if event_type == "planning_started":
+            yield _sse_status("thinking", "Составляю план работ")
+        elif event_type in ("plan_created", "plan_revised"):
             count = payload.get("task_count")
             yield _sse_status(
                 "thinking", f"План готов: {count} задач(и)" if count else "План составлен"
@@ -1124,29 +1157,6 @@ async def _stream_events(
     # BYOK first: the user's own key means the provider bills them, not us.
     api_key = resolve_turn_api_key(db, current_user, provider_name) or ""
 
-    if content:
-        verdict = await check_project_safety(
-            text=content, provider_name=provider_name, model=model, api_key=api_key
-        )
-        if verdict.blocked:
-            reason = f"{verdict.category}: {verdict.reason}" if verdict.reason else verdict.category
-            block_project(db, project, reason=reason)
-            db.add(
-                ModerationEvent(
-                    project_id=project.id,
-                    project_name=project.name,
-                    user_id=current_user.id,
-                    action="flagged",
-                    category=verdict.category,
-                    reason=verdict.reason,
-                )
-            )
-            db.commit()
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Проект заблокирован модерацией: {reason}",
-            )
-
     return StreamingResponse(
         with_heartbeat(
             _orchestration_event_source(
@@ -1158,6 +1168,7 @@ async def _stream_events(
                 provider_name=provider_name,
                 model=model,
                 api_key=api_key,
+                moderation_text=content,
             )
         ),
         media_type="text/event-stream",

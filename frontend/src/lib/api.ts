@@ -919,3 +919,100 @@ export async function setCustomDomain(
 export async function verifyCustomDomain(projectId: string): Promise<CustomDomainType> {
   return requestJson<CustomDomainType>(`/projects/${projectId}/domain/verify`, { method: "POST" });
 }
+
+export type SupportMessageType = {
+  id: string;
+  conversation_id: string;
+  sender_party: "user" | "staff";
+  sender_user_id: string;
+  body: string;
+  read_at: string | null;
+  created_at: string;
+};
+
+export type SupportConversationType = {
+  id: string;
+  status: string;
+  messages: SupportMessageType[];
+};
+
+export type StaffConversationSummaryType = {
+  id: string;
+  user_id: string;
+  user_email: string;
+  credits_balance: number;
+  status: string;
+  unread_from_user: number;
+  last_message_at: string | null;
+  last_message_preview: string;
+  last_sender_party: string | null;
+};
+
+export async function fetchSupportConversation(): Promise<SupportConversationType> {
+  return requestJson<SupportConversationType>("/support/conversation");
+}
+
+export async function fetchSupportUnread(): Promise<{ unread: number }> {
+  return requestJson<{ unread: number }>("/support/unread-count");
+}
+
+export async function sendSupportMessage(body: string): Promise<SupportMessageType> {
+  return requestJson<SupportMessageType>("/support/messages", {
+    method: "POST",
+    body: JSON.stringify({ body }),
+  });
+}
+
+export async function markSupportRead(messageIds: string[]): Promise<void> {
+  await requestJson<{ updated: string[] }>("/support/read", {
+    method: "POST",
+    body: JSON.stringify({ message_ids: messageIds }),
+  });
+}
+
+export async function fetchStaffConversations(options?: {
+  status?: string;
+  unreadOnly?: boolean;
+  page?: number;
+}): Promise<{ items: StaffConversationSummaryType[]; total: number }> {
+  const params = new URLSearchParams();
+  if (options?.status) params.set("status", options.status);
+  if (options?.unreadOnly) params.set("unread_only", "true");
+  if (options?.page) params.set("page", String(options.page));
+  const qs = params.toString();
+  return requestJson(`/support/staff/conversations${qs ? `?${qs}` : ""}`);
+}
+
+export async function fetchStaffConversation(conversationId: string): Promise<SupportConversationType> {
+  return requestJson<SupportConversationType>(`/support/staff/conversations/${conversationId}/messages`);
+}
+
+export async function sendStaffMessage(
+  conversationId: string,
+  body: string,
+): Promise<SupportMessageType> {
+  return requestJson<SupportMessageType>(`/support/staff/conversations/${conversationId}/messages`, {
+    method: "POST",
+    body: JSON.stringify({ body }),
+  });
+}
+
+export async function markStaffRead(conversationId: string, messageIds: string[]): Promise<void> {
+  await requestJson(`/support/staff/conversations/${conversationId}/read`, {
+    method: "POST",
+    body: JSON.stringify({ message_ids: messageIds }),
+  });
+}
+
+export async function closeStaffConversation(conversationId: string): Promise<void> {
+  await requestJson(`/support/staff/conversations/${conversationId}/close`, { method: "POST" });
+}
+
+export async function openStaffConversationForUser(userId: string): Promise<SupportConversationType> {
+  return requestJson<SupportConversationType>(
+    `/support/staff/conversations/open-for-user/${userId}`,
+    { method: "POST" },
+  );
+}
+
+export { setAccessToken } from "@/lib/auth";

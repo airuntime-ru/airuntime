@@ -20,6 +20,28 @@
         <th scope="row"><a href="{% url 'admin_analytics_dashboard' %}">Расходы, маржа и воронка</a></th>
         <td>Расход на провайдера, списания с пользователей, BYOK, заявки на тарифы, burn free.</td>
       </tr>
+      <tr>
+        <th scope="row"><a href="{% url 'admin:product_analytics_dashboard' %}">Продуктовая аналитика</a></th>
+        <td>DAU, экраны приложения, retention D1/D7/D30, разбивка по платформам.</td>
+      </tr>
+    </table>
+  </div>
+  <div class="module" style="margin-bottom:18px;">
+    <table>
+      <caption>Оркестрация</caption>
+      <tr>
+        <th scope="row"><a href="{% url 'admin:orchestration_section_domainorchestrationrun_changelist' %}">Запуски оркестрации</a></th>
+        <td>Наблюдаемость движка: KPI по проектам, задачи, таймлайн событий без секретов.</td>
+      </tr>
+    </table>
+  </div>
+  <div class="module" style="margin-bottom:18px;">
+    <table>
+      <caption>Поддержка</caption>
+      <tr>
+        <th scope="row"><a href="{% url 'admin_support_open' %}">Чат поддержки</a></th>
+        <td>1-on-1 переписка с пользователями (как в clino): inbox оператора на фронте.</td>
+      </tr>
     </table>
   </div>
   {% include "admin/app_list.html" with app_list=app_list show_changelinks=True %}

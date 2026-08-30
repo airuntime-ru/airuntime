@@ -9,6 +9,8 @@ so they are not for ordinary project owners.
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
@@ -29,8 +31,9 @@ def _require_admin(current_user: User) -> None:
 @router.get("/metrics")
 def orchestration_metrics(
     window_hours: int = Query(default=24, ge=1, le=24 * 30),
+    project_id: UUID | None = Query(default=None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
     _require_admin(current_user)
-    return collect_metrics(db, window_hours=window_hours).to_dict()
+    return collect_metrics(db, window_hours=window_hours, project_id=project_id).to_dict()

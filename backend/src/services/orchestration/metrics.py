@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -76,13 +77,23 @@ class OrchestrationMetrics:
         return asdict(self)
 
 
-def collect_metrics(db: Session, *, window_hours: int = 24) -> OrchestrationMetrics:
+def _run_scope(*, since: datetime, project_id: UUID | None):
+    clauses = [OrchestrationRun.created_at >= since]
+    if project_id is not None:
+        clauses.append(OrchestrationRun.project_id == project_id)
+    return clauses
+
+
+def collect_metrics(
+    db: Session, *, window_hours: int = 24, project_id: UUID | None = None
+) -> OrchestrationMetrics:
     since = datetime.now(UTC) - timedelta(hours=window_hours)
     metrics = OrchestrationMetrics(window_hours=window_hours)
+    run_scope = _run_scope(since=since, project_id=project_id)
 
     run_rows = db.execute(
         select(OrchestrationRun.status, func.count())
-        .where(OrchestrationRun.created_at >= since)
+        .where(*run_scope)
         .group_by(OrchestrationRun.status)
     ).all()
     by_status = {status: count for status, count in run_rows}
@@ -101,7 +112,7 @@ def collect_metrics(db: Session, *, window_hours: int = 24) -> OrchestrationMetr
             select(func.count())
             .select_from(OrchestrationRun)
             .where(
-                OrchestrationRun.created_at >= since,
+                *run_scope,
                 OrchestrationRun.status.notin_(
                     ("completed", "failed", "cancelled", "waiting_for_user", "created")
                 ),
@@ -119,7 +130,7 @@ def collect_metrics(db: Session, *, window_hours: int = 24) -> OrchestrationMetr
                 func.extract("epoch", OrchestrationRun.finished_at - OrchestrationRun.started_at)
             ),
         ).where(
-            OrchestrationRun.created_at >= since,
+            *run_scope,
             OrchestrationRun.status == "completed",
             OrchestrationRun.started_at.is_not(None),
             OrchestrationRun.finished_at.is_not(None),
@@ -138,7 +149,7 @@ def collect_metrics(db: Session, *, window_hours: int = 24) -> OrchestrationMetr
         db.execute(
             select(func.count())
             .select_from(OrchestrationRun)
-            .where(OrchestrationRun.created_at >= since, OrchestrationRun.plan_version > 1)
+            .where(*run_scope, OrchestrationRun.plan_version > 1)
         ).scalar_one()
         or 0
     )
@@ -147,7 +158,7 @@ def collect_metrics(db: Session, *, window_hours: int = 24) -> OrchestrationMetr
     task_rows = db.execute(
         select(AgentTask.status, func.count())
         .join(OrchestrationRun, OrchestrationRun.id == AgentTask.run_id)
-        .where(OrchestrationRun.created_at >= since)
+        .where(*run_scope)
         .group_by(AgentTask.status)
     ).all()
     tasks_by_status = {status: count for status, count in task_rows}
@@ -164,7 +175,7 @@ def collect_metrics(db: Session, *, window_hours: int = 24) -> OrchestrationMetr
             .select_from(AgentTask)
             .join(OrchestrationRun, OrchestrationRun.id == AgentTask.run_id)
             .where(
-                OrchestrationRun.created_at >= since,
+                *run_scope,
                 AgentTask.status == "completed",
                 AgentTask.attempt <= 1,
             )
@@ -180,7 +191,7 @@ def collect_metrics(db: Session, *, window_hours: int = 24) -> OrchestrationMetr
             select(func.count())
             .select_from(AgentTask)
             .join(OrchestrationRun, OrchestrationRun.id == AgentTask.run_id)
-            .where(OrchestrationRun.created_at >= since, AgentTask.attempt > 1)
+            .where(*run_scope, AgentTask.attempt > 1)
         ).scalar_one()
         or 0
     )
@@ -193,7 +204,7 @@ def collect_metrics(db: Session, *, window_hours: int = 24) -> OrchestrationMetr
         rows = db.execute(
             select(column, func.count())
             .join(OrchestrationRun, OrchestrationRun.id == AgentTask.run_id)
-            .where(OrchestrationRun.created_at >= since)
+            .where(*run_scope)
             .group_by(column)
         ).all()
         setattr(metrics, target, {str(value): count for value, count in rows})
@@ -206,7 +217,7 @@ def collect_metrics(db: Session, *, window_hours: int = 24) -> OrchestrationMetr
     event_rows = db.execute(
         select(RunEvent.event_type, func.count())
         .join(OrchestrationRun, OrchestrationRun.id == RunEvent.run_id)
-        .where(OrchestrationRun.created_at >= since)
+        .where(*run_scope)
         .group_by(RunEvent.event_type)
     ).all()
     events = {event_type: count for event_type, count in event_rows}
@@ -229,18 +240,19 @@ def collect_metrics(db: Session, *, window_hours: int = 24) -> OrchestrationMetr
             select(func.count())
             .select_from(OrchestrationRun)
             .where(
-                OrchestrationRun.created_at >= since,
+                *run_scope,
                 OrchestrationRun.error_code.in_(("loop_detected", "no_progress")),
             )
         ).scalar_one()
         or 0
     )
 
+    lease_scope = [WorkspaceLease.acquired_at >= since, WorkspaceLease.released_at.is_(None)]
+    if project_id is not None:
+        lease_scope.append(WorkspaceLease.project_id == project_id)
     metrics.workspace_lease_conflicts = (
         db.execute(
-            select(func.count())
-            .select_from(WorkspaceLease)
-            .where(WorkspaceLease.acquired_at >= since, WorkspaceLease.released_at.is_(None))
+            select(func.count()).select_from(WorkspaceLease).where(*lease_scope)
         ).scalar_one()
         or 0
     )

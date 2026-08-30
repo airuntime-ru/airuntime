@@ -198,6 +198,7 @@ services:
       S3_ACCESS_KEY: ${S3_ACCESS_KEY}
       S3_SECRET_KEY: ${S3_SECRET_KEY}
       S3_BUCKET: ${S3_BUCKET}
+      ANALYTICS_INGEST_KEY: ${ANALYTICS_INGEST_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -309,6 +310,8 @@ services:
       DJANGO_CSRF_TRUSTED_ORIGINS: https://admin.${APP_DOMAIN}
       DJANGO_SUPERUSER_EMAIL: admin@${APP_DOMAIN}
       DJANGO_SUPERUSER_PASSWORD: ${DJANGO_SUPERUSER_PASSWORD}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      FRONTEND_URL: https://${APP_DOMAIN}
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -352,6 +355,30 @@ services:
       traefik.http.routers.frontend.tls.certresolver: letsencrypt
       traefik.http.services.frontend.loadbalancer.server.port: "3000"
 
+  # Telegram-бот для infra-алертов (деплой, логи, health-check, stuck runs).
+  # Без AIRUNTIME_TELEGRAM_BOT_TOKEN контейнер idle'ит и не мешает стеку.
+  ops-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.ops-bot
+    container_name: airuntime-ops-bot
+    restart: unless-stopped
+    logging: *default-logging
+    env_file:
+      - .env
+    environment:
+      STATE_DIR: /var/lib/ops-bot
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      HEALTH_CHECK_URLS: https://api.${APP_DOMAIN}/health,https://admin.${APP_DOMAIN}/,https://${APP_DOMAIN}/
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ops_bot_state:/var/lib/ops-bot
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - internal
+
 networks:
   public:
     name: airuntime_public
@@ -363,3 +390,4 @@ volumes:
   minio_data:
   traefik_letsencrypt:
   airruntime_projects_data:
+  ops_bot_state:

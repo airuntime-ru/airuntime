@@ -1,4 +1,5 @@
 from src.db.models.agent_run_metric import AgentRunMetric
+from src.db.models.analytics import AnalyticsEvent, AnalyticsSession
 from src.db.models.agent_task import AgentTask
 from src.db.models.chat import Chat
 from src.db.models.chat_file import ChatFile
@@ -18,6 +19,7 @@ from src.db.models.project_service import ProjectService
 from src.db.models.refresh_token import RefreshToken
 from src.db.models.run_event import RunEvent
 from src.db.models.secret import Secret
+from src.db.models.support import SupportConversation, SupportMessage
 from src.db.models.system_setting import SystemSetting
 from src.db.models.user import User
 from src.db.models.user_provider_credential import UserProviderCredential
@@ -48,4 +50,8 @@ __all__ = [
     "WorkspaceLease",
     "RunEvent",
     "McpServer",
+    "AnalyticsSession",
+    "AnalyticsEvent",
+    "SupportConversation",
+    "SupportMessage",
 ]

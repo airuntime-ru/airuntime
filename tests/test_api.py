@@ -10,14 +10,13 @@ from tests.conftest import auth_tokens
 
 @pytest.fixture(autouse=True)
 def _stub_moderation_for_chat_router_tests(monkeypatch):
-    """chat.py's stream handler calls `check_project_safety(...)` synchronously, before
-    `event_source()` even starts, on every turn with non-empty content - a second, independent
-    real-Codex call site that patching `chat_router.run_product_pipeline` does not cover
-    (moderation.py calls `codex_simple_complete` directly for the "openai" provider, see
-    moderation.py:107-109).
+    """chat.py's stream handler calls `check_project_safety(...)` after the first SSE status
+    frame (so a multi-minute Codex moderation call no longer holds the HTTP response at 0 bytes).
+    Patching `chat_router.run_product_pipeline` does not cover this - moderation.py calls
+    `codex_simple_complete` directly for the "openai" provider, see moderation.py:107-109.
     Whenever a real OPENAI_API_KEY happens to be present in the environment/.env (as it is for
     local dev), `resolve_provider_and_model` picks "openai" as configured and this fires for
-    real, blocking each such test for `codex_simple_timeout_seconds` (45s) against a Redis queue
+    real, blocking each such test for `codex_simple_timeout_seconds` against a Redis queue
     with no worker listening before failing open (moderation.py's own fail-open contract - see
     its docstring). Stubbing it out here is behavior-neutral (tests never exercise moderation
     blocking) and keeps this file fast and deterministic regardless of what is in .env."""

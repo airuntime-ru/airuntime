@@ -59,6 +59,8 @@ EVENT_TYPES = frozenset(
         "run_completed",
         "run_failed",
         "run_cancelled",
+        "trace",
+        "llm_call",
     }
 )
 

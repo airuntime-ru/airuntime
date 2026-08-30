@@ -437,6 +437,14 @@ class RunEventRepository:
             .all()
         )
 
+    def list_paginated(
+        self, run_id: uuid.UUID | str, *, offset: int = 0, limit: int = 50
+    ) -> tuple[list[RunEvent], int]:
+        base = self.db.query(RunEvent).filter(RunEvent.run_id == run_id)
+        total = base.count()
+        rows = base.order_by(RunEvent.seq.asc()).offset(offset).limit(limit).all()
+        return rows, total
+
     def latest_seq(self, run_id: uuid.UUID | str) -> int:
         value = (
             self.db.query(func.coalesce(func.max(RunEvent.seq), 0))

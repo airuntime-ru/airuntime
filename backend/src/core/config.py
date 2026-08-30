@@ -162,7 +162,16 @@ class Settings(BaseSettings):
     s3_max_upload_bytes: int = 10 * 1024 * 1024
     s3_presign_expire_seconds: int = 3600
 
-    @field_validator("s3_endpoint_url", "s3_public_endpoint_url", "openai_base_url", mode="before")
+    # Optional shared secret for POST /analytics/batch. Empty = accept all (dev default).
+    analytics_ingest_key: str | None = None
+
+    @field_validator(
+        "s3_endpoint_url",
+        "s3_public_endpoint_url",
+        "openai_base_url",
+        "analytics_ingest_key",
+        mode="before",
+    )
     @classmethod
     def empty_endpoint_to_none(cls, value: str | None) -> str | None:
         if value is None or value == "":

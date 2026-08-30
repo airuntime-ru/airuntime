@@ -26,6 +26,8 @@ from src.api.dto.orchestration import (
     OrchestrationRunListResponse,
     OrchestrationRunResponse,
     OrchestrationTaskResponse,
+    RunEventHistoryResponse,
+    RunEventResponse,
 )
 from src.core.config import settings
 from src.db.models.chat import Chat
@@ -40,6 +42,7 @@ from src.services.orchestration.repository import (
     AgentTaskRepository,
     OrchestrationPlanRepository,
     OrchestrationRunRepository,
+    RunEventRepository,
 )
 from src.services.orchestration.status import is_run_terminal
 from src.services.prompt_guard import sanitize_user_message
@@ -194,6 +197,33 @@ def get_run(
     project = _get_owned_project(project_id, current_user, db)
     run = _get_owned_run(project, run_id, db)
     return _run_detail_response(db, run)
+
+
+@router.get("/runs/{run_id}/events/history", response_model=RunEventHistoryResponse)
+def list_run_event_history(
+    project_id: UUID,
+    run_id: UUID,
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> RunEventHistoryResponse:
+    project = _get_owned_project(project_id, current_user, db)
+    _get_owned_run(project, run_id, db)
+    rows, total = RunEventRepository(db).list_paginated(run_id, offset=offset, limit=limit)
+    return RunEventHistoryResponse(
+        items=[
+            RunEventResponse(
+                seq=row.seq,
+                event_type=row.event_type,
+                payload=json.loads(row.payload_json),
+                task_id=row.task_id,
+                created_at=row.created_at,
+            )
+            for row in rows
+        ],
+        total=total,
+    )
 
 
 @router.get("/runs/{run_id}/events")

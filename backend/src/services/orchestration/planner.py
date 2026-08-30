@@ -22,9 +22,12 @@ plan asked for, never a superset.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
+
+from sqlalchemy.orm import Session
 
 from src.core.config import settings
 from src.services.agent.pipeline_llm import complete_structured
@@ -37,6 +40,7 @@ from src.services.orchestration.schemas import (
     PlannedTask,
     SpecialistRole,
 )
+from src.services.orchestration.trace import emit_trace
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +141,10 @@ _PLANNING_SYSTEM_PROMPT_TEMPLATE = """Ты - планировщик платфо
   risk_level, verification_method) оставляй ровно как в схеме - только на английском.
 - complexity: "simple" для одной задачи, "compound" для нескольких связанных задач одного
   проекта, "large" для многомодульной работы (например сайт + отдельный Telegram-бот).
+- risks - список объектов {{"description": "...", "severity": "low|medium|high|critical"}},
+  никогда не список строк. Пустой список [] допустим.
+- final_acceptance_criteria - список объектов AcceptanceCriterion (id/description/
+  verification_method), не строки.
 - Каждая задача должна нести хотя бы один acceptance_criterion, проверяемый одним из методов:
   build, test, preview, runtime, manual, llm_review.
 - Every acceptance_criterion must have a non-empty unique ASCII id.
@@ -560,6 +568,35 @@ class PlanGenerationResult:
     errors: list[str] = field(default_factory=list)
 
 
+def _emit_plan_trace(
+    db: Session | None,
+    run_id: object | None,
+    result: PlanGenerationResult,
+    *,
+    duration_ms: int,
+) -> None:
+    if db is None or run_id is None:
+        return
+    error_summary = "; ".join(result.errors[:5]) if result.errors else "none"
+    emit_trace(
+        db,
+        run_id=run_id,
+        category="planning",
+        action="generate_plan",
+        summary=(
+            f"plan source={result.source} tasks={len(result.plan.tasks)} "
+            f"errors={len(result.errors)}"
+        ),
+        duration_ms=duration_ms,
+        details={
+            "source": result.source,
+            "task_count": len(result.plan.tasks),
+            "errors": result.errors[:10],
+            "error_summary": error_summary,
+        },
+    )
+
+
 async def generate_plan(
     *,
     user_message: str,
@@ -570,7 +607,10 @@ async def generate_plan(
     max_tasks: int | None = None,
     timeout_seconds: int | None = None,
     usage_sink: Callable[[dict[str, Any]], None] | None = None,
+    db: Session | None = None,
+    run_id: object | None = None,
 ) -> PlanGenerationResult:
+    started = time.monotonic()
     max_tasks = max_tasks or settings.orchestration_max_plan_tasks
     # Codex cold-starts a container per planning call - 90s was cutting off before any JSON
     # arrived, which forced endless single-task fallbacks and then "replan limit reached".
@@ -584,14 +624,23 @@ async def generate_plan(
         and not website_quality
         and not product_quality
     ):
-        return PlanGenerationResult(
+        result = PlanGenerationResult(
             plan=build_single_task_plan(user_message, reason="short request - planning skipped"),
             source="heuristic_simple",
         )
+        _emit_plan_trace(
+            db, run_id, result, duration_ms=int((time.monotonic() - started) * 1000)
+        )
+        return result
 
     system_prompt = build_planning_system_prompt(max_tasks=max_tasks)
     user_text = (
         f"Состояние проекта:\n{project_context_summary}\n\nЗапрос пользователя:\n{user_message}"
+    )
+    logger.info(
+        "planner: starting LLM plan generation (timeout=%ss model=%s)",
+        timeout_seconds,
+        model,
     )
 
     raw_plan = await complete_structured(
@@ -603,10 +652,13 @@ async def generate_plan(
         response_model=ExecutionPlan,
         timeout_seconds=timeout_seconds,
         usage_sink=usage_sink,
+        trace_db=db,
+        trace_run_id=run_id,
+        trace_category="planning",
     )
     if raw_plan is None:
         logger.info("planner: LLM call produced no usable plan, falling back to single-task plan")
-        return PlanGenerationResult(
+        result = PlanGenerationResult(
             plan=build_single_task_plan(
                 user_message,
                 reason="planner call failed",
@@ -617,6 +669,10 @@ async def generate_plan(
             source="fallback_llm_failed",
             errors=["planner_call_failed"],
         )
+        _emit_plan_trace(
+            db, run_id, result, duration_ms=int((time.monotonic() - started) * 1000)
+        )
+        return result
 
     errors = validate_plan_structure(raw_plan, max_tasks=max_tasks)
     if not errors:
@@ -631,7 +687,11 @@ async def generate_plan(
             if project_type is not None
             else raw_plan
         )
-        return PlanGenerationResult(plan=quality_plan, source="llm")
+        result = PlanGenerationResult(plan=quality_plan, source="llm")
+        _emit_plan_trace(
+            db, run_id, result, duration_ms=int((time.monotonic() - started) * 1000)
+        )
+        return result
 
     logger.info(
         "planner: LLM plan failed structural validation (%s), asking for one repair", errors
@@ -649,6 +709,9 @@ async def generate_plan(
         response_model=ExecutionPlan,
         timeout_seconds=timeout_seconds,
         usage_sink=usage_sink,
+        trace_db=db,
+        trace_run_id=run_id,
+        trace_category="planning",
     )
     if repaired_plan is not None:
         repaired_errors = validate_plan_structure(repaired_plan, max_tasks=max_tasks)
@@ -664,13 +727,17 @@ async def generate_plan(
                 if project_type is not None
                 else repaired_plan
             )
-            return PlanGenerationResult(plan=quality_plan, source="llm_repaired")
+            result = PlanGenerationResult(plan=quality_plan, source="llm_repaired")
+            _emit_plan_trace(
+                db, run_id, result, duration_ms=int((time.monotonic() - started) * 1000)
+            )
+            return result
         errors = repaired_errors
 
     logger.warning(
         "planner: plan invalid even after repair (%s), falling back to single-task plan", errors
     )
-    return PlanGenerationResult(
+    result = PlanGenerationResult(
         plan=build_single_task_plan(
             user_message,
             reason="plan validation failed twice",
@@ -681,3 +748,5 @@ async def generate_plan(
         source="fallback_invalid",
         errors=errors,
     )
+    _emit_plan_trace(db, run_id, result, duration_ms=int((time.monotonic() - started) * 1000))
+    return result

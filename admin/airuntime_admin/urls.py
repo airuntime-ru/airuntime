@@ -1,8 +1,11 @@
 from django.contrib import admin
-from django.urls import path
+from django.shortcuts import redirect
+from django.urls import path, reverse
 
 from airuntime_admin import docker_views
 from core import analytics_views
+from core import support_views
+from orchestration_section import admin as orchestration_admin
 
 _orig_get_app_list = admin.site.get_app_list
 
@@ -46,6 +49,11 @@ def _get_app_list_with_adminuser_under_auth(request, app_label=None):
 
 admin.site.get_app_list = _get_app_list_with_adminuser_under_auth
 
+
+def _product_analytics_redirect(request):
+    return redirect(reverse("admin:product_analytics_dashboard"))
+
+
 urlpatterns = [
     path(
         "docker/containers/",
@@ -71,6 +79,31 @@ urlpatterns = [
         "analytics/export/<str:report>.csv",
         admin.site.admin_view(analytics_views.analytics_export_csv_view),
         name="admin_analytics_export",
+    ),
+    path(
+        "orchestration/project/<uuid:project_id>/",
+        admin.site.admin_view(orchestration_admin.project_dashboard_view),
+        name="admin_orchestration_project_dashboard",
+    ),
+    path(
+        "orchestration/run/<uuid:run_id>/",
+        admin.site.admin_view(orchestration_admin.run_detail_view),
+        name="admin_orchestration_run_detail",
+    ),
+    path(
+        "product-analytics/",
+        admin.site.admin_view(_product_analytics_redirect),
+        name="admin_product_analytics",
+    ),
+    path(
+        "support/open/",
+        admin.site.admin_view(support_views.SupportChatBridgeView.as_view()),
+        name="admin_support_open",
+    ),
+    path(
+        "support/open/<uuid:user_id>/",
+        admin.site.admin_view(support_views.SupportChatBridgeView.as_view()),
+        name="admin_support_open_user",
     ),
     path("", admin.site.urls),
 ]

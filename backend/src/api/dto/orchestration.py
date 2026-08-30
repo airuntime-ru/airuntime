@@ -67,3 +67,18 @@ class OrchestrationTaskResponse(BaseModel):
 
 class OrchestrationRunDetailResponse(OrchestrationRunResponse):
     tasks: list[OrchestrationTaskResponse]
+
+
+class RunEventResponse(BaseModel):
+    seq: int
+    event_type: str
+    payload: dict
+    task_id: UUID | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class RunEventHistoryResponse(BaseModel):
+    items: list[RunEventResponse]
+    total: int

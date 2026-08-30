@@ -128,6 +128,11 @@ class AcceptanceCriterion(BaseModel):
     @classmethod
     def _supply_missing_llm_id(cls, value: Any) -> Any:
         """Keep otherwise valid planner output usable when the model omits a criterion id."""
+        if isinstance(value, str):
+            value = {
+                "description": value.strip() or "criterion",
+                "verification_method": "manual",
+            }
         if not isinstance(value, dict):
             return value
         normalized = dict(value)
@@ -155,6 +160,16 @@ class Risk(BaseModel):
     description: str
     severity: RiskLevel = RiskLevel.MEDIUM
     mitigation: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_string_risk(cls, value: Any) -> Any:
+        """Codex often emits risks as plain strings; a schema mismatch here used to trigger a
+        full extra planning container (~3-4 minutes) for a repair retry."""
+        if isinstance(value, str):
+            text = value.strip() or "риск"
+            return {"description": text}
+        return value
 
     @field_validator("severity", mode="before")
     @classmethod

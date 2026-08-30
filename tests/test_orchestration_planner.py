@@ -195,6 +195,39 @@ class TestPlannerOutputNormalization:
         assert plan.complexity == "simple"
         assert plan.goal == "Do it"
 
+    def test_string_risks_and_criteria_are_coerced(self) -> None:
+        plan = ExecutionPlan.model_validate(
+            {
+                "goal": "Лендинг",
+                "complexity": "simple",
+                "tasks": [
+                    {
+                        "local_id": "landing",
+                        "role": "implementer",
+                        "goal": "Сделать лендинг",
+                        "acceptance_criteria": ["Hero и CTA видны в preview"],
+                    }
+                ],
+                "final_acceptance_criteria": ["Сайт открывается без ошибок"],
+                "risks": [
+                    "Качество и доступность в preview.",
+                    {
+                        "description": "Срыв сроков",
+                        "severity": "высокий",
+                        "mitigation": "урезать scope",
+                    },
+                ],
+            }
+        )
+        assert [risk.description for risk in plan.risks] == [
+            "Качество и доступность в preview.",
+            "Срыв сроков",
+        ]
+        assert plan.risks[0].severity.value == "medium"
+        assert plan.risks[1].severity.value == "high"
+        assert plan.tasks[0].acceptance_criteria[0].description == "Hero и CTA видны в preview"
+        assert plan.final_acceptance_criteria[0].description == "Сайт открывается без ошибок"
+
 
 @pytest.mark.asyncio
 class TestGeneratePlan:
