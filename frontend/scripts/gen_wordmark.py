@@ -44,7 +44,6 @@ def letter_paths(font: TTFont) -> list[tuple[str, str, float]]:
 def main() -> None:
     font = TTFont(str(FONT_PATH))
     paths = letter_paths(font)
-    total_width = 0.0
     lines: list[str] = []
     for ch, d, x in paths:
         lines.append(f"<!-- {ch} x={x:.2f} -->")

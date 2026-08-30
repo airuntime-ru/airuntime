@@ -33,7 +33,7 @@ function AirMark({ size, className }: { size: number; className?: string }) {
 
   return (
     <svg
-      viewBox="0 0 512 512"
+      viewBox="55 45 402 402"
       width={size}
       height={size}
       role="img"

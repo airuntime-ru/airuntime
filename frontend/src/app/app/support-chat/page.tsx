@@ -23,7 +23,7 @@ export default function SupportStaffChatPage() {
   const bridgeToken = searchParams.get("bridge_token");
   const customerUserId = searchParams.get("customer_user_id");
 
-  const [ready, setReady] = useState(false);
+  const [ready, setReady] = useState(!bridgeToken);
   const [inbox, setInbox] = useState<StaffConversationSummaryType[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [thread, setThread] = useState<SupportConversationType | null>(null);
@@ -35,10 +35,10 @@ export default function SupportStaffChatPage() {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (bridgeToken) {
-      setAccessToken(bridgeToken);
-    }
-    setReady(true);
+    if (!bridgeToken) return;
+    setAccessToken(bridgeToken);
+    const timer = window.setTimeout(() => setReady(true), 0);
+    return () => window.clearTimeout(timer);
   }, [bridgeToken]);
 
   const loadInbox = useCallback(async () => {
@@ -66,9 +66,12 @@ export default function SupportStaffChatPage() {
 
   useEffect(() => {
     if (!ready) return;
-    void loadInbox();
+    const kickoff = window.setTimeout(() => void loadInbox(), 0);
     const timer = window.setInterval(loadInbox, POLL_MS);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearTimeout(kickoff);
+      window.clearInterval(timer);
+    };
   }, [ready, loadInbox]);
 
   useEffect(() => {
@@ -82,9 +85,12 @@ export default function SupportStaffChatPage() {
 
   useEffect(() => {
     if (!activeId) return;
-    void loadThread(activeId);
+    const kickoff = window.setTimeout(() => void loadThread(activeId), 0);
     const timer = window.setInterval(() => loadThread(activeId), POLL_MS);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearTimeout(kickoff);
+      window.clearInterval(timer);
+    };
   }, [activeId, loadThread]);
 
   useEffect(() => {

@@ -7,12 +7,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-SRC = Path(
-    r"C:\Users\miald\.cursor\projects\c-Users-miald-storage-Programming-startups-airuntime-ru\assets"
-    r"\c__Users_miald_AppData_Roaming_Cursor_User_workspaceStorage_3d89f7fdc9cd68bde00106103b6ac94c_images"
-    r"_ChatGPT_Image_Jul_7__2026__02_07_34_PM-bd59132a-b6dd-4278-a325-5a2b394ff098.png"
-)
-OUT_DIR = Path(__file__).resolve().parents[1] / "public" / "brand"
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "brand-source" / "logo-full.png"
+OUT_DIR = ROOT / "public" / "brand"
 
 
 def rgb_to_hex(rgb: tuple[int, int, int]) -> str:

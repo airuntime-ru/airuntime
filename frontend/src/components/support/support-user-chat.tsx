@@ -63,16 +63,22 @@ export function SupportUserChat({ hidden }: { hidden?: boolean }) {
 
   useEffect(() => {
     if (hidden) return;
-    void refreshUnread();
+    const kickoff = window.setTimeout(() => void refreshUnread(), 0);
     const timer = window.setInterval(refreshUnread, POLL_CLOSED_MS);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearTimeout(kickoff);
+      window.clearInterval(timer);
+    };
   }, [hidden, refreshUnread]);
 
   useEffect(() => {
     if (!open) return;
-    void loadConversation({ initial: true });
+    const kickoff = window.setTimeout(() => void loadConversation({ initial: true }), 0);
     const timer = window.setInterval(() => loadConversation(), POLL_OPEN_MS);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearTimeout(kickoff);
+      window.clearInterval(timer);
+    };
   }, [open, loadConversation]);
 
   useEffect(() => {

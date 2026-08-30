@@ -7,7 +7,7 @@ to a single project where noted. No secret values or free-text model output in a
 from __future__ import annotations
 
 import json
-from datetime import timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
@@ -271,4 +271,8 @@ def project_metrics(project_id: UUID | str, window_hours: int = 24) -> dict:
 def decimal_default(value):
     if isinstance(value, Decimal):
         return float(value)
+    if isinstance(value, datetime | date):
+        return value.isoformat()
+    if isinstance(value, UUID):
+        return str(value)
     raise TypeError(f"Not JSON serializable: {type(value)}")

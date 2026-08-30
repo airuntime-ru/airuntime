@@ -98,6 +98,7 @@ from src.services.orchestration.failure_policy import (
 from src.services.orchestration.git_transaction import GitTransactionManager
 from src.services.orchestration.mcp import registry as mcp_registry
 from src.services.orchestration.planner import ExecutionPlan, generate_plan
+from src.services.orchestration.project_finalize import finalize_project_after_completed_run
 from src.services.orchestration.replanner import (
     ReplanGate,
     generate_replan,
@@ -1407,6 +1408,7 @@ async def _run_orchestration_inner(
                     )
                 else:
                     _walk_run_to_completed(db, run)
+                    finalize_project_after_completed_run(db, run=run, project=project)
                 db.commit()
                 return
 
