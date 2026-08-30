@@ -136,11 +136,7 @@ class OpsMonitor:
             body = body[:400] + "…"
         if not body:
             body = "(пустое сообщение)"
-        return (
-            "<b>Сообщение в поддержку</b>\n"
-            f"<code>{esc(event.user_email)}</code>\n"
-            f"{esc(body)}"
-        )
+        return f"<b>Сообщение в поддержку</b>\n<code>{esc(event.user_email)}</code>\n{esc(body)}"
 
     def _in_deploy_grace(self) -> bool:
         raw = self.state.get("deploy_grace_until")
@@ -302,6 +298,53 @@ class OpsMonitor:
         self.send_code("\n".join(lines))
         self.state.set("last_stuck_alert_at", now.isoformat())
         self.state.set("last_stuck_alert_fp", fingerprint)
+
+    def check_orchestration_internal_errors(self) -> None:
+        """Alert on recent runs that failed with internal_error (engine bugs)."""
+        query = """
+            SELECT r.id::text, p.name, r.error_message, r.finished_at
+            FROM orchestration_runs r
+            JOIN projects p ON p.id = r.project_id
+            WHERE r.status = 'failed'
+              AND r.error_code = 'internal_error'
+              AND r.finished_at > now() - interval '6 hours'
+            ORDER BY r.finished_at DESC
+            LIMIT 10
+        """
+        try:
+            with psycopg.connect(self.settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(query)
+                    rows = cur.fetchall()
+        except Exception:
+            logger.exception("Failed to query internal_error orchestration runs")
+            return
+
+        if not rows:
+            return
+
+        run_ids = [row[0] for row in rows]
+        fingerprint = hashlib.sha1(",".join(sorted(run_ids)).encode("utf-8")).hexdigest()[:16]
+        now = datetime.now(UTC)
+        if self.state.get("last_internal_error_alert_fp") == fingerprint:
+            last = self.state.get("last_internal_error_alert_at")
+            if last and now - datetime.fromisoformat(last) < timedelta(hours=6):
+                return
+
+        lines = [
+            "<b>Алерт: orchestration internal_error</b>",
+            f"За последние 6 ч: <b>{len(rows)}</b> run(s)",
+            "",
+        ]
+        for run_id, project_name, err, finished_at in rows[:8]:
+            err_short = (err or "—")[:100]
+            lines.append(
+                f"• <code>{esc(run_id[:8])}…</code> · {esc(project_name)}\n"
+                f"  {esc(err_short)} · {esc(finished_at.isoformat() if finished_at else None)}"
+            )
+        self.send_code("\n".join(lines))
+        self.state.set("last_internal_error_alert_at", now.isoformat())
+        self.state.set("last_internal_error_alert_fp", fingerprint)
 
     def check_routerai_balance(self) -> None:
         if not self.settings.routerai_api_key:

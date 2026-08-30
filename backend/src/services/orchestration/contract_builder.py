@@ -27,6 +27,7 @@ from src.db.models.project import Project
 from src.services.orchestration.context_engine import ContextEngine
 from src.services.orchestration.role_policy import (
     compute_write_scope,
+    expand_allowed_paths_for_project,
     filter_skills,
     filter_tools,
     get_role_policy,
@@ -180,6 +181,7 @@ def build_task_contract(
         requested_paths=planned_task.relevant_paths,
         fallback_relevant_paths=planned_task.relevant_paths,
     )
+    allowed_paths = expand_allowed_paths_for_project(project.type, role, allowed_paths)
     allowed_tools = filter_tools(role)
     role_permitted_skills = filter_skills(
         role, planned_task.suggested_skills, registered_skill_ids=registered_skill_ids

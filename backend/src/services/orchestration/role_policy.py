@@ -325,6 +325,60 @@ def filter_skills(
     return sorted(set(requested_skill_ids) & allowed)
 
 
+_WEBSITE_WRITE_DEFAULTS: tuple[str, ...] = (
+    "public",
+    "src",
+    "static",
+    "assets",
+    "templates",
+    "Dockerfile",
+    "package.json",
+    "package-lock.json",
+    "index.html",
+    "requirements.txt",
+    "app.py",
+    "pyproject.toml",
+)
+
+_DELIVERABLE_ROLES = frozenset(
+    {
+        SpecialistRole.IMPLEMENTER,
+        SpecialistRole.UI_UX_SPECIALIST,
+        SpecialistRole.BUILD_FIXER,
+        SpecialistRole.INTEGRATION_AGENT,
+    }
+)
+
+
+def expand_allowed_paths_for_project(
+    project_type: str,
+    role: SpecialistRole,
+    allowed_paths: list[str],
+) -> list[str]:
+    """Widen narrowly-scoped website tasks so agents can edit the whole public/ tree.
+
+    Planners often declare only ``public/index.html``; without ``public/`` the agent gets
+    scope_violation when touching ``public/styles.css`` and enters a replan loop.
+    """
+    if role not in _DELIVERABLE_ROLES:
+        return allowed_paths
+    if project_type not in ("website", "mixed"):
+        return allowed_paths
+    merged: list[str] = []
+    seen: set[str] = set()
+    for path in [*allowed_paths, *_WEBSITE_WRITE_DEFAULTS]:
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        merged.append(path)
+    if (
+        any(p == "public" or p.startswith("public/") for p in allowed_paths)
+        and "public" not in seen
+    ):
+        merged.insert(0, "public")
+    return merged
+
+
 def compute_write_scope(
     role: SpecialistRole, *, requested_paths: list[str], fallback_relevant_paths: list[str]
 ) -> tuple[list[str], list[str]]:

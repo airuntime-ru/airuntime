@@ -259,6 +259,85 @@ async def _ensure_preview_and_runtime_evidence(
     )
 
 
+def _inherit_evidence_from_dependencies(
+    dependency_tasks: list[AgentTask],
+) -> tuple[dict | None, dict | None, dict | None]:
+    """Reuse build/preview/runtime evidence collected by completed dependency tasks.
+
+    QA/visual review tasks often declare preview validation but run as read-only skills that
+    do not re-run preview themselves — without inheritance they fail with "no preview_result".
+    """
+    build_result: dict | None = None
+    preview_result: dict | None = None
+    runtime_result: dict | None = None
+    for dep in dependency_tasks:
+        if dep.status != "completed" or not dep.evidence_json:
+            continue
+        try:
+            evidence = TaskEvidence.model_validate_json(dep.evidence_json)
+        except Exception:  # noqa: BLE001 - malformed evidence must not abort the run
+            continue
+        if build_result is None and evidence.build_result:
+            build_result = evidence.build_result
+        if preview_result is None and evidence.preview_result:
+            preview_result = evidence.preview_result
+        if runtime_result is None and evidence.runtime_health_result:
+            runtime_result = evidence.runtime_health_result
+    return build_result, preview_result, runtime_result
+
+
+_DELIVERABLE_TASK_ROLES = frozenset({"implementer", "ui_ux_specialist", "integration_agent"})
+_REVIEW_TASK_ROLES = frozenset({"qa_reviewer", "security_reviewer"})
+
+
+def _try_recover_qa_deadlock(
+    db: Session,
+    *,
+    run: OrchestrationRun,
+    plan_id: uuid.UUID | str,
+    plan_tasks: list[AgentTask],
+    non_terminal: list[AgentTask],
+    task_repo: AgentTaskRepository,
+) -> bool:
+    """Skip blocked QA when the main deliverable is already accepted.
+
+    Prevents ``plan deadlocked`` failures when optional QA chains stall after implementer
+    completed (common when budget pauses or replan leaves redundant QA nodes).
+    """
+    if not any(t.status == "completed" and t.role in _DELIVERABLE_TASK_ROLES for t in plan_tasks):
+        return False
+    stuck = [t for t in non_terminal if t.status in ("blocked", "pending")]
+    if not stuck or not all(t.role in _REVIEW_TASK_ROLES for t in stuck):
+        return False
+    for task in stuck:
+        task_repo.transition(
+            task,
+            "skipped",
+            error_message="optional QA skipped after main deliverable was accepted",
+        )
+    task_repo.refresh_readiness(plan_id)
+    events_bus.emit(
+        db,
+        run_id=run.id,
+        event_type="trace",
+        payload={
+            "category": "scheduling",
+            "action": "qa_deadlock_recovery",
+            "summary": f"skipped {len(stuck)} blocked QA task(s)",
+        },
+    )
+    return True
+
+
+def _user_has_run_budget(db: Session, *, user_id: uuid.UUID, provider_name: str) -> bool:
+    user = db.query(User).filter(User.id == user_id).one_or_none()
+    if user is None:
+        return False
+    if user.credits_balance > 0:
+        return True
+    return has_valid_key(db, user, provider_name)
+
+
 def _reasoning_effort_for_project(db, project) -> str | None:
     """Codex reasoning effort for the project owner's plan.
 
@@ -916,17 +995,18 @@ async def _run_one_task(
                 payload={"note": f"Подключаю сервисы: {', '.join(service_requests)}"},
             )
 
+        dep_build, dep_preview, dep_runtime = _inherit_evidence_from_dependencies(dependency_tasks)
         build_result = await _ensure_build_evidence(
             contract=contract,
             project_id=project.id,
-            existing=agent_result.build_result,
+            existing=agent_result.build_result or dep_build,
         )
         preview_result, runtime_health_result = await _ensure_preview_and_runtime_evidence(
             contract=contract,
             project_id=project.id,
             build_result=build_result,
-            preview_existing=agent_result.preview_result,
-            runtime_existing=agent_result.runtime_health_result,
+            preview_existing=agent_result.preview_result or dep_preview,
+            runtime_existing=agent_result.runtime_health_result or dep_runtime,
         )
         outcome = await asyncio.to_thread(
             git_txn.complete,
@@ -1166,6 +1246,17 @@ def extend_budget_after_topup(db: Session, run: OrchestrationRun) -> bool:
     return True
 
 
+def prepare_run_for_resume(db: Session, run: OrchestrationRun) -> None:
+    """Clear persisted blockers before relaunching a run parked at waiting_for_user."""
+    if run.error_code == "budget_exceeded":
+        extend_budget_after_topup(db, run)
+        return
+    if run.error_code == "replan_limit_reached":
+        run.error_code = None
+        run.error_message = None
+        db.add(run)
+
+
 def resume_task_after_user_input(db: Session, task_id: uuid.UUID | str) -> AgentTask:
     """Called by whatever surface collects the missing secret/service/decision (chat.py wiring
     or the orchestration API router) once it has actually been supplied - moves the task back to
@@ -1345,6 +1436,37 @@ async def _run_orchestration_inner(
 
             plan = OrchestrationPlanRepository(db).get_active(run.id)
             if plan is None:
+                project_row = db.query(Project).filter(Project.id == run.project_id).one_or_none()
+                if project_row is None:
+                    OrchestrationRunRepository(db).transition(
+                        run, "failed", error_message="project not found"
+                    )
+                    events_bus.emit(
+                        db, run_id=run.id, event_type="run_failed", payload={"reason": "no_project"}
+                    )
+                    db.commit()
+                    return
+                if run.original_request and not is_run_terminal(run.status):
+                    if run.status != "planning":
+                        OrchestrationRunRepository(db).transition(run, "planning")
+                        events_bus.emit(
+                            db, run_id=run.id, event_type="planning_started", payload={}
+                        )
+                        db.commit()
+                    context_engine = ContextEngine(db)
+                    router = CapabilityRouter(skill_registry=skill_registry)
+                    await _ensure_planned(
+                        db,
+                        run=run,
+                        project=project_row,
+                        context_engine=context_engine,
+                        router=router,
+                        provider_name=provider_name,
+                        model=model,
+                        api_key=api_key,
+                    )
+                    db.commit()
+                    continue
                 OrchestrationRunRepository(db).transition(
                     run, "failed", error_message="no active plan"
                 )
@@ -1393,6 +1515,16 @@ async def _run_orchestration_inner(
                 if running:
                     db.commit()
                     await asyncio.sleep(2)
+                    continue
+                if _try_recover_qa_deadlock(
+                    db,
+                    run=run,
+                    plan_id=plan.id,
+                    plan_tasks=plan_tasks,
+                    non_terminal=non_terminal,
+                    task_repo=task_repo,
+                ):
+                    db.commit()
                     continue
                 if non_terminal:
                     OrchestrationRunRepository(db).transition(
@@ -1515,13 +1647,21 @@ async def _run_orchestration_inner(
             if replan_hit is not None:
                 failed_task_id, outcome, evidence_json = replan_hit
                 if not replan_gate.can_replan(current_plan_version=plan_version):
-                    OrchestrationRunRepository(db).transition(
-                        run, "failed", error_message="replan limit reached"
+                    run_repo = OrchestrationRunRepository(db)
+                    run_repo.transition(
+                        run,
+                        "waiting_for_user",
+                        error_code="replan_limit_reached",
+                        error_message=(
+                            "Агент несколько раз перепланировал задачу, но результат не "
+                            "прошёл проверку. Уточните запрос в чате или пополните баланс "
+                            "и нажмите «Продолжить»."
+                        ),
                     )
                     events_bus.emit(
                         db,
                         run_id=run.id,
-                        event_type="run_failed",
+                        event_type="waiting_for_user",
                         payload={"reason": "replan_limit_reached"},
                     )
                     db.commit()
@@ -1529,6 +1669,25 @@ async def _run_orchestration_inner(
 
                 OrchestrationRunRepository(db).transition(run, "replanning")
                 db.commit()
+
+                if not _user_has_run_budget(db, user_id=run.user_id, provider_name=provider_name):
+                    OrchestrationRunRepository(db).transition(
+                        run,
+                        "waiting_for_user",
+                        error_code="budget_exceeded",
+                        error_message=(
+                            "Закончились кредиты — работа агента приостановлена. "
+                            "Пополните баланс в профиле или подключите свой API-ключ."
+                        ),
+                    )
+                    events_bus.emit(
+                        db,
+                        run_id=run.id,
+                        event_type="waiting_for_user",
+                        payload={"reason": "budget_exceeded", "during": "replan"},
+                    )
+                    db.commit()
+                    return
 
                 task_repo = AgentTaskRepository(db)
                 completed_tasks = [
@@ -1626,6 +1785,31 @@ def launch_run_in_background(
     key = str(run_id)
     _active_tokens[key] = token
 
+    try:
+        db = SessionLocal()
+        try:
+            run = OrchestrationRunRepository(db).get(run_id)
+            if run is None:
+                return
+            if not _user_has_run_budget(db, user_id=run.user_id, provider_name=provider_name):
+                run_repo = OrchestrationRunRepository(db)
+                run_repo.transition(
+                    run,
+                    "waiting_for_user",
+                    error_code="budget_exceeded",
+                    error_message=(
+                        "Закончились кредиты — работа агента приостановлена. "
+                        "Пополните баланс в профиле или подключите свой API-ключ."
+                    ),
+                )
+                db.commit()
+                _active_tokens.pop(key, None)
+                return
+        finally:
+            db.close()
+    except Exception:  # noqa: BLE001 - must not block launch on a preflight failure
+        logger.exception("launch_run_in_background: preflight failed for run %s", run_id)
+
     async def _drive() -> None:
         try:
             await run_orchestration(
@@ -1673,12 +1857,13 @@ def recover_stranded_runs(db_factory: Callable[[], Session] | None = None) -> in
             stranded = OrchestrationRunRepository(db).list_resumable()
             # Capture as plain values - the session closes before the runs are driven.
             pending = [
-                (r.id, r.provider or settings.provider_name, r.model or "") for r in stranded
+                (r.id, r.provider or settings.provider_name, r.model or "", r.user_id)
+                for r in stranded
             ]
         finally:
             db.close()
 
-        for run_id, provider_name, model in pending:
+        for run_id, provider_name, model, user_id in pending:
             if str(run_id) in _background_tasks:
                 continue  # already being driven by this process
             api_key = resolve_platform_api_key(provider_name) or ""
@@ -1690,10 +1875,19 @@ def recover_stranded_runs(db_factory: Callable[[], Session] | None = None) -> in
                 )
                 continue
             try:
+                skip_launch = False
                 db = factory()
                 try:
                     run = OrchestrationRunRepository(db).get(run_id)
-                    if run is not None:
+                    if run is not None and not _user_has_run_budget(
+                        db, user_id=user_id, provider_name=provider_name
+                    ):
+                        logger.info(
+                            "orchestration restart recovery: skipping run %s - user has no credits",
+                            run_id,
+                        )
+                        skip_launch = True
+                    elif run is not None:
                         plan = OrchestrationPlanRepository(db).get_active(run.id)
                         if plan is not None:
                             AgentTaskRepository(db).reset_stale_running(plan.id, stale_seconds=60)
@@ -1701,6 +1895,8 @@ def recover_stranded_runs(db_factory: Callable[[], Session] | None = None) -> in
                             db.commit()
                 finally:
                     db.close()
+                if skip_launch:
+                    continue
             except Exception:  # noqa: BLE001
                 logger.exception(
                     "orchestration restart recovery: stale-task reset failed for run %s", run_id

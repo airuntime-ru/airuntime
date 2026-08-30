@@ -372,7 +372,7 @@ class TestExhaustedAttempts:
         assert "plan_revised" in _events(db, run.id)
 
     @pytest.mark.asyncio
-    async def test_fails_when_replan_limit_is_reached(
+    async def test_parks_at_waiting_for_user_when_replan_limit_is_reached(
         self, db: Session, db_factory, project: Project, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(engine.settings, "orchestration_max_replans", 0)
@@ -386,7 +386,8 @@ class TestExhaustedAttempts:
 
         db.expire_all()
         refreshed = OrchestrationRunRepository(db).get(run.id)
-        assert refreshed.status == "failed"
+        assert refreshed.status == "waiting_for_user"
+        assert refreshed.error_code == "replan_limit_reached"
         assert refreshed.plan_version == 1
 
 

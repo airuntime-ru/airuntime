@@ -10,6 +10,7 @@ from src.services.orchestration.role_policy import (
     ROLE_REGISTRY,
     can_execute_role,
     compute_write_scope,
+    expand_allowed_paths_for_project,
     filter_skills,
     filter_tools,
 )
@@ -132,6 +133,25 @@ class TestComputeWriteScope:
             SpecialistRole.INTEGRATION_AGENT, requested_paths=["*"], fallback_relevant_paths=[]
         )
         assert ".env" in forbidden and ".git" in forbidden
+
+
+class TestExpandAllowedPaths:
+    def test_website_implementer_gets_public_tree(self) -> None:
+        expanded = expand_allowed_paths_for_project(
+            "website",
+            SpecialistRole.IMPLEMENTER,
+            ["public/index.html"],
+        )
+        assert "public" in expanded
+        assert "public/index.html" in expanded
+
+    def test_read_only_role_unchanged(self) -> None:
+        paths = expand_allowed_paths_for_project(
+            "website",
+            SpecialistRole.QA_REVIEWER,
+            ["public/index.html"],
+        )
+        assert paths == ["public/index.html"]
 
 
 class TestCanExecuteRole:

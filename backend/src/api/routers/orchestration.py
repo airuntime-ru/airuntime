@@ -292,7 +292,7 @@ async def resume_run(
 
     # Must happen before relaunching: a run parked on budget would otherwise immediately re-park,
     # since the engine reseeds its BudgetTracker from the same persisted credits_used/credit_budget.
-    engine.extend_budget_after_topup(db, run)
+    engine.prepare_run_for_resume(db, run)
 
     plan = OrchestrationPlanRepository(db).get_active(run.id)
     if plan is not None:

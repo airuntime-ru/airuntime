@@ -77,6 +77,7 @@ def main() -> None:
             if now - last_stuck_check >= settings.stuck_check_interval_sec:
                 try:
                     monitor.check_stuck_orchestration_runs()
+                    monitor.check_orchestration_internal_errors()
                 except Exception:
                     logger.exception("Stuck runs check failed")
                 last_stuck_check = now
