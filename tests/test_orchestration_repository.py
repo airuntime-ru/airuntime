@@ -103,6 +103,41 @@ class TestOrchestrationRunRepository:
         with pytest.raises(IllegalStatusTransition):
             repo.transition(run, "running")
 
+    def test_terminal_run_fails_orphan_tasks(
+        self, db: Session, project: Project, chat: Chat
+    ) -> None:
+        run_repo = OrchestrationRunRepository(db)
+        plan_repo = OrchestrationPlanRepository(db)
+        task_repo = AgentTaskRepository(db)
+        run = run_repo.create(project_id=project.id, chat_id=chat.id, user_id=project.user_id)
+        plan = plan_repo.create_version(run_id=run.id, version=1, graph_json="{}")
+        orphan = task_repo.create(
+            run_id=run.id,
+            plan_id=plan.id,
+            local_id="orphan",
+            title="Orphan QA",
+            role="qa_reviewer",
+            execution_kind="skill",
+            status="blocked",
+            depends_on_json=json.dumps([]),
+        )
+        finished = task_repo.create(
+            run_id=run.id,
+            plan_id=plan.id,
+            local_id="done",
+            title="Done",
+            role="implementer",
+            execution_kind="specialist_agent",
+            status="completed",
+            depends_on_json=json.dumps([]),
+        )
+
+        run_repo.transition(run, "failed", error_message="deadlock")
+
+        assert task_repo.get(orphan.id).status == "failed"
+        assert task_repo.get(orphan.id).error_code == "run_terminal"
+        assert task_repo.get(finished.id).status == "completed"
+
     def test_same_status_transition_is_idempotent_noop(
         self, db: Session, project: Project, chat: Chat
     ) -> None:

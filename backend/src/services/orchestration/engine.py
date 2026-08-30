@@ -1109,11 +1109,14 @@ async def _run_one_task(
             continue
 
         if evaluation.decision == FailureDecision.WAIT_FOR_USER:
+            task_error_code = (
+                "loop_detected" if evaluation.loop_detected else evaluation.failure_class.value
+            )
             task_repo.transition(
                 task,
                 "waiting_for_user",
                 attempt=task.attempt + 1,
-                error_code=evaluation.failure_class.value,
+                error_code=task_error_code,
                 error_message=error_message,
             )
             events_bus.emit(
@@ -1251,7 +1254,7 @@ def prepare_run_for_resume(db: Session, run: OrchestrationRun) -> None:
     if run.error_code == "budget_exceeded":
         extend_budget_after_topup(db, run)
         return
-    if run.error_code == "replan_limit_reached":
+    if run.error_code in ("replan_limit_reached", "loop_detected"):
         run.error_code = None
         run.error_message = None
         db.add(run)
@@ -1501,8 +1504,20 @@ async def _run_orchestration_inner(
                 non_terminal = [t for t in plan_tasks if not is_task_terminal(t.status)]
                 waiting = [t for t in non_terminal if t.status == "waiting_for_user"]
                 if waiting:
+                    loop_task = next((t for t in waiting if t.error_code == "loop_detected"), None)
                     if run.status != "waiting_for_user":
-                        OrchestrationRunRepository(db).transition(run, "waiting_for_user")
+                        park_fields: dict[str, object] = {}
+                        if loop_task is not None:
+                            park_fields = {
+                                "error_code": "loop_detected",
+                                "error_message": (
+                                    "Агент несколько раз повторял одну и ту же ошибку. "
+                                    "Уточните запрос в чате и нажмите «Продолжить»."
+                                ),
+                            }
+                        OrchestrationRunRepository(db).transition(
+                            run, "waiting_for_user", **park_fields
+                        )
                         events_bus.emit(
                             db,
                             run_id=run.id,

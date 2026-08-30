@@ -599,6 +599,11 @@ def _friendly_run_failure(detail: str) -> str:
             "Агент несколько раз пытался исправить проверку и остановился. "
             "Напишите, что поправить, или задеплойте текущие файлы во вкладке «Деплои»."
         )
+    if key in {"loop_detected", "loop detected"}:
+        return (
+            "Агент несколько раз повторял одну и ту же ошибку. "
+            "Уточните запрос в чате и нажмите «Продолжить»."
+        )
     if key.startswith("budget") or "budget_exceeded" in key or "бюджет" in key:
         if "₽" in detail or "кредит" in detail.lower():
             return detail

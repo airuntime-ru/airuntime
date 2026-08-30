@@ -118,3 +118,31 @@ class TestPrepareRunForResume:
 
         assert run.error_code is None
         assert run.error_message is None
+
+    def test_clears_loop_detected_blocker(self, db) -> None:
+        user = User(email=f"{uuid.uuid4().hex}@example.com", credits_balance=1000)
+        db.add(user)
+        db.flush()
+        project = Project(user_id=user.id, type="website", name="helpers")
+        db.add(project)
+        db.flush()
+        chat = Chat(project_id=project.id)
+        db.add(chat)
+        db.flush()
+        run = OrchestrationRunRepository(db).create(
+            project_id=project.id,
+            chat_id=chat.id,
+            user_id=user.id,
+            original_request="test",
+        )
+        run.status = "waiting_for_user"
+        run.error_code = "loop_detected"
+        run.error_message = "stuck in loop"
+        db.commit()
+
+        engine.prepare_run_for_resume(db, run)
+        db.commit()
+        db.refresh(run)
+
+        assert run.error_code is None
+        assert run.error_message is None

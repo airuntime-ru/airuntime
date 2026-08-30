@@ -195,10 +195,14 @@ def evaluate_failure(
         max_attempts=max_attempts,
         replanning_enabled=replanning_enabled,
     )
-    if loop_detected and decision in (FailureDecision.RETRY, FailureDecision.REPAIR):
-        # A detected loop overrides "just try again" - grinding on an identical fingerprint
-        # burns budget for zero expected value. Escalate instead.
-        decision = FailureDecision.REPLAN if replanning_enabled else FailureDecision.WAIT_FOR_USER
+    if loop_detected and decision in (
+        FailureDecision.RETRY,
+        FailureDecision.REPAIR,
+        FailureDecision.REPLAN,
+    ):
+        # Grinding on an identical fingerprint burns budget for zero expected value — park
+        # the run so the user can clarify the request instead of auto-replanning again.
+        decision = FailureDecision.WAIT_FOR_USER
 
     reason = f"{failure_class.value} on attempt {attempt}/{max_attempts}"
     if loop_detected:

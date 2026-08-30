@@ -88,6 +88,7 @@ class OrchestrationRunRepository:
 
     def transition(self, run: OrchestrationRun, status: str, **fields: object) -> OrchestrationRun:
         validate_run_transition(run.status, status)
+        previous_status = run.status
         now = datetime.now(UTC)
         if run.status != status:
             if status == "analyzing" and run.started_at is None:
@@ -99,6 +100,8 @@ class OrchestrationRunRepository:
             setattr(run, key, value)
         self.db.add(run)
         self.db.flush()
+        if status in RUN_TERMINAL_STATUSES and previous_status not in RUN_TERMINAL_STATUSES:
+            AgentTaskRepository(self.db).fail_orphan_tasks_for_run(run.id, run_status=status)
         return run
 
     def request_cancel(self, run: OrchestrationRun) -> OrchestrationRun:
@@ -242,6 +245,24 @@ class AgentTaskRepository:
         self.db.add(task)
         self.db.flush()
         return task
+
+    def fail_orphan_tasks_for_run(
+        self, run_id: uuid.UUID | str, *, run_status: str
+    ) -> list[AgentTask]:
+        """Fail tasks left non-terminal when their run reaches a terminal status."""
+        reason = f"Run already {run_status}"
+        failed: list[AgentTask] = []
+        for task in self.list_by_run(run_id):
+            if is_task_terminal(task.status):
+                continue
+            self.transition(
+                task,
+                "failed",
+                error_code="run_terminal",
+                error_message=reason,
+            )
+            failed.append(task)
+        return failed
 
     def reset_stale_running(
         self, plan_id: uuid.UUID | str, *, stale_seconds: int = 300

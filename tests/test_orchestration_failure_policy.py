@@ -184,7 +184,7 @@ class TestEvaluateFailure:
         assert evaluation.decision == FailureDecision.RETRY
         assert evaluation.loop_detected is False
 
-    def test_repeated_identical_failure_overrides_retry_with_replan(self) -> None:
+    def test_repeated_identical_failure_parks_at_waiting_for_user(self) -> None:
         detector = fp.LoopDetector(max_repeats=2)
         evaluation = None
         for attempt in range(1, 4):
@@ -196,7 +196,7 @@ class TestEvaluateFailure:
                 error_message="same failure every time",
             )
         assert evaluation.loop_detected is True
-        assert evaluation.decision == FailureDecision.REPLAN
+        assert evaluation.decision == FailureDecision.WAIT_FOR_USER
 
     def test_repeated_failure_without_replanning_waits_for_user_not_infinite_retry(self) -> None:
         detector = fp.LoopDetector(max_repeats=2)
