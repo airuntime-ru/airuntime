@@ -91,7 +91,7 @@ _TASK_FORWARD_EDGES: dict[str, frozenset[str]] = {
     # parked (not skipped - skipped is terminal and would silently drop the work) until the user
     # tops up and resumes. See engine.py's BudgetStatus.EXCEEDED branch.
     "ready": frozenset({"running", "skipped", "waiting_for_user"}),
-    "running": frozenset({"collecting_evidence"}),
+    "running": frozenset({"collecting_evidence", "ready"}),
     "collecting_evidence": frozenset({"validating"}),
     "validating": frozenset({"completed", "repairing", "waiting_for_user"}),
     "repairing": frozenset({"running"}),
