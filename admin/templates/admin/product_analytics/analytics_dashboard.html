@@ -101,10 +101,12 @@
 <script src="{% static 'core/vendor/chart.umd.min.js' %}"></script>
 <script>
 (function () {
+  // json_script writes the value as a JSON string; parse twice to get the object.
   var read = function (id) {
     var node = document.getElementById(id);
     if (!node) return null;
-    return JSON.parse(node.textContent);
+    var raw = JSON.parse(node.textContent);
+    return typeof raw === "string" ? JSON.parse(raw) : raw;
   };
 
   var kpis = read("data-kpis") || { tiles: [] };
