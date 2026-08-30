@@ -1,9 +1,9 @@
 from core.models import (
     AppUser,
+    CreditLedgerEntry,
     CreditTopUp,
     Deployment,
     ModerationEvent,
-    CreditLedgerEntry,
     Plan,
     PlanChangeRequest,
     Project,

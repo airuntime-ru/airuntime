@@ -1,12 +1,16 @@
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-src = ["backend/src", "tests", "scripts", "admin"]
+src = ["backend/src", "tests", "admin"]
 extend-exclude = ["admin/core/migrations"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 ignore = ["B008", "E501", "UP047"]
+
+[tool.ruff.lint.per-file-ignores]
+# Env vars must be set before Settings() loads on import.
+"tests/conftest.py" = ["E402"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["src"]

@@ -115,8 +115,8 @@ def test_list_ledger_filters_and_paginates(db: Session):
 def test_summarize_project_generation_usage(db: Session):
     from datetime import UTC, datetime, timedelta
 
-    from src.db.models.orchestration_run import OrchestrationRun
     from src.db.models.chat import Chat
+    from src.db.models.orchestration_run import OrchestrationRun
     from src.services.billing import summarize_project_generation_usage
 
     user = _user(db, email="usage-summary@airuntime.dev")

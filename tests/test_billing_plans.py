@@ -20,7 +20,6 @@ from src.core.config import settings
 from src.db.models.credit_ledger import CreditLedgerEntry
 from src.db.models.plan import Plan
 from src.db.models.plan_change_request import PlanChangeRequest
-from src.db.models.project import Project
 from src.db.models.user import User
 from src.services import plan_requests
 from src.services.billing import (

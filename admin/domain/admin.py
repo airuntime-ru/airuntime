@@ -258,8 +258,8 @@ class DomainPlanChangeRequestAdmin(admin.ModelAdmin):
         updated = self._resolve(request, queryset, "approved")
         self.message_user(
             request,
-            "Одобрено заявок: {}. Бюджет будет начислен и письмо отправлено при следующем "
-            "цикле обработки биллинга.".format(updated),
+            f"Одобрено заявок: {updated}. Бюджет будет начислен и письмо отправлено при следующем "
+            "цикле обработки биллинга.",
             messages.SUCCESS,
         )
 
@@ -268,8 +268,8 @@ class DomainPlanChangeRequestAdmin(admin.ModelAdmin):
         updated = self._resolve(request, queryset, "rejected")
         self.message_user(
             request,
-            "Отклонено заявок: {}. Пользователю уйдёт письмо при следующем цикле "
-            "обработки биллинга.".format(updated),
+            f"Отклонено заявок: {updated}. Пользователю уйдёт письмо при следующем цикле "
+            "обработки биллинга.",
             messages.SUCCESS,
         )
 
@@ -298,7 +298,15 @@ class DomainUserProviderCredentialAdmin(admin.ModelAdmin):
     list_display = ("user", "provider", "last4", "is_valid", "validated_at")
     list_filter = ("provider", "is_valid")
     search_fields = ("user__email",)
-    readonly_fields = ("id", "user", "provider", "last4", "validated_at", "last_error", "created_at")
+    readonly_fields = (
+        "id",
+        "user",
+        "provider",
+        "last4",
+        "validated_at",
+        "last_error",
+        "created_at",
+    )
     exclude = ("encrypted_key",)
     ordering = ("-created_at",)
 
