@@ -63,6 +63,7 @@ admin/*.sqlite3
 
 # Ops / one-off server scripts (keep local only; not frontend/scripts/)
 /scripts/
+!/scripts/notify_deploy.sh
 
 # Local audit artifacts
 frontend/docs/landing-audit/

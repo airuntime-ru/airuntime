@@ -140,7 +140,18 @@ class OpsMonitor:
             f"{esc(body)}"
         )
 
+    def _in_deploy_grace(self) -> bool:
+        raw = self.state.get("deploy_grace_until")
+        if not raw:
+            return False
+        try:
+            return datetime.now(UTC) < datetime.fromisoformat(raw)
+        except ValueError:
+            return False
+
     def check_container_errors(self) -> None:
+        if self._in_deploy_grace():
+            return
         if self._docker is None:
             return
         since_seconds = self.settings.log_check_interval_sec
@@ -206,6 +217,8 @@ class OpsMonitor:
         self.state.set("last_error_alert_fp", fingerprint)
 
     def check_health_urls(self) -> None:
+        if self._in_deploy_grace():
+            return
         if not self.settings.health_check_urls:
             return
         failures: list[tuple[str, str]] = []
