@@ -94,7 +94,9 @@ _TASK_FORWARD_EDGES: dict[str, frozenset[str]] = {
     "running": frozenset({"collecting_evidence", "ready"}),
     "collecting_evidence": frozenset({"validating"}),
     "validating": frozenset({"completed", "repairing", "waiting_for_user"}),
-    "repairing": frozenset({"running"}),
+    # repairing -> waiting_for_user: budget can run out between validation retries (engine.py
+    # re-enters _run_one_task's loop while the task is still in repairing).
+    "repairing": frozenset({"running", "waiting_for_user"}),
     "waiting_for_user": frozenset({"ready", "running"}),
 }
 

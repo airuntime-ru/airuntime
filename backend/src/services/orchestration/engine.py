@@ -1419,7 +1419,11 @@ async def _run_orchestration_inner(
                     )
                 else:
                     _walk_run_to_completed(db, run)
-                    finalize_project_after_completed_run(db, run=run, project=project)
+                    project_row = (
+                        db.query(Project).filter(Project.id == run.project_id).one_or_none()
+                    )
+                    if project_row is not None:
+                        finalize_project_after_completed_run(db, run=run, project=project_row)
                 db.commit()
                 return
 

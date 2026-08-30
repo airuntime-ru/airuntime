@@ -216,6 +216,32 @@ class TestAgentTaskRepositoryReadiness:
         assert {t.local_id for t in ready} == {"b"}
         assert task_repo.get(task_b.id).status == "ready"
 
+    def test_repairing_can_park_on_budget_exceeded(
+        self, db: Session, project: Project, chat: Chat
+    ) -> None:
+        run_repo = OrchestrationRunRepository(db)
+        plan_repo = OrchestrationPlanRepository(db)
+        task_repo = AgentTaskRepository(db)
+        run = run_repo.create(project_id=project.id, chat_id=chat.id, user_id=project.user_id)
+        plan = plan_repo.create_version(run_id=run.id, version=1, graph_json="{}")
+        task = task_repo.create(
+            run_id=run.id,
+            plan_id=plan.id,
+            local_id="main",
+            title="Main",
+            role="implementer",
+            execution_kind="specialist_agent",
+            status="pending",
+            depends_on_json=json.dumps([]),
+        )
+        task_repo.refresh_readiness(plan.id)
+        task_repo.transition(task, "running")
+        task_repo.transition(task, "collecting_evidence")
+        task_repo.transition(task, "validating")
+        task_repo.transition(task, "repairing")
+        task_repo.transition(task, "waiting_for_user", error_code="budget_exceeded")
+        assert task_repo.get(task.id).status == "waiting_for_user"
+
     def test_failed_dependency_skips_dependent_forever(
         self, db: Session, project: Project, chat: Chat
     ) -> None:
