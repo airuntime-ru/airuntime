@@ -154,9 +154,7 @@ class TestPlatformToolCapabilityProvider:
 
         monkeypatch.setattr(capability_provider, "submit_control_job", _preview)
         provider = PlatformToolCapabilityProvider()
-        result = await provider.invoke(
-            PLATFORM_CAPABILITY_PREVIEW_CHECK, {"paths": ["/"]}, _ctx()
-        )
+        result = await provider.invoke(PLATFORM_CAPABILITY_PREVIEW_CHECK, {"paths": ["/"]}, _ctx())
 
         assert result.status == "completed"
         assert result.output["status"] == "passed"

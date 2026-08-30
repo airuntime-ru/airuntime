@@ -46,9 +46,7 @@ def _ensure_platform_git_excludes(project_dir: Path) -> None:
         exclude_path = project_dir / exclude_path
     exclude_path.parent.mkdir(parents=True, exist_ok=True)
     existing = (
-        exclude_path.read_text(encoding="utf-8", errors="replace")
-        if exclude_path.exists()
-        else ""
+        exclude_path.read_text(encoding="utf-8", errors="replace") if exclude_path.exists() else ""
     )
     existing_lines = {line.strip() for line in existing.splitlines()}
     missing = [pattern for pattern in _PLATFORM_GIT_EXCLUDES if pattern not in existing_lines]
@@ -554,9 +552,13 @@ def create_worktree(
     write task can never touch the shared checkout other concurrent/sequential tasks use."""
     init_repo_if_needed(project_dir)
     worktree_path.parent.mkdir(parents=True, exist_ok=True)
-    if base_sha is None and _run_git(
-        cwd=project_dir, args=["rev-parse", "--verify", "-q", "HEAD"], check=False
-    ).returncode != 0:
+    if (
+        base_sha is None
+        and _run_git(
+            cwd=project_dir, args=["rev-parse", "--verify", "-q", "HEAD"], check=False
+        ).returncode
+        != 0
+    ):
         # Brand-new project, zero commits yet (HEAD is unborn) - `worktree add ... HEAD` has
         # nothing to branch from and fails outright. commit_snapshot() can't help here either
         # (an empty tree has no diff to no-op against), so give the shared checkout a real root

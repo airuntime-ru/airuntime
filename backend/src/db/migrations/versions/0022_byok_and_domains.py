@@ -44,12 +44,11 @@ def upgrade() -> None:
     op.add_column("projects", sa.Column("custom_domain", sa.String(253), nullable=True))
     op.add_column(
         "projects",
-        sa.Column(
-            "custom_domain_status", sa.String(20), nullable=False, server_default="none"
-        ),
+        sa.Column("custom_domain_status", sa.String(20), nullable=False, server_default="none"),
     )
     op.add_column(
-        "projects", sa.Column("custom_domain_verified_at", sa.DateTime(timezone=True), nullable=True)
+        "projects",
+        sa.Column("custom_domain_verified_at", sa.DateTime(timezone=True), nullable=True),
     )
     op.add_column("projects", sa.Column("custom_domain_error", sa.String(500), nullable=True))
     op.add_column(

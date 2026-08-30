@@ -52,7 +52,7 @@ def _run(db: Session, project: Project, *, status_chain: list[str], **fields):
 
 class TestCollectMetrics:
     def test_empty_window_reports_none_rates_not_zero(self, db: Session) -> None:
-        """"no runs yet" and "0% success" must not render identically on a dashboard."""
+        """ "no runs yet" and "0% success" must not render identically on a dashboard."""
         metrics = collect_metrics(db, window_hours=1)
         assert metrics.runs_total == 0
         assert metrics.run_success_rate is None

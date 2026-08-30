@@ -210,7 +210,9 @@ def collect_metrics(db: Session, *, window_hours: int = 24) -> OrchestrationMetr
         .group_by(RunEvent.event_type)
     ).all()
     events = {event_type: count for event_type, count in event_rows}
-    metrics.build_success_rate = _rate(events.get("run_completed", 0), events.get("build_started", 0))
+    metrics.build_success_rate = _rate(
+        events.get("run_completed", 0), events.get("build_started", 0)
+    )
     metrics.deploy_success_rate = _rate(
         events.get("run_completed", 0), events.get("deploy_started", 0)
     )

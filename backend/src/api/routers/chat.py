@@ -1124,7 +1124,6 @@ async def _stream_events(
     # BYOK first: the user's own key means the provider bills them, not us.
     api_key = resolve_turn_api_key(db, current_user, provider_name) or ""
 
-
     if content:
         verdict = await check_project_safety(
             text=content, provider_name=provider_name, model=model, api_key=api_key

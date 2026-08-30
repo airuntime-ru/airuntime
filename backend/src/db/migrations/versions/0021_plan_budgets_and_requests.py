@@ -85,9 +85,7 @@ def upgrade() -> None:
 
     op.drop_column("plans", "monthly_credits")
 
-    op.add_column(
-        "credit_ledger_entries", sa.Column("markup_percent", sa.Integer(), nullable=True)
-    )
+    op.add_column("credit_ledger_entries", sa.Column("markup_percent", sa.Integer(), nullable=True))
 
     op.alter_column("users", "credits_balance", server_default="0")
 
@@ -121,9 +119,7 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
     )
-    op.create_index(
-        "ix_plan_change_requests_user_id", "plan_change_requests", ["user_id"]
-    )
+    op.create_index("ix_plan_change_requests_user_id", "plan_change_requests", ["user_id"])
     op.create_index("ix_plan_change_requests_status", "plan_change_requests", ["status"])
 
 

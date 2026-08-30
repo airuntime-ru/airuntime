@@ -571,9 +571,7 @@ class McpExecutor:
             )
         except _Cancelled:
             return AgentExecutionResult(
-                task_result=TaskResult(
-                    status="failed", summary=f"mcp {capability_id}: отменено"
-                ),
+                task_result=TaskResult(status="failed", summary=f"mcp {capability_id}: отменено"),
                 error=cancellation.reason or "cancelled",
             )
         status = "completed" if result.status == "completed" else "failed"

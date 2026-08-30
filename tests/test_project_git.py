@@ -73,8 +73,7 @@ def test_platform_preview_artifacts_are_not_committed_or_reported_as_project_cha
     commit_hash = commit_snapshot(project_dir, message="site")
     assert commit_hash is not None
     names = {
-        entry.name
-        for entry in list_version_tree(project_dir, commit_hash=commit_hash, rel_path="")
+        entry.name for entry in list_version_tree(project_dir, commit_hash=commit_hash, rel_path="")
     }
     assert names == {"public"}
     assert (preview_dir / "result.json").exists()

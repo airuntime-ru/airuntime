@@ -272,9 +272,7 @@ def run_preview(
         result_path = worker_local_dir / "result.json"
         if not result_path.exists():
             details = _container_failure_details(runner_container, wait_result)
-            return _empty_result(
-                f"Preview container exited without producing a result{details}"
-            )
+            return _empty_result(f"Preview container exited without producing a result{details}")
         try:
             data = json.loads(result_path.read_text(encoding="utf-8"))
             # run_preview.py only knows the bare filename it wrote (page_x.png) - rewrite to a

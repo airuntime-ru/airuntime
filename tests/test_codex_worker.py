@@ -119,7 +119,7 @@ def test_proxy_base_url_skips_codex_login(monkeypatch) -> None:
     script = command[-1]
     assert "codex login" not in script
     assert 'base_url = "https://routerai.ru/api/v1"' in script
-    assert "model_provider = \"routerai\"" in script
+    assert 'model_provider = "routerai"' in script
     assert "exec" in script
 
 
@@ -130,17 +130,13 @@ def test_direct_openai_still_logs_in(monkeypatch) -> None:
 
 
 def test_job_uses_per_turn_api_key_instead_of_platform() -> None:
-    assert (
-        codex_worker._job_api_key({"api_key": "sk-user-openai"}) == "sk-user-openai"
-    )
+    assert codex_worker._job_api_key({"api_key": "sk-user-openai"}) == "sk-user-openai"
 
 
 def test_job_base_url_null_means_official_openai(monkeypatch) -> None:
     monkeypatch.setattr(settings, "openai_base_url", "https://routerai.ru/api/v1")
     assert codex_worker._job_base_url({"openai_base_url": None}) is None
-    assert (
-        codex_worker._job_base_url({}) == "https://routerai.ru/api/v1"
-    )
+    assert codex_worker._job_base_url({}) == "https://routerai.ru/api/v1"
 
 
 def test_job_base_url_override_skips_login() -> None:
@@ -165,12 +161,8 @@ def test_openai_byok_uses_official_openai(monkeypatch) -> None:
     def _no_admin(_name: str) -> None:
         return None
 
-    monkeypatch.setattr(
-        "src.services.agent.codex_runtime.resolve_api_key_for_provider", _no_admin
-    )
-    assert (
-        resolve_codex_base_url(provider_name="openai", api_key="sk-user-openai") is None
-    )
+    monkeypatch.setattr("src.services.agent.codex_runtime.resolve_api_key_for_provider", _no_admin)
+    assert resolve_codex_base_url(provider_name="openai", api_key="sk-user-openai") is None
     assert (
         resolve_codex_base_url(provider_name="openai", api_key="sk-platform-routerai")
         == "https://routerai.ru/api/v1"

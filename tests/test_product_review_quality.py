@@ -61,9 +61,7 @@ def test_quality_gate_rejects_missing_files_and_low_functional_honesty() -> None
 
 
 @pytest.mark.asyncio
-async def test_product_review_returns_usage_and_partial_findings(
-    tmp_path, monkeypatch
-) -> None:
+async def test_product_review_returns_usage_and_partial_findings(tmp_path, monkeypatch) -> None:
     import src.services.orchestration.skills.product_review as module
 
     (tmp_path / "Dockerfile").write_text("FROM python:3.13-slim", encoding="utf-8")

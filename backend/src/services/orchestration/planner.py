@@ -266,9 +266,7 @@ def _preview_criterion(task: PlannedTask) -> AcceptanceCriterion:
     )
 
 
-def ensure_website_quality_plan(
-    plan: ExecutionPlan, *, max_tasks: int
-) -> ExecutionPlan:
+def ensure_website_quality_plan(plan: ExecutionPlan, *, max_tasks: int) -> ExecutionPlan:
     """Server-side quality invariant for visible website work.
 
     The planner may suggest a good workflow, but production must not depend on it remembering
@@ -299,8 +297,7 @@ def ensure_website_quality_plan(
         implementation = updated
 
     has_visual_qa = any(
-        task.role == SpecialistRole.QA_REVIEWER
-        and "visual_preview_review" in task.suggested_skills
+        task.role == SpecialistRole.QA_REVIEWER and "visual_preview_review" in task.suggested_skills
         for task in tasks
     )
     if has_visual_qa or len(tasks) >= max_tasks:

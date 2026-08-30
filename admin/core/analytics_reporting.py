@@ -65,9 +65,9 @@ def _spend_stats(start, end) -> dict:
     charged_rub = _credits_to_rub(charged_credits)
 
     topups_rub = (
-        CreditTopUp.objects.filter(
-            status="paid", paid_at__gte=start, paid_at__lt=end
-        ).aggregate(v=Sum("amount_rub"))["v"]
+        CreditTopUp.objects.filter(status="paid", paid_at__gte=start, paid_at__lt=end).aggregate(
+            v=Sum("amount_rub")
+        )["v"]
         or 0
     )
 
@@ -127,8 +127,13 @@ def summary_kpis(*, days: int = 30) -> dict:
         }
     )
     tiles.append(
-        {"key": "paying_users", "label": "Платящих", "unit": "", "value": paying_users,
-         "delta_pct": None}
+        {
+            "key": "paying_users",
+            "label": "Платящих",
+            "unit": "",
+            "value": paying_users,
+            "delta_pct": None,
+        }
     )
     return {"tiles": tiles, "current": current, "previous": previous}
 

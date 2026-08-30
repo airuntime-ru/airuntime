@@ -1231,6 +1231,7 @@ class TestEnsurePreviewAndRuntimeEvidence:
         task = AgentTaskRepository(db).list_by_run(run.id)[0]
         assert task.status == "completed"
         assert "build_result" in (task.evidence_json or "")
-        assert '"ok": true' in (task.evidence_json or "").lower() or '"ok":true' in (
-            task.evidence_json or ""
-        ).lower()
+        assert (
+            '"ok": true' in (task.evidence_json or "").lower()
+            or '"ok":true' in (task.evidence_json or "").lower()
+        )

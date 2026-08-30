@@ -65,9 +65,7 @@ def _write_minimal_project_files(root: Path, project_type: str) -> None:
         public_dir.mkdir(parents=True, exist_ok=True)
         index = public_dir / "index.html"
         if not index.exists():
-            index.write_text(
-                "<!doctype html><html><body>Test site</body></html>", encoding="utf-8"
-            )
+            index.write_text("<!doctype html><html><body>Test site</body></html>", encoding="utf-8")
 
     if project_type in ("telegram_bot", "mixed"):
         app_py = root / "app.py"
@@ -85,7 +83,7 @@ def _write_minimal_project_files(root: Path, project_type: str) -> None:
         dockerfile.write_text(
             "FROM nginx:alpine\nCOPY public /usr/share/nginx/html\n"
             if project_type == "website"
-            else "FROM python:3.13-slim\nCOPY . /app\nWORKDIR /app\nCMD [\"python\", \"app.py\"]\n",
+            else 'FROM python:3.13-slim\nCOPY . /app\nWORKDIR /app\nCMD ["python", "app.py"]\n',
             encoding="utf-8",
         )
 
@@ -164,9 +162,7 @@ def orchestration_stub(monkeypatch, tmp_path, db):
                     requested_services=[self._service]
                     if self._service and not is_read_only
                     else [],
-                    requested_secrets=[self._secret]
-                    if self._secret and not is_read_only
-                    else [],
+                    requested_secrets=[self._secret] if self._secret and not is_read_only else [],
                 ),
                 build_result={"ok": True, "log_tail": "ok"},
                 preview_result={"status": "passed", "pages": []},

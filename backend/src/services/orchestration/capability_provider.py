@@ -142,9 +142,7 @@ class PlatformToolCapabilityProvider:
             )
         return CapabilityResult(status="completed" if result.get("ok") else "failed", output=result)
 
-    async def _preview_check(
-        self, context: CapabilityContext, arguments: dict
-    ) -> CapabilityResult:
+    async def _preview_check(self, context: CapabilityContext, arguments: dict) -> CapabilityResult:
         import asyncio
 
         paths = arguments.get("paths")

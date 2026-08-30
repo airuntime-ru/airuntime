@@ -94,7 +94,9 @@ def _spawn_codex_run(job: dict) -> None:
     # run_control_action: that returns one dict for a Redis RPC result key nobody polls here -
     # codex_run's caller (agent/codex_runtime.py) polls a live events list instead.
     logger.info("Codex job queued on worker thread id=%s", job.get("job_id"))
-    threading.Thread(target=_run_codex_job, args=(job,), daemon=True, name=f"codex-{job.get('job_id', '')[:12]}").start()
+    threading.Thread(
+        target=_run_codex_job, args=(job,), daemon=True, name=f"codex-{job.get('job_id', '')[:12]}"
+    ).start()
 
 
 def process_control_job(job: dict) -> None:

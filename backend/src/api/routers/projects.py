@@ -66,9 +66,7 @@ def _to_response(project: Project) -> ProjectResponse:
 
 
 def _owned_project_or_404(db: Session, project_id: UUID, user: User) -> Project:
-    project = (
-        db.query(Project).filter(Project.id == project_id, Project.user_id == user.id).first()
-    )
+    project = db.query(Project).filter(Project.id == project_id, Project.user_id == user.id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return project

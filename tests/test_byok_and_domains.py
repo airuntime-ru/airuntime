@@ -236,7 +236,9 @@ def test_setting_a_domain_starts_pending(db: Session, project: Project):
 
 
 def test_a_domain_cannot_be_claimed_twice(db: Session, user: User, project: Project):
-    other = Project(user_id=user.id, type="website", name="Второй", description="", status="created")
+    other = Project(
+        user_id=user.id, type="website", name="Второй", description="", status="created"
+    )
     db.add(other)
     db.commit()
     cd.set_custom_domain(db, project, "shop.example.com")

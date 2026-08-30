@@ -126,9 +126,7 @@ def _load_screenshots(
     return images, screenshot_dir
 
 
-def _apply_score_gate(
-    review: ReviewResult, *, floors: dict[str, int]
-) -> ReviewResult:
+def _apply_score_gate(review: ReviewResult, *, floors: dict[str, int]) -> ReviewResult:
     failed = [
         f"{field}={getattr(review.score, field)} (minimum {minimum})"
         for field, minimum in floors.items()
@@ -180,9 +178,7 @@ class _PreviewReviewSkillBase(BaseSkill):
             )
 
         gated = _deterministic_gate(preview)
-        images, screenshot_dir = _load_screenshots(
-            preview, workspace_root=context.workspace_root
-        )
+        images, screenshot_dir = _load_screenshots(preview, workspace_root=context.workspace_root)
         brief_text = context.arguments.get("brief_text", "")
         user_text = (
             f"Бриф (цель и критерии приёмки):\n{brief_text}\n\n"
