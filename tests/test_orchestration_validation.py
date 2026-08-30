@@ -123,6 +123,41 @@ class TestValidateStaticBuildPreviewRuntime:
     def test_preview_passed_status(self) -> None:
         assert v.validate_preview(_evidence(preview_result={"status": "passed"})).passed is True
 
+    def test_preview_issues_found_only_external_font_cdn_passes(self) -> None:
+        preview = {
+            "status": "issues_found",
+            "fatal_errors": [],
+            "pages": [
+                {
+                    "url": "http://preview/",
+                    "console_errors": [],
+                    "network_errors": [
+                        "GET https://fonts.googleapis.com/css2?family=Inter - net::ERR_NAME_NOT_RESOLVED"
+                    ],
+                    "overflow_elements": [],
+                    "broken_images": [],
+                }
+            ],
+        }
+        assert v.validate_preview(_evidence(preview_result=preview)).passed is True
+
+    def test_preview_issues_found_with_console_errors_fails(self) -> None:
+        preview = {
+            "status": "issues_found",
+            "fatal_errors": [],
+            "pages": [
+                {
+                    "console_errors": ["Uncaught TypeError"],
+                    "network_errors": [
+                        "GET https://fonts.googleapis.com/css2?family=Inter - net::ERR_NAME_NOT_RESOLVED"
+                    ],
+                    "overflow_elements": [],
+                    "broken_images": [],
+                }
+            ],
+        }
+        assert v.validate_preview(_evidence(preview_result=preview)).passed is False
+
     def test_runtime_required_but_missing_fails(self) -> None:
         assert v.validate_runtime(_evidence()).passed is False
 

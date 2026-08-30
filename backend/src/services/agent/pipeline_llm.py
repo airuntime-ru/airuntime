@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
-
 from sqlalchemy.orm import Session
 
 from src.services.agent.codex_runtime import CODEX_ELIGIBLE_PROVIDERS, codex_simple_complete

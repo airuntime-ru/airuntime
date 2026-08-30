@@ -72,12 +72,16 @@ class ProductAnalyticsDashboardAdmin(admin.ModelAdmin):
             "top_screens_json": json.dumps(
                 reporting.top_screens(days=days, platform=platform), ensure_ascii=False
             ),
-            "platforms_json": json.dumps(reporting.platform_breakdown(days=days), ensure_ascii=False),
+            "platforms_json": json.dumps(
+                reporting.platform_breakdown(days=days), ensure_ascii=False
+            ),
             "retention_json": json.dumps(
                 reporting.retention_summary(days=days, platform=platform), ensure_ascii=False
             ),
         }
-        return TemplateResponse(request, "admin/product_analytics/analytics_dashboard.html", context)
+        return TemplateResponse(
+            request, "admin/product_analytics/analytics_dashboard.html", context
+        )
 
     _EXPORT_FIELDS = {
         "top-screens": ("screen", "views", "avg_duration_ms"),

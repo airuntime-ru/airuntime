@@ -5,9 +5,7 @@ from django.db import models
 
 class OrchestrationRun(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    project = models.ForeignKey(
-        "core.Project", on_delete=models.DO_NOTHING, db_column="project_id"
-    )
+    project = models.ForeignKey("core.Project", on_delete=models.DO_NOTHING, db_column="project_id")
     chat_id = models.UUIDField()
     message_id = models.UUIDField(null=True, blank=True)
     user_id = models.UUIDField()
@@ -54,9 +52,7 @@ class OrchestrationRun(models.Model):
 
 class RunEvent(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    run = models.ForeignKey(
-        OrchestrationRun, on_delete=models.DO_NOTHING, db_column="run_id"
-    )
+    run = models.ForeignKey(OrchestrationRun, on_delete=models.DO_NOTHING, db_column="run_id")
     task_id = models.UUIDField(null=True, blank=True)
     seq = models.IntegerField()
     event_type = models.CharField(max_length=64)
@@ -76,9 +72,7 @@ class RunEvent(models.Model):
 
 class AgentTask(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    run = models.ForeignKey(
-        OrchestrationRun, on_delete=models.DO_NOTHING, db_column="run_id"
-    )
+    run = models.ForeignKey(OrchestrationRun, on_delete=models.DO_NOTHING, db_column="run_id")
     plan_id = models.UUIDField()
     parent_task_id = models.UUIDField(null=True, blank=True)
 

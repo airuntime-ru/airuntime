@@ -27,6 +27,34 @@ NAV_TIMEOUT_MS = 15_000
 FIRST_LOAD_RETRIES = 6
 FIRST_LOAD_RETRY_DELAY_S = 1.5
 
+# Must stay aligned with backend/src/services/orchestration/preview_gate.py — preview runs
+# without outbound internet, so external font CDNs must not fail the gate.
+_EXTERNAL_FONT_CDN_HOSTS = (
+    "fonts.googleapis.com",
+    "fonts.gstatic.com",
+    "use.typekit.net",
+    "fast.fonts.net",
+    "cloud.typography.com",
+)
+
+
+def _is_benign_cdn_network_error(error: str) -> bool:
+    lower = error.lower()
+    return any(host in lower for host in _EXTERNAL_FONT_CDN_HOSTS)
+
+
+def _blocking_network_errors(network_errors: list[str]) -> list[str]:
+    return [entry for entry in network_errors if not _is_benign_cdn_network_error(entry)]
+
+
+def _page_has_blocking_issues(page_result: dict) -> bool:
+    return bool(
+        page_result.get("console_errors")
+        or _blocking_network_errors(page_result.get("network_errors") or [])
+        or page_result.get("overflow_elements")
+        or page_result.get("broken_images")
+    )
+
 _OVERFLOW_SCRIPT = """
 () => {
   const vw = window.innerWidth;
@@ -270,12 +298,7 @@ def main() -> int:
                         result["fatal_errors"].append(page_result["fatal_error"])
                         continue
                     result["pages"].append(page_result)
-                    if (
-                        page_result["console_errors"]
-                        or page_result["network_errors"]
-                        or page_result["overflow_elements"]
-                        or page_result["broken_images"]
-                    ):
+                    if _page_has_blocking_issues(page_result):
                         vp = page_result["viewport"]
                         result["warnings"].append(
                             f"Issues found on {page_result['url']} ({vp['width']}x{vp['height']})"

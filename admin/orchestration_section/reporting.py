@@ -67,9 +67,7 @@ def project_orchestration_summary(project_id: UUID | str, days: int = 30) -> dic
     stuck = _stuck_qs(runs).count()
 
     credits = runs.aggregate(total=Sum("credits_used"))["total"] or 0
-    avg_credits = (
-        runs.filter(status="completed").aggregate(v=Avg("credits_used"))["v"]
-    )
+    avg_credits = runs.filter(status="completed").aggregate(v=Avg("credits_used"))["v"]
 
     recent = list(
         runs.order_by("-created_at")[:25].values(
@@ -219,9 +217,7 @@ def project_metrics(project_id: UUID | str, window_hours: int = 24) -> dict:
     repair_attempted = task_qs.filter(attempt__gt=1).count()
     repaired = tasks_completed - first_try
 
-    tasks_by_role = dict(
-        task_qs.values("role").annotate(c=Count("id")).values_list("role", "c")
-    )
+    tasks_by_role = dict(task_qs.values("role").annotate(c=Count("id")).values_list("role", "c"))
     tasks_by_kind = dict(
         task_qs.values("execution_kind").annotate(c=Count("id")).values_list("execution_kind", "c")
     )

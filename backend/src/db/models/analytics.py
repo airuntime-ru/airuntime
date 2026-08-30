@@ -30,7 +30,7 @@ class AnalyticsSession(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
-    events: Mapped[list["AnalyticsEvent"]] = relationship(
+    events: Mapped[list[AnalyticsEvent]] = relationship(
         "AnalyticsEvent", back_populates="session", cascade="all, delete-orphan"
     )
 

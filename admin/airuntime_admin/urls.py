@@ -3,8 +3,7 @@ from django.shortcuts import redirect
 from django.urls import path, reverse
 
 from airuntime_admin import docker_views
-from core import analytics_views
-from core import support_views
+from core import analytics_views, support_views
 from orchestration_section import admin as orchestration_admin
 
 _orig_get_app_list = admin.site.get_app_list

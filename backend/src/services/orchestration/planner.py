@@ -628,9 +628,7 @@ async def generate_plan(
             plan=build_single_task_plan(user_message, reason="short request - planning skipped"),
             source="heuristic_simple",
         )
-        _emit_plan_trace(
-            db, run_id, result, duration_ms=int((time.monotonic() - started) * 1000)
-        )
+        _emit_plan_trace(db, run_id, result, duration_ms=int((time.monotonic() - started) * 1000))
         return result
 
     system_prompt = build_planning_system_prompt(max_tasks=max_tasks)
@@ -669,9 +667,7 @@ async def generate_plan(
             source="fallback_llm_failed",
             errors=["planner_call_failed"],
         )
-        _emit_plan_trace(
-            db, run_id, result, duration_ms=int((time.monotonic() - started) * 1000)
-        )
+        _emit_plan_trace(db, run_id, result, duration_ms=int((time.monotonic() - started) * 1000))
         return result
 
     errors = validate_plan_structure(raw_plan, max_tasks=max_tasks)
@@ -688,9 +684,7 @@ async def generate_plan(
             else raw_plan
         )
         result = PlanGenerationResult(plan=quality_plan, source="llm")
-        _emit_plan_trace(
-            db, run_id, result, duration_ms=int((time.monotonic() - started) * 1000)
-        )
+        _emit_plan_trace(db, run_id, result, duration_ms=int((time.monotonic() - started) * 1000))
         return result
 
     logger.info(

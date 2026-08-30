@@ -1,6 +1,6 @@
 from src.db.models.agent_run_metric import AgentRunMetric
-from src.db.models.analytics import AnalyticsEvent, AnalyticsSession
 from src.db.models.agent_task import AgentTask
+from src.db.models.analytics import AnalyticsEvent, AnalyticsSession
 from src.db.models.chat import Chat
 from src.db.models.chat_file import ChatFile
 from src.db.models.credit_ledger import CreditLedgerEntry

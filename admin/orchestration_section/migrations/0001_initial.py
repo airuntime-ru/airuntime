@@ -14,7 +14,12 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name="OrchestrationRun",
             fields=[
-                ("id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+                (
+                    "id",
+                    models.UUIDField(
+                        default=uuid.uuid4, editable=False, primary_key=True, serialize=False
+                    ),
+                ),
                 ("chat_id", models.UUIDField()),
                 ("message_id", models.UUIDField(blank=True, null=True)),
                 ("user_id", models.UUIDField()),
@@ -59,7 +64,12 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name="RunEvent",
             fields=[
-                ("id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+                (
+                    "id",
+                    models.UUIDField(
+                        default=uuid.uuid4, editable=False, primary_key=True, serialize=False
+                    ),
+                ),
                 ("task_id", models.UUIDField(blank=True, null=True)),
                 ("seq", models.IntegerField()),
                 ("event_type", models.CharField(max_length=64)),
@@ -85,7 +95,12 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name="AgentTask",
             fields=[
-                ("id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+                (
+                    "id",
+                    models.UUIDField(
+                        default=uuid.uuid4, editable=False, primary_key=True, serialize=False
+                    ),
+                ),
                 ("plan_id", models.UUIDField()),
                 ("parent_task_id", models.UUIDField(blank=True, null=True)),
                 ("local_id", models.CharField(max_length=64)),

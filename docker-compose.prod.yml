@@ -338,12 +338,14 @@ services:
         NEXT_PUBLIC_API_BASE_URL: https://api.${APP_DOMAIN}/api/v1
         NEXT_PUBLIC_SITE_URL: https://${APP_DOMAIN}
         NEXT_PUBLIC_BASE_DOMAIN: ${APP_DOMAIN}
+        NEXT_PUBLIC_ANALYTICS_INGEST_KEY: ${ANALYTICS_INGEST_KEY:-}
     restart: unless-stopped
     logging: *default-logging
     environment:
       NEXT_PUBLIC_API_BASE_URL: https://api.${APP_DOMAIN}/api/v1
       NEXT_PUBLIC_SITE_URL: https://${APP_DOMAIN}
       NEXT_PUBLIC_BASE_DOMAIN: ${APP_DOMAIN}
+      NEXT_PUBLIC_ANALYTICS_INGEST_KEY: ${ANALYTICS_INGEST_KEY:-}
     depends_on:
       - backend
     networks:

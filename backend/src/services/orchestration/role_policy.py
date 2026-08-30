@@ -68,6 +68,10 @@ _DESIGN_FACTORY_RULES = """
    preview_project: сразу заверши ход после успешной сборки, а платформа сама поднимет изолированный
    preview 1440x900/390x844 и передаст скриншоты независимому visual reviewer. Его замечания имеют
    право вернуть результат на доработку.
+7. Изолированный preview без интернета: не подключай Google Fonts, Adobe Fonts, Typekit и другие
+   внешние CDN шрифтов (@import url(...), link href на fonts.googleapis.com). Используй system-ui,
+   локальные @font-face или self-hosted файлы в репозитории — иначе preview будет бесконечно
+   возвращать issues_found и гонять задачу по кругу.
 """
 
 

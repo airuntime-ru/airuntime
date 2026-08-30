@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from src.services.orchestration.preview_gate import preview_passes_validation
 from src.services.orchestration.schemas import (
     ClaimedAcceptanceResult,
     RiskLevel,
@@ -208,12 +209,17 @@ def validate_preview(evidence: TaskEvidence) -> ValidationFinding:
             severity=RiskLevel.MEDIUM,
             message="preview was required but no preview_result is present",
         )
-    ok = evidence.preview_result.get("status") == "passed"
+    preview = evidence.preview_result
+    ok = preview_passes_validation(preview)
+    status = preview.get("status")
+    message = f"preview status={status}"
+    if ok and status == "issues_found":
+        message = "preview issues_found (external font CDN only; ignored)"
     return ValidationFinding(
         step="preview",
         passed=ok,
         severity=RiskLevel.MEDIUM,
-        message=f"preview status={evidence.preview_result.get('status')}",
+        message=message,
         evidence_ref="preview_result",
     )
 
@@ -250,6 +256,8 @@ def _verify_criterion_status(method: str, evidence: TaskEvidence) -> str:
     result = lookup[method]
     if result is None:
         return "unknown"
+    if method == "preview":
+        return "passed" if preview_passes_validation(result) else "failed"
     return "passed" if result.get("ok") or result.get("status") == "passed" else "failed"
 
 

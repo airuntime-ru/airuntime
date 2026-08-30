@@ -6,6 +6,7 @@ import json
 from django.contrib import admin
 from django.http import HttpResponse
 from django.template.response import TemplateResponse
+from django.urls import reverse
 
 from core import analytics_reporting as reporting
 
@@ -37,6 +38,7 @@ def analytics_dashboard_view(request):
         "plan_requests_json": _json(reporting.plan_requests_summary(days=days)),
         "free_burn_json": _json(reporting.free_burn_rate(days=days)),
         "usage_totals_json": _json(reporting.usage_totals(days=days)),
+        "product_analytics_url": reverse("admin:product_analytics_dashboard"),
     }
     return TemplateResponse(request, "admin/analytics_dashboard.html", context)
 

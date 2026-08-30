@@ -13,6 +13,9 @@
 {% block content %}
 <style>
   .an-toolbar { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; margin-bottom:18px; }
+  .an-nav { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:18px; }
+  .an-nav a { padding:8px 14px; border-radius:999px; border:1px solid var(--border-color); text-decoration:none; color:var(--body-fg); font-size:13px; font-weight:600; }
+  .an-nav a.is-active { background:var(--primary); border-color:var(--primary); color:var(--primary-fg); }
   .an-range { display:flex; gap:8px; flex-wrap:wrap; }
   .an-range a { padding:7px 14px; border:1px solid var(--border-color); border-radius:999px; font-size:13px; text-decoration:none; color:var(--body-fg); background:var(--body-bg); }
   .an-range a.is-active { background:var(--primary); border-color:var(--primary); color:var(--primary-fg); }
@@ -35,6 +38,11 @@
   .an-funnel__bar { height:22px; border-radius:5px; background:var(--primary); min-width:2px; }
   .an-actions a { font-size:12px; margin-left:10px; }
 </style>
+
+<nav class="an-nav">
+  <a href="{{ product_analytics_url }}">Продукт</a>
+  <a href="{% url 'admin_analytics_dashboard' %}?days={{ days }}" class="is-active">Расходы и маржа</a>
+</nav>
 
 <div class="an-toolbar">
   <div class="an-range">
