@@ -7,7 +7,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from src.db.models.orchestration import OrchestrationRun
+from src.db.models.orchestration_run import OrchestrationRun
 from src.db.models.project import Project
 from src.services.agentic_artifacts import ensure_dockerfile, workspace_has_agent_code
 from src.services.artifacts import _telegram_token
