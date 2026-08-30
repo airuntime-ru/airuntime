@@ -104,7 +104,9 @@
 (function () {
   function read(id) {
     const el = document.getElementById(id);
-    return el ? JSON.parse(el.textContent) : null;
+    if (!el) return null;
+    const raw = JSON.parse(el.textContent);
+    return typeof raw === "string" ? JSON.parse(raw) : raw;
   }
 
   const summary = read("orch-summary") || {};
