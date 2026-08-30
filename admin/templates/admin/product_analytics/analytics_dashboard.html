@@ -128,37 +128,45 @@
 
   document.getElementById("pa-screens").innerHTML =
     "<tr><th>Экран</th><th class='num'>Просмотры</th><th class='num'>Ср. время, мс</th></tr>" +
-    screens.map(function (row) {
-      return "<tr><td>" + row.screen + "</td><td class='num'>" + fmt(row.views) +
-        "</td><td class='num'>" + fmt(row.avg_duration_ms) + "</td></tr>";
-    }).join("");
+    (screens.length
+      ? screens.map(function (row) {
+          return "<tr><td>" + row.screen + "</td><td class='num'>" + fmt(row.views) +
+            "</td><td class='num'>" + fmt(row.avg_duration_ms) + "</td></tr>";
+        }).join("")
+      : "<tr><td colspan='3'>Пока нет просмотров экранов за выбранный период.</td></tr>");
 
   document.getElementById("pa-retention").innerHTML =
     "<tr><th>Когорта</th><th class='num'>Размер</th><th class='num'>D1</th><th class='num'>D7</th><th class='num'>D30</th></tr>" +
-    (retention.cohorts || []).map(function (row) {
-      return "<tr><td>" + row.cohort_day + "</td><td class='num'>" + fmt(row.cohort_size) +
-        "</td><td class='num'>" + row.d1_pct + "%</td><td class='num'>" + row.d7_pct +
-        "%</td><td class='num'>" + row.d30_pct + "%</td></tr>";
-    }).join("");
+    ((retention.cohorts || []).length
+      ? retention.cohorts.map(function (row) {
+          return "<tr><td>" + row.cohort_day + "</td><td class='num'>" + fmt(row.cohort_size) +
+            "</td><td class='num'>" + row.d1_pct + "%</td><td class='num'>" + row.d7_pct +
+            "%</td><td class='num'>" + row.d30_pct + "%</td></tr>";
+        }).join("")
+      : "<tr><td colspan='5'>Недостаточно данных для retention — нужны повторные визиты.</td></tr>");
 
   if (window.Chart) {
-    new Chart(document.getElementById("pa-dau-chart"), {
-      type: "line",
-      data: {
-        labels: dau.map(function (r) { return r.day; }),
-        datasets: [{ label: "DAU", data: dau.map(function (r) { return r.dau; }), borderColor: "#2388ff", tension: 0.3 }]
-      },
-      options: { responsive: true, maintainAspectRatio: false }
-    });
+    try {
+      new Chart(document.getElementById("pa-dau-chart"), {
+        type: "line",
+        data: {
+          labels: dau.map(function (r) { return r.day; }),
+          datasets: [{ label: "DAU", data: dau.map(function (r) { return r.dau; }), borderColor: "#2388ff", tension: 0.3 }]
+        },
+        options: { responsive: true, maintainAspectRatio: false }
+      });
 
-    new Chart(document.getElementById("pa-platform-chart"), {
-      type: "doughnut",
-      data: {
-        labels: platforms.map(function (r) { return r.platform; }),
-        datasets: [{ data: platforms.map(function (r) { return r.events; }), backgroundColor: ["#2388ff", "#5ce6b0", "#ffb020", "#c62828"] }]
-      },
-      options: { responsive: true, maintainAspectRatio: false }
-    });
+      new Chart(document.getElementById("pa-platform-chart"), {
+        type: "doughnut",
+        data: {
+          labels: platforms.length ? platforms.map(function (r) { return r.platform; }) : ["нет данных"],
+          datasets: [{ data: platforms.length ? platforms.map(function (r) { return r.events; }) : [1], backgroundColor: ["#2388ff", "#5ce6b0", "#ffb020", "#c62828"] }]
+        },
+        options: { responsive: true, maintainAspectRatio: false }
+      });
+    } catch (err) {
+      console.error("product analytics charts failed", err);
+    }
   }
 })();
 </script>

@@ -86,31 +86,40 @@ def dau_series(*, days: int = 30, platform: str | None = None) -> list[dict]:
         .annotate(dau=Count(IDENTITY, distinct=True))
         .order_by("day")
     )
-    return [{"day": row["day"].isoformat(), "dau": row["dau"]} for row in rows]
+    by_day = {row["day"].isoformat(): row["dau"] for row in rows}
+    start = timezone.localdate() - timedelta(days=days - 1)
+    end = timezone.localdate()
+    out: list[dict] = []
+    day = start
+    while day <= end:
+        iso = day.isoformat()
+        out.append({"day": iso, "dau": by_day.get(iso, 0)})
+        day += timedelta(days=1)
+    return out
 
 
 def top_screens(*, days: int = 30, limit: int = 15, platform: str | None = None) -> list[dict]:
     since = _since(days)
-    qs = _apply_platform(
-        AnalyticsEvent.objects.filter(
-            occurred_at__gte=since,
-            name="screen_view",
-            screen__isnull=False,
-        ),
-        platform,
-    )
-    rows = (
-        qs.values("screen")
-        .annotate(views=Count("id"), avg_duration_ms=Avg("duration_ms"))
+    base = _apply_platform(AnalyticsEvent.objects.filter(occurred_at__gte=since), platform)
+    view_rows = (
+        base.filter(name="screen_view", screen__isnull=False)
+        .values("screen")
+        .annotate(views=Count("id"))
         .order_by("-views")[:limit]
     )
+    duration_rows = {
+        row["screen"]: row["avg_duration_ms"]
+        for row in base.filter(name="screen_leave", screen__isnull=False, duration_ms__isnull=False)
+        .values("screen")
+        .annotate(avg_duration_ms=Avg("duration_ms"))
+    }
     return [
         {
             "screen": row["screen"],
             "views": row["views"],
-            "avg_duration_ms": int(row["avg_duration_ms"] or 0),
+            "avg_duration_ms": int(duration_rows.get(row["screen"]) or 0),
         }
-        for row in rows
+        for row in view_rows
     ]
 
 

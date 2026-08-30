@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
+import { ProductAnalytics } from "@/components/product-analytics";
 import { seoCopy } from "@/lib/landing/content";
 
 const inter = Inter({
@@ -67,7 +68,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ru" className={`${inter.variable} ${jetbrains.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col bg-[var(--background)] text-[var(--foreground)]">{children}</body>
+      <body className="min-h-full flex flex-col bg-[var(--background)] text-[var(--foreground)]">
+        <ProductAnalytics />
+        {children}
+      </body>
     </html>
   );
 }

@@ -26,7 +26,8 @@ type BatchPayload = {
 
 const ANON_KEY = "airuntime-analytics-anon-id";
 const SESSION_KEY = "airuntime-analytics-session-id";
-const FLUSH_MS = 15_000;
+const FLUSH_MS = 5_000;
+const FLUSH_DEBOUNCE_MS = 800;
 const MAX_BATCH = 40;
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").replace(/\/$/, "");
@@ -36,7 +37,8 @@ let platform: AnalyticsPlatform = "web";
 let userId: string | null = null;
 let sessionStarted = false;
 const queue: QueuedEvent[] = [];
-let flushTimer: ReturnType<typeof setInterval> | null = null;
+let intervalTimer: ReturnType<typeof setInterval> | null = null;
+let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let currentScreen: string | null = null;
 let currentScreenStartedAt = 0;
 
@@ -128,11 +130,21 @@ function sanitizeProps(
   return Object.keys(out).length ? out : undefined;
 }
 
+function scheduleFlush(keepalive = false): void {
+  if (debounceTimer) clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(() => {
+    debounceTimer = null;
+    void flushAnalytics(keepalive);
+  }, FLUSH_DEBOUNCE_MS);
+}
+
 function enqueue(event: QueuedEvent): void {
   queue.push(event);
   if (queue.length >= MAX_BATCH) {
     void flushAnalytics();
+    return;
   }
+  scheduleFlush();
 }
 
 function buildBatch(): BatchPayload {
@@ -154,13 +166,17 @@ async function sendBatch(payload: BatchPayload, keepalive = false): Promise<void
   if (INGEST_KEY) {
     headers.Authorization = `Bearer ${INGEST_KEY}`;
   }
-  await fetch(batchUrl(), {
+  const resp = await fetch(batchUrl(), {
     method: "POST",
     headers,
     body: JSON.stringify(payload),
     keepalive,
     credentials: "omit",
   });
+  if (!resp.ok) {
+    const detail = await resp.text().catch(() => "");
+    throw new Error(`analytics ingest ${resp.status}: ${detail.slice(0, 200)}`);
+  }
 }
 
 export async function flushAnalytics(keepalive = false): Promise<void> {
@@ -197,11 +213,13 @@ export function initProductAnalytics(): void {
     enqueue({ name: "session_start", ts: new Date().toISOString() });
   }
 
-  if (!flushTimer) {
-    flushTimer = setInterval(() => {
+  if (!intervalTimer) {
+    intervalTimer = setInterval(() => {
       void flushAnalytics();
     }, FLUSH_MS);
   }
+
+  scheduleFlush();
 
   const onHide = () => {
     leaveCurrentScreen();
@@ -238,7 +256,9 @@ export function trackScreenView(
 /** Map Next.js app pathname to a stable analytics screen slug. */
 export function pathnameToScreen(pathname: string): string {
   const parts = pathname.split("/").filter(Boolean);
-  if (parts[0] !== "app") return pathname.slice(0, 64) || "app";
+  if (!parts.length) return "landing";
+  if (parts[0] === "auth") return parts.slice(1).join("_").slice(0, 64) || "auth";
+  if (parts[0] !== "app") return parts.join("_").slice(0, 64);
   if (parts.length === 1) return "app_home";
   if (parts[1] === "projects" && parts[2]) {
     const section = parts[3] ?? "overview";

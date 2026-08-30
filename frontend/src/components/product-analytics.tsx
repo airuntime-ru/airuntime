@@ -23,7 +23,7 @@ export function ProductAnalytics() {
   }, []);
 
   useEffect(() => {
-    if (!pathname?.startsWith("/app")) return;
+    if (!pathname) return;
     trackScreenView(pathnameToScreen(pathname), { props: { path: pathname.slice(0, 128) } });
   }, [pathname]);
 
