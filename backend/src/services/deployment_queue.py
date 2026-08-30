@@ -10,7 +10,12 @@ QUEUE_KEY = "deployment:jobs"
 
 
 def _redis() -> Redis:
-    return Redis.from_url(settings.redis_url, decode_responses=True)
+    return Redis.from_url(
+        settings.redis_url,
+        decode_responses=True,
+        socket_connect_timeout=5,
+        socket_timeout=15,
+    )
 
 
 def enqueue_deployment(

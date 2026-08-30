@@ -7,7 +7,7 @@
  * "отвалился и стоп". The fetch itself was not aborted on unmount; the UI was.
  */
 
-import type { OutOfCreditsDetail } from "@/lib/api";
+import { describeDisconnectedError, type OutOfCreditsDetail } from "@/lib/api";
 
 export type AgentStatus = {
   phase: string;
@@ -552,7 +552,7 @@ async function runStreamLoop(projectId: string, chatId: string, handlers: Stream
         }
       }
     } else {
-      const message = err instanceof Error ? err.message : "Не удалось получить ответ агента";
+      const message = describeDisconnectedError(err);
       session.chatError = message;
       applyStatus({ phase: "error", label: "Не удалось получить ответ агента", state: "error" });
       if (session.messages?.length) {

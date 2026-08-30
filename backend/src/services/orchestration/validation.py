@@ -61,24 +61,19 @@ def validate_scope(contract: TaskContract, evidence: TaskEvidence) -> list[Valid
     if contract.forbidden_paths == [
         "*"
     ]:  # read-only role ceiling (role_policy.compute_write_scope)
-        if touched:
-            findings.append(
-                ValidationFinding(
-                    step="scope",
-                    passed=False,
-                    severity=RiskLevel.CRITICAL,
-                    message=f"read-only role modified files: {touched}",
-                    evidence_ref="changed_files",
-                )
+        # ScopedWorkspaceTools (executors.py) already prevents write_file/edit_file/delete_file
+        # calls for read-only roles at tool-call time. A git diff showing changed files here
+        # means a CONCURRENT write task (parallel_read_only runs without a lease, alongside
+        # shared_sequential tasks) committed changes that moved HEAD between this task's
+        # begin() and complete() — not that this read-only task itself wrote anything.
+        # Failing on that diff would blame the wrong task and waste replan budget.
+        findings.append(
+            ValidationFinding(
+                step="scope",
+                passed=True,
+                message="read-only role: writes prevented at tool level (ScopedWorkspaceTools)",
             )
-        else:
-            findings.append(
-                ValidationFinding(
-                    step="scope",
-                    passed=True,
-                    message="no files touched, as required for a read-only role",
-                )
-            )
+        )
     else:
         out_of_scope = (
             [

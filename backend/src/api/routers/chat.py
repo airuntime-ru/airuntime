@@ -67,13 +67,19 @@ from src.services.project_subdomain import (
 )
 from src.services.prompt_guard import prepare_agent_user_message, sanitize_user_message
 from src.services.secrets import capture_telegram_tokens_from_text, ensure_secret_placeholder
-from src.services.sse_heartbeat import SSE_PING, Ticker
+from src.services.sse_heartbeat import SSE_PING, Ticker, with_heartbeat
 from src.services.system_settings import resolve_api_key_for_provider
 from src.services.workspace import project_dir
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/projects/{project_id}/chats", tags=["chat"])
+
+_SSE_HEADERS = {
+    "Cache-Control": "no-cache, no-transform",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
 
 
 class _StopDeployment(RuntimeError):
@@ -801,8 +807,11 @@ async def _orchestration_event_source(
             if thin_arch:
                 yield _sse_status("verify", "Архитектура выглядит слишком тонкой", "error")
                 yield append_visible(f"\n\n{thin_arch}")
-            _commit_workspace_snapshot(
-                project, artifact_path, message=f"{project.name}: {original_request}"
+            await asyncio.to_thread(
+                _commit_workspace_snapshot,
+                project,
+                artifact_path,
+                f"{project.name}: {original_request}",
             )
 
             project.status = "ready"
@@ -851,10 +860,11 @@ async def _orchestration_event_source(
         has_code = _workspace_is_deployable(project, artifact_path)
         if has_code:
             # Persist whatever is on disk so «Файлы»/Versions light up even when auto-QA failed.
-            _commit_workspace_snapshot(
+            await asyncio.to_thread(
+                _commit_workspace_snapshot,
                 project,
                 artifact_path,
-                message=f"{project.name}: snapshot after failed run",
+                f"{project.name}: snapshot after failed run",
             )
             has_website = project.type in ("website", "mixed")
             has_bot = project.type in ("telegram_bot", "mixed")
@@ -1145,17 +1155,20 @@ async def _stream_events(
             )
 
     return StreamingResponse(
-        _orchestration_event_source(
-            db=db,
-            project=project,
-            chat_id=chat_id,
-            current_user=current_user,
-            original_request=safe_message,
-            provider_name=provider_name,
-            model=model,
-            api_key=api_key,
+        with_heartbeat(
+            _orchestration_event_source(
+                db=db,
+                project=project,
+                chat_id=chat_id,
+                current_user=current_user,
+                original_request=safe_message,
+                provider_name=provider_name,
+                model=model,
+                api_key=api_key,
+            )
         ),
         media_type="text/event-stream",
+        headers=_SSE_HEADERS,
     )
 
 
@@ -1211,7 +1224,11 @@ async def stream_repair_post(
         async for frame in iter_repair_sse(db, project, chat, force_error=force_error):
             yield frame
 
-    return StreamingResponse(event_source(), media_type="text/event-stream")
+    return StreamingResponse(
+        with_heartbeat(event_source()),
+        media_type="text/event-stream",
+        headers=_SSE_HEADERS,
+    )
 
 
 @router.get("/{chat_id}/stream")

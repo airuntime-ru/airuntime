@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     billing_usd_to_rub: int = 100
     provider_name: str = "openai"
     openai_api_key: str | None = None
+    # When set, Codex CLI talks to this OpenAI-compatible Responses endpoint instead of
+    # api.openai.com (login is skipped; auth is a Bearer token from OPENAI_API_KEY).
+    openai_base_url: str | None = "https://routerai.ru/api/v1"
     anthropic_api_key: str | None = None
     gemini_api_key: str | None = None
     openrouter_api_key: str | None = None
@@ -154,7 +157,7 @@ class Settings(BaseSettings):
     s3_max_upload_bytes: int = 10 * 1024 * 1024
     s3_presign_expire_seconds: int = 3600
 
-    @field_validator("s3_endpoint_url", "s3_public_endpoint_url", mode="before")
+    @field_validator("s3_endpoint_url", "s3_public_endpoint_url", "openai_base_url", mode="before")
     @classmethod
     def empty_endpoint_to_none(cls, value: str | None) -> str | None:
         if value is None or value == "":

@@ -56,10 +56,16 @@ def create_deployment_for_project(
         skip_auto_check=skip_auto_check,
     )
     if not queued:
-        # Lazy import: worker imports truncate_logs_ref from this module.
-        from src.workers.deployment_worker import process_job
-
-        process_job(job)
+        # Never run Docker from the API process. Inline process_job() used to freeze the
+        # asyncio loop (and every chat/login request) for the length of a docker build.
+        deployment.status = "failed"
+        store_deployment_error(
+            deployment,
+            "Не удалось поставить задачу в очередь запуска. Повторите из вкладки «Деплои».",
+        )
+        deployment.finished_at = datetime.now(UTC)
+        db.add(deployment)
+        db.commit()
         db.refresh(deployment)
     return deployment
 

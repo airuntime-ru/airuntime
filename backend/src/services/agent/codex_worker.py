@@ -61,7 +61,12 @@ _LOGIN_FAILED_EXIT = 17
 
 
 def _redis() -> Redis:
-    return Redis.from_url(settings.redis_url, decode_responses=True)
+    return Redis.from_url(
+        settings.redis_url,
+        decode_responses=True,
+        socket_connect_timeout=5,
+        socket_timeout=10,
+    )
 
 
 def _events_key(run_id: str) -> str:
@@ -111,6 +116,30 @@ def _remove_failed_start_container(client: docker.DockerClient, container_name: 
         pass
 
 
+def _codex_model_id(model: str) -> str:
+    """RouterAI (and other OpenAI-compatible proxies) identify OpenAI models as ``openai/<id>``."""
+    if not (settings.openai_base_url or "").strip():
+        return model
+    if "/" in model:
+        return model
+    return f"openai/{model}"
+
+
+def _codex_config_toml() -> str | None:
+    base = (settings.openai_base_url or "").strip().rstrip("/")
+    if not base:
+        return None
+    return (
+        'model_provider = "routerai"\n'
+        "\n"
+        "[model_providers.routerai]\n"
+        'name = "RouterAI"\n'
+        f'base_url = "{base}"\n'
+        'env_key = "OPENAI_API_KEY"\n'
+        'wire_api = "responses"\n'
+    )
+
+
 def _build_argv(job: dict, *, model: str, remapped_cwd: str | None) -> list[str]:
     # NOTE: flag names (--skip-git-repo-check, --dangerously-bypass-approvals-and-sandbox,
     # --cd, --image) match the Codex CLI docs at the time this was written. `exec` has no TTY
@@ -158,9 +187,23 @@ def _login_and_exec_command(argv: list[str]) -> list[str]:
     container no longer stays alive independently for a follow-up exec - login-then-run is now
     the container's one and only job. Re-logs in on every run (cheap, local, no network
     round-trip) rather than trying to persist/cache auth across runs - simplest way to stay
-    correct if the admin rotates the key."""
-    login = 'printf "%s" "$OPENAI_API_KEY" | codex login --with-api-key'
+    correct if the admin rotates the key.
+
+    When ``settings.openai_base_url`` is set the key is a third-party proxy token (RouterAI),
+    not an OpenAI key: ``codex login`` talks to OpenAI and would 401. Write a user-level
+    ``config.toml`` instead and skip login; Codex sends the env key as Bearer to the proxy.
+    """
     exec_cmd = shlex.join(argv)
+    config = _codex_config_toml()
+    if config is not None:
+        script = (
+            "mkdir -p /root/.codex && cat > /root/.codex/config.toml << 'AIRUNTIME_CODEX_EOF'\n"
+            f"{config}"
+            "AIRUNTIME_CODEX_EOF\n"
+            f"exec {exec_cmd}"
+        )
+        return ["sh", "-c", script]
+    login = 'printf "%s" "$OPENAI_API_KEY" | codex login --with-api-key'
     script = (
         f"if ! {login} >/tmp/codex-login.log 2>&1; then "
         f"cat /tmp/codex-login.log >&2; exit {_LOGIN_FAILED_EXIT}; "
@@ -271,7 +314,7 @@ def iter_codex_events(job: dict) -> Iterator[dict]:
             effective_cwd = None
             effective_images = []
 
-        model = job.get("model") or settings.default_model_openai
+        model = _codex_model_id(job.get("model") or settings.default_model_openai)
         argv = _build_argv(
             {**job, "image_paths": effective_images}, model=model, remapped_cwd=effective_cwd
         )

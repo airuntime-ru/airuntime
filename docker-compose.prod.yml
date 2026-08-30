@@ -183,6 +183,7 @@ services:
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
       PROVIDER_NAME: ${PROVIDER_NAME:-openai}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://routerai.ru/api/v1}
       SMTP_HOST: mailserver
       SMTP_PORT: 587
       SMTP_USERNAME: noreply@${APP_DOMAIN}
@@ -218,6 +219,7 @@ services:
       traefik.http.routers.api.entrypoints: websecure
       traefik.http.routers.api.tls.certresolver: letsencrypt
       traefik.http.services.api.loadbalancer.server.port: "8000"
+      traefik.http.services.api.loadbalancer.responseforwarding.flushinterval: "1ms"
 
   worker:
     build:
@@ -236,6 +238,7 @@ services:
       # Worker now resolves the OpenAI key itself (it's the one that execs into the codex
       # container - see codex_worker.py) instead of only the backend process needing it.
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://routerai.ru/api/v1}
       # The production Compose project attaches worker-launched Codex turns to the internal
       # network. The generic config default ("airuntime_default") only exists in local Compose.
       CODEX_NETWORK: ${CODEX_NETWORK:-airuntime_internal}

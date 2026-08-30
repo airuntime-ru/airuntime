@@ -96,3 +96,30 @@ def test_project_container_disables_buildkit_for_socket_proxy(monkeypatch) -> No
 
     assert env["DOCKER_HOST"] == "tcp://docker-proxy:2375"
     assert env["DOCKER_BUILDKIT"] == "0"
+
+
+def test_codex_model_id_prefixes_openai_when_proxy_base_url_is_set(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "openai_base_url", "https://routerai.ru/api/v1")
+    assert codex_worker._codex_model_id("gpt-5.6-sol") == "openai/gpt-5.6-sol"
+    assert codex_worker._codex_model_id("openai/gpt-5.6-luna") == "openai/gpt-5.6-luna"
+
+
+def test_codex_model_id_unchanged_for_direct_openai(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "openai_base_url", None)
+    assert codex_worker._codex_model_id("gpt-5.6-sol") == "gpt-5.6-sol"
+
+
+def test_proxy_base_url_skips_codex_login(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "openai_base_url", "https://routerai.ru/api/v1/")
+    command = codex_worker._login_and_exec_command(["codex", "exec", "--json", "prompt"])
+    script = command[-1]
+    assert "codex login" not in script
+    assert 'base_url = "https://routerai.ru/api/v1"' in script
+    assert "model_provider = \"routerai\"" in script
+    assert "exec" in script
+
+
+def test_direct_openai_still_logs_in(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "openai_base_url", None)
+    command = codex_worker._login_and_exec_command(["codex", "exec", "--json", "prompt"])
+    assert "codex login --with-api-key" in command[-1]

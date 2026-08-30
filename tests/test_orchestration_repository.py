@@ -215,7 +215,7 @@ class TestAgentTaskRepositoryReadiness:
         assert {t.local_id for t in ready} == {"b"}
         assert task_repo.get(task_b.id).status == "ready"
 
-    def test_failed_dependency_keeps_dependent_blocked_forever(
+    def test_failed_dependency_skips_dependent_forever(
         self, db: Session, project: Project, chat: Chat
     ) -> None:
         run_repo = OrchestrationRunRepository(db)
@@ -251,7 +251,7 @@ class TestAgentTaskRepositoryReadiness:
         task_repo.transition(task_a, "failed")
 
         task_repo.refresh_readiness(plan.id)
-        assert task_repo.get(task_b.id).status == "blocked"
+        assert task_repo.get(task_b.id).status == "skipped"
 
 
 class TestWorkspaceLeaseRepository:

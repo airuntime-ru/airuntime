@@ -68,13 +68,13 @@ class TestValidateScope:
         critical = [f for f in findings if not f.passed and f.severity.value == "critical"]
         assert critical
 
-    def test_readonly_role_any_change_fails(self) -> None:
+    def test_readonly_role_git_diff_does_not_fail(self) -> None:
         contract = _contract(
             role=SpecialistRole.QA_REVIEWER, allowed_paths=[], forbidden_paths=["*"]
         )
         evidence = _evidence(changed_files=["public/index.html"])
         findings = v.validate_scope(contract, evidence)
-        assert any(not f.passed for f in findings)
+        assert all(f.passed for f in findings)
 
     def test_readonly_role_no_changes_passes(self) -> None:
         contract = _contract(

@@ -31,7 +31,12 @@ _worker_inline_docker: contextvars.ContextVar[bool] = contextvars.ContextVar(
 
 
 def _redis() -> Redis:
-    return Redis.from_url(settings.redis_url, decode_responses=True)
+    return Redis.from_url(
+        settings.redis_url,
+        decode_responses=True,
+        socket_connect_timeout=5,
+        socket_timeout=15,
+    )
 
 
 @contextmanager

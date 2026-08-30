@@ -245,9 +245,9 @@ class AgentTaskRepository:
 
     def refresh_readiness(self, plan_id: uuid.UUID | str) -> list[AgentTask]:
         """Move `pending`/`blocked` tasks to `ready` once every local_id in their
-        depends_on_json is `completed`; move them to `blocked` if a dependency has `failed` /
-        `cancelled` / `skipped` (can never become ready). Returns tasks that just became ready.
-        Pure DAG-scheduling bookkeeping - does not start execution."""
+        depends_on_json is `completed`; move them to `skipped` (terminal) if a dependency has
+        `failed` / `cancelled` / `skipped` (can never become ready). Returns tasks that just
+        became ready. Pure DAG-scheduling bookkeeping - does not start execution."""
         import json
 
         tasks = self.list_by_plan(plan_id)
@@ -259,8 +259,8 @@ class AgentTaskRepository:
             deps: list[str] = json.loads(task.depends_on_json) if task.depends_on_json else []
             dep_tasks = [by_local_id[d] for d in deps if d in by_local_id]
             if any(d.status in ("failed", "cancelled", "skipped") for d in dep_tasks):
-                if task.status != "blocked":
-                    self.transition(task, "blocked")
+                if task.status != "skipped":
+                    self.transition(task, "skipped")
                 continue
             if all(d.status == "completed" for d in dep_tasks):
                 self.transition(task, "ready")

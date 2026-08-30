@@ -510,9 +510,10 @@ async def _ensure_planned(
         return existing
 
     workspace_root = project_workspace_dir(project.id)
-    project_git.init_repo_if_needed(workspace_root)
-    git_sha = project_git.current_head_sha(workspace_root)
-    context_summary = context_engine.build_global_context_summary(
+    await asyncio.to_thread(project_git.init_repo_if_needed, workspace_root)
+    git_sha = await asyncio.to_thread(project_git.current_head_sha, workspace_root)
+    context_summary = await asyncio.to_thread(
+        context_engine.build_global_context_summary,
         original_request=run.original_request or "",
         project=project,
         workspace_root=workspace_root,
@@ -686,11 +687,15 @@ async def _run_one_task(
         )
         db.commit()
 
-        git_sha = project_git.current_head_sha(workspace_root)
-        available_files = context_engine.list_workspace_files_cached(
-            project.id, workspace_root, git_sha
+        git_sha = await asyncio.to_thread(project_git.current_head_sha, workspace_root)
+        available_files = await asyncio.to_thread(
+            context_engine.list_workspace_files_cached,
+            project.id,
+            workspace_root,
+            git_sha,
         )
-        contract = build_task_contract(
+        contract = await asyncio.to_thread(
+            build_task_contract,
             task=task,
             planned_task=planned_task,
             run_goal=run.goal or run.original_request or "",
@@ -735,7 +740,8 @@ async def _run_one_task(
         handle = None
         waited = 0.0
         while handle is None:
-            handle = git_txn.begin(
+            handle = await asyncio.to_thread(
+                git_txn.begin,
                 task=task,
                 contract=contract,
                 project_id=project.id,
@@ -760,7 +766,7 @@ async def _run_one_task(
 
         executor = _build_executor(task.execution_kind, db=db, mcp_repo=McpServerRepository(db))
         if executor is None:
-            git_txn.abort(handle)
+            await asyncio.to_thread(git_txn.abort, handle)
             task_repo.transition(task, "waiting_for_user")
             events_bus.emit(
                 db,
@@ -862,7 +868,7 @@ async def _run_one_task(
         )
 
         if cancellation.is_cancelled:
-            git_txn.abort(handle)
+            await asyncio.to_thread(git_txn.abort, handle)
             task_repo.transition(task, "cancelled")
             db.commit()
             return _TaskAttemptOutcome("run_should_stop", detail=cancellation.reason)
@@ -912,7 +918,8 @@ async def _run_one_task(
             preview_existing=agent_result.preview_result,
             runtime_existing=agent_result.runtime_health_result,
         )
-        outcome = git_txn.complete(
+        outcome = await asyncio.to_thread(
+            git_txn.complete,
             handle,
             result=agent_result.task_result,
             build_result=build_result,

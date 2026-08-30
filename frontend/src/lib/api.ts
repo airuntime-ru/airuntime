@@ -122,19 +122,42 @@ export type TelegramBotProfileType = {
 
 async function rawRequest(path: string, init: RequestInit = {}, retry = true): Promise<Response> {
   const token = getAccessToken();
-  const response = await fetch(`${apiBase}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init.headers ?? {}),
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${apiBase}${path}`, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(init.headers ?? {}),
+      },
+    });
+  } catch (err) {
+    throw new Error(describeDisconnectedError(err));
+  }
   if (response.status !== 401 || !retry) return response;
 
   const refreshed = await refreshSession();
   if (!refreshed) return response;
   return rawRequest(path, init, false);
+}
+
+/** Browser fetch failures look like "the user's Wi-Fi died". They are almost always the
+ *  server/proxy dropping a long SSE stream, not the client's network. */
+export function describeDisconnectedError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err || "");
+  const lower = message.toLowerCase();
+  if (
+    lower === "failed to fetch" ||
+    lower === "network error" ||
+    lower === "load failed" ||
+    lower === "networkerror when attempting to fetch resource." ||
+    lower.includes("failed to fetch") ||
+    lower.includes("networkerror")
+  ) {
+    return "Связь с агентом оборвалась на сервере. Это не ваша сеть — отправьте сообщение ещё раз.";
+  }
+  return message || "Не удалось получить ответ агента";
 }
 
 export type OutOfCreditsAction = { id: string; label: string; href: string };

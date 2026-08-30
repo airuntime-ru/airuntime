@@ -38,6 +38,7 @@ Docker proxy) is a deliberate follow-up, not part of this change.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
@@ -117,15 +118,35 @@ airuntime.project_id="$AIRUNTIME_PROJECT_ID" -t "$AIRUNTIME_SCRATCH_IMAGE_PREFIX
 """
 
 
+_redis_client: Redis | None = None
+
+
 def _redis() -> Redis:
-    return Redis.from_url(settings.redis_url, decode_responses=True)
+    """Module-level singleton Redis client with bounded timeouts.
+
+    The previous version created a fresh ``Redis.from_url`` (and a fresh connection
+    pool) on every call. Connections were never explicitly closed, so over a long
+    uptime each orchestration turn leaked a pool. Worse, no ``socket_timeout`` was
+    set, so a single hung Redis call (e.g. ``rpush`` from ``_submit_run``) blocked
+    the async event loop indefinitely, freezing every endpoint - including
+    ``/auth/request-code`` (the "login infinite loading" symptom).
+    """
+    global _redis_client
+    if _redis_client is None:
+        _redis_client = Redis.from_url(
+            settings.redis_url,
+            decode_responses=True,
+            socket_connect_timeout=5,
+            socket_timeout=10,
+        )
+    return _redis_client
 
 
 def _events_key(run_id: str) -> str:
     return f"{_EVENTS_KEY_PREFIX}{run_id}"
 
 
-def _submit_run(
+async def _submit_run(
     *,
     project_id: str | None,
     cwd: str | None,
@@ -156,7 +177,9 @@ def _submit_run(
         "allow_docker": allow_docker,
         "reasoning_effort": reasoning_effort,
     }
-    _redis().rpush(QUEUE_KEY, json.dumps(job))
+    # rpush is a blocking Redis call — run it off the event loop so a slow/unreachable
+    # Redis cannot freeze every other endpoint (the "login infinite loading" symptom).
+    await asyncio.to_thread(_redis().rpush, QUEUE_KEY, json.dumps(job))
     return run_id
 
 
@@ -586,7 +609,7 @@ class CodexAgentSession:
         image_paths: list[str],
         cancellation: CancellationToken | None = None,
     ) -> AsyncIterator[TextDelta | ToolCallRequested | ToolCallResult | AgentDone]:
-        run_id = _submit_run(
+        run_id = await _submit_run(
             job_id=self.correlation_id,
             project_id=project_id,
             cwd=cwd,
@@ -649,7 +672,7 @@ async def codex_simple_complete(
     root = Path(workspace_root).resolve() if workspace_root is not None else None
     image_paths = _write_temp_images(root, images or []) if root is not None and images else []
     try:
-        run_id = _submit_run(
+        run_id = await _submit_run(
             project_id=project_id if root is not None else None,
             cwd=str(root) if root is not None else None,
             model=model,
