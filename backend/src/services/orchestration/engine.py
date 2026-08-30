@@ -125,7 +125,7 @@ from src.services.orchestration.skills.base import registry as skill_registry
 from src.services.orchestration.status import is_run_terminal, is_task_terminal
 from src.services.orchestration.workspace_isolation import WorkspaceIsolationManager, make_holder_id
 from src.services.project_services import ProjectServiceError, ensure_service_request
-from src.services.system_settings import resolve_api_key_for_provider
+from src.services.system_settings import resolve_platform_api_key
 from src.services.workspace import project_dir as project_workspace_dir
 
 logger = logging.getLogger(__name__)
@@ -1650,11 +1650,7 @@ def recover_stranded_runs(db_factory: Callable[[], Session] | None = None) -> in
         for run_id, provider_name, model in pending:
             if str(run_id) in _background_tasks:
                 continue  # already being driven by this process
-            api_key = (
-                resolve_api_key_for_provider(provider_name)
-                or getattr(settings, f"{provider_name}_api_key", None)
-                or ""
-            )
+            api_key = resolve_platform_api_key(provider_name) or ""
             if not api_key:
                 logger.warning(
                     "orchestration restart recovery: skipping run %s - no API key for provider %s",

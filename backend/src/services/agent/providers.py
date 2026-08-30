@@ -25,6 +25,7 @@ from typing import Any, Protocol
 
 import httpx
 
+from src.core.config import ROUTERAI_DEFAULT_BASE_URL, settings
 from src.services.agent.events import TextDelta, ToolCallRequested, ToolCallResult, TurnFinished
 from src.services.file_context import ImageAttachment
 
@@ -500,6 +501,9 @@ def get_agent_provider(provider_name: str) -> AgentProvider:
                 "X-Title": "AIRuntime",
             },
         )
+    if provider_name == "routerai":
+        base = (settings.openai_base_url or ROUTERAI_DEFAULT_BASE_URL).rstrip("/")
+        return OpenAICompatibleProvider(base_url=f"{base}/chat/completions")
     if provider_name == "gemini":
         return GeminiProvider()
     return OpenAICompatibleProvider(base_url="https://api.openai.com/v1/chat/completions")

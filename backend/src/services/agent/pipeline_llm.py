@@ -104,6 +104,8 @@ async def _raw_complete(
             images=usable_images,
             workspace_root=codex_workspace_root if usable_images else None,
             project_id=codex_project_id if usable_images else None,
+            api_key=api_key,
+            provider_name=provider_name,
         )
 
     provider = get_agent_provider(provider_name)

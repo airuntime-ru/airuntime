@@ -14,18 +14,25 @@ import uuid
 import httpx
 from sqlalchemy.orm import Session
 
+from src.core.config import ROUTERAI_DEFAULT_BASE_URL, SUPPORTED_LLM_PROVIDERS
 from src.db.models.user import User
 from src.db.models.user_provider_credential import UserProviderCredential
 from src.services.secrets import decrypt_secret, encrypt_secret
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_PROVIDERS = ("openai", "anthropic", "gemini", "openrouter")
+SUPPORTED_PROVIDERS = SUPPORTED_LLM_PROVIDERS
 
 # Cheap, read-only endpoints used purely to prove a key works.
 _VALIDATION = {
     "openai": ("GET", "https://api.openai.com/v1/models", "Authorization", "Bearer {key}"),
     "openrouter": ("GET", "https://openrouter.ai/api/v1/models", "Authorization", "Bearer {key}"),
+    "routerai": (
+        "GET",
+        f"{ROUTERAI_DEFAULT_BASE_URL}/models",
+        "Authorization",
+        "Bearer {key}",
+    ),
     "anthropic": ("GET", "https://api.anthropic.com/v1/models", "x-api-key", "{key}"),
     "gemini": (
         "GET",
@@ -148,6 +155,13 @@ def revalidate_credential(db: Session, user: User, provider: str) -> UserProvide
     db.commit()
     db.refresh(row)
     return row
+
+
+def resolve_turn_api_key(db: Session, user: User, provider: str) -> str | None:
+    """BYOK first, then the platform key for this provider."""
+    from src.services.system_settings import resolve_platform_api_key
+
+    return resolve_user_api_key(db, user, provider) or resolve_platform_api_key(provider)
 
 
 def resolve_user_api_key(db: Session, user: User, provider: str) -> str | None:

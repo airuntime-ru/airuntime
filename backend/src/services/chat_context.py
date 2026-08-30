@@ -75,7 +75,11 @@ async def _summarize(
 
     if provider_name in CODEX_ELIGIBLE_PROVIDERS:
         return await codex_simple_complete(
-            system_prompt=_SUMMARY_PROMPT, user_text=transcript, model=model
+            system_prompt=_SUMMARY_PROMPT,
+            user_text=transcript,
+            model=model,
+            api_key=api_key,
+            provider_name=provider_name,
         )
 
     provider = get_agent_provider(provider_name)

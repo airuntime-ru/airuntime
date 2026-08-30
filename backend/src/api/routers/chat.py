@@ -36,7 +36,7 @@ from src.services.agentic_artifacts import (
     workspace_has_agent_code,
 )
 from src.services.artifacts import ArtifactError, _telegram_token
-from src.services.byok import resolve_user_api_key
+from src.services.byok import resolve_turn_api_key, resolve_user_api_key
 from src.services.credit_gate import out_of_credits_detail
 from src.services.deployments import create_deployment_for_project
 from src.services.file_context import (
@@ -68,7 +68,6 @@ from src.services.project_subdomain import (
 from src.services.prompt_guard import prepare_agent_user_message, sanitize_user_message
 from src.services.secrets import capture_telegram_tokens_from_text, ensure_secret_placeholder
 from src.services.sse_heartbeat import SSE_PING, Ticker, with_heartbeat
-from src.services.system_settings import resolve_api_key_for_provider
 from src.services.workspace import project_dir
 
 logger = logging.getLogger(__name__)
@@ -1123,12 +1122,7 @@ async def _stream_events(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     # BYOK first: the user's own key means the provider bills them, not us.
-    api_key = (
-        resolve_user_api_key(db, current_user, provider_name)
-        or resolve_api_key_for_provider(provider_name)
-        or getattr(settings, f"{provider_name}_api_key", None)
-        or ""
-    )
+    api_key = resolve_turn_api_key(db, current_user, provider_name) or ""
 
 
     if content:

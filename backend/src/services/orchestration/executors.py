@@ -30,7 +30,7 @@ from typing import Protocol
 
 from sqlalchemy.orm import Session
 
-from src.services.agent.codex_runtime import CodexAgentSession
+from src.services.agent.codex_runtime import CodexAgentSession, resolve_codex_base_url
 from src.services.agent.events import AgentDone, TextDelta, ToolCallRequested, ToolCallResult
 from src.services.agent.loop import CodingAgentSession
 from src.services.agent.tools import ToolExecutionResult, WorkspaceTools
@@ -345,6 +345,10 @@ class CodexContainerExecutor(_BaseAgentTurnExecutor):
             system_prompt=_role_system_prompt(contract),
             correlation_id=str(contract.task_id),
             reasoning_effort=context.reasoning_effort,
+            api_key=context.api_key,
+            openai_base_url=resolve_codex_base_url(
+                provider_name=context.provider_name, api_key=context.api_key
+            ),
         )
         events = session.run(
             history=context.history,

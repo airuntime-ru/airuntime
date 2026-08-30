@@ -20,6 +20,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   anthropic: "Anthropic",
   gemini: "Google Gemini",
   openrouter: "OpenRouter",
+  routerai: "RouterAI",
 };
 
 export function ByokSection() {
@@ -95,6 +96,7 @@ export function ByokSection() {
           <p className="mt-1 text-sm leading-relaxed text-[var(--ar-mist)]">
             На своём ключе токены оплачивает провайдер напрямую — кредиты не списываются, и
             доступны любые модели. Ключ хранится зашифрованно и не показывается обратно.
+            Ключ OpenAI идёт на api.openai.com; ключ RouterAI — на routerai.ru.
           </p>
         </div>
       </div>

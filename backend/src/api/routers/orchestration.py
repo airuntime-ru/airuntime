@@ -32,7 +32,7 @@ from src.db.models.chat import Chat
 from src.db.models.project import Project
 from src.db.models.user import User
 from src.db.session import SessionLocal, get_db
-from src.services.byok import resolve_user_api_key
+from src.services.byok import resolve_turn_api_key, resolve_user_api_key
 from src.services.credit_gate import out_of_credits_detail
 from src.services.model_access import ModelNotAllowedError, resolve_model_for_user
 from src.services.orchestration import engine, events_bus
@@ -43,7 +43,6 @@ from src.services.orchestration.repository import (
 )
 from src.services.orchestration.status import is_run_terminal
 from src.services.prompt_guard import sanitize_user_message
-from src.services.system_settings import resolve_api_key_for_provider
 
 logger = logging.getLogger(__name__)
 
@@ -142,12 +141,7 @@ async def create_run(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     # BYOK first: the user's own key means the provider bills them, not us.
-    api_key = (
-        resolve_user_api_key(db, current_user, provider_name)
-        or resolve_api_key_for_provider(provider_name)
-        or getattr(settings, f"{provider_name}_api_key", None)
-        or ""
-    )
+    api_key = resolve_turn_api_key(db, current_user, provider_name) or ""
 
     if not api_key:
         raise HTTPException(
@@ -281,12 +275,7 @@ async def resume_run(
     provider_name = run.provider or settings.provider_name
     model = run.model or ""
     # BYOK first: the user's own key means the provider bills them, not us.
-    api_key = (
-        resolve_user_api_key(db, current_user, provider_name)
-        or resolve_api_key_for_provider(provider_name)
-        or getattr(settings, f"{provider_name}_api_key", None)
-        or ""
-    )
+    api_key = resolve_turn_api_key(db, current_user, provider_name) or ""
 
     if not api_key:
         raise HTTPException(

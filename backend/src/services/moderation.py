@@ -106,7 +106,11 @@ async def check_project_safety(
 
     if provider_name in CODEX_ELIGIBLE_PROVIDERS:
         collected = await codex_simple_complete(
-            system_prompt=_MODERATION_SYSTEM_PROMPT, user_text=moderated_text[:4000], model=model
+            system_prompt=_MODERATION_SYSTEM_PROMPT,
+            user_text=moderated_text[:4000],
+            model=model,
+            api_key=api_key,
+            provider_name=provider_name,
         )
     else:
         provider = get_agent_provider(provider_name)

@@ -50,19 +50,22 @@ from typing import Any
 
 from redis import Redis
 
-from src.core.config import settings
+from src.core.config import ROUTERAI_DEFAULT_BASE_URL, settings
 from src.services.agent.events import AgentDone, TextDelta, ToolCallRequested, ToolCallResult
 from src.services.agent.tools import ServiceRequest, WorkspaceTools
 from src.services.docker_control_queue import QUEUE_KEY, in_worker_inline_docker
 from src.services.file_context import ImageAttachment
 from src.services.orchestration.cancellation import CancellationToken, cancel_codex_run
+from src.services.system_settings import resolve_api_key_for_provider
 
 logger = logging.getLogger(__name__)
 
-# Providers driven through Codex instead of a direct HTTP call. Codex CLI only speaks to
-# OpenAI, so this is deliberately narrow - an explicit anthropic/gemini/openrouter selection
-# (by the user, or because no OpenAI key is configured) keeps using agent/providers.py.
-CODEX_ELIGIBLE_PROVIDERS = {"openai"}
+# Providers driven through Codex instead of a direct HTTP call. Codex CLI speaks the
+# OpenAI Responses API, so this covers official OpenAI and OpenAI-compatible proxies
+# (RouterAI). Anthropic/Gemini/OpenRouter keep using agent/providers.py.
+CODEX_ELIGIBLE_PROVIDERS = {"openai", "routerai"}
+
+_UNSET: Any = object()
 
 _EVENTS_KEY_PREFIX = "codex:events:"
 _DONE_MARKER = "__codex_run_done__"
@@ -146,6 +149,25 @@ def _events_key(run_id: str) -> str:
     return f"{_EVENTS_KEY_PREFIX}{run_id}"
 
 
+def resolve_codex_base_url(*, provider_name: str, api_key: str | None) -> str | None:
+    """Proxy base URL for this Codex turn, or None for official api.openai.com.
+
+    Platform OpenAI traffic and every RouterAI turn go through ``settings.openai_base_url``.
+    A user's own OpenAI BYOK key must hit OpenAI directly - the proxy would reject it.
+    """
+    name = (provider_name or "").strip().lower()
+    proxy = (settings.openai_base_url or "").strip().rstrip("/") or None
+    if name == "routerai":
+        return proxy or ROUTERAI_DEFAULT_BASE_URL
+    if name != "openai":
+        return proxy
+    platform_key = (resolve_api_key_for_provider("openai") or settings.openai_api_key or "").strip()
+    user_key = (api_key or "").strip()
+    if user_key and user_key != platform_key:
+        return None
+    return proxy
+
+
 async def _submit_run(
     *,
     project_id: str | None,
@@ -157,6 +179,8 @@ async def _submit_run(
     job_id: str | None = None,
     allow_docker: bool = True,
     reasoning_effort: str | None = None,
+    api_key: str | None = None,
+    openai_base_url: Any = _UNSET,
 ) -> str:
     # Every attempt needs its own event key/container identity. Reusing the orchestration task id
     # here left the previous attempt's terminal marker and JSONL tail in Redis; the next retry
@@ -177,6 +201,10 @@ async def _submit_run(
         "allow_docker": allow_docker,
         "reasoning_effort": reasoning_effort,
     }
+    if api_key:
+        job["api_key"] = api_key
+    if openai_base_url is not _UNSET:
+        job["openai_base_url"] = openai_base_url
     # rpush is a blocking Redis call — run it off the event loop so a slow/unreachable
     # Redis cannot freeze every other endpoint (the "login infinite loading" symptom).
     await asyncio.to_thread(_redis().rpush, QUEUE_KEY, json.dumps(job))
@@ -470,6 +498,8 @@ class CodexAgentSession:
         correlation_id: str | None = None,
         allow_docker: bool = True,
         reasoning_effort: str | None = None,
+        api_key: str | None = None,
+        openai_base_url: Any = _UNSET,
     ) -> None:
         self.model = model
         self.workspace = workspace
@@ -483,6 +513,8 @@ class CodexAgentSession:
         self.allow_docker = allow_docker
         # None = use the global default; a restricted plan passes a cheaper effort.
         self.reasoning_effort = reasoning_effort
+        self.api_key = api_key
+        self.openai_base_url = openai_base_url
 
     def _handle_terminal(self, payload: dict[str, Any]) -> AgentDone | None:
         # Bare {"type": "error", "message": ...} events (straight from codex's own JSONL
@@ -576,6 +608,10 @@ class CodexAgentSession:
             "image_paths": image_paths,
             "allow_docker": self.allow_docker,
         }
+        if self.api_key:
+            job["api_key"] = self.api_key
+        if self.openai_base_url is not _UNSET:
+            job["openai_base_url"] = self.openai_base_url
         saw_event = False
         seen_text = [False]
         for payload in iter_codex_events(job):
@@ -619,6 +655,8 @@ class CodexAgentSession:
             timeout_seconds=settings.codex_turn_timeout_seconds,
             allow_docker=self.allow_docker,
             reasoning_effort=self.reasoning_effort,
+            api_key=self.api_key,
+            openai_base_url=self.openai_base_url,
         )
 
         saw_event = False
@@ -658,6 +696,9 @@ async def codex_simple_complete(
     images: list[ImageAttachment] | None = None,
     workspace_root: str | Path | None = None,
     project_id: str | None = None,
+    api_key: str | None = None,
+    provider_name: str | None = None,
+    openai_base_url: Any = _UNSET,
 ) -> str:
     """One-shot text completion via Codex for the lightweight non-coding call sites (chat title/
     summary in chat_context.py, moderation classification in moderation.py) - no project
@@ -671,6 +712,9 @@ async def codex_simple_complete(
     effective_timeout = timeout_seconds or settings.codex_simple_timeout_seconds
     root = Path(workspace_root).resolve() if workspace_root is not None else None
     image_paths = _write_temp_images(root, images or []) if root is not None and images else []
+    endpoint = openai_base_url
+    if endpoint is _UNSET and provider_name:
+        endpoint = resolve_codex_base_url(provider_name=provider_name, api_key=api_key)
     try:
         run_id = await _submit_run(
             project_id=project_id if root is not None else None,
@@ -680,6 +724,8 @@ async def codex_simple_complete(
             image_paths=image_paths,
             timeout_seconds=effective_timeout,
             allow_docker=False,
+            api_key=api_key,
+            openai_base_url=endpoint,
         )
     except Exception:  # noqa: BLE001 - Redis being down must never break chat/moderation
         _cleanup_paths(image_paths)

@@ -72,6 +72,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   anthropic: "Anthropic Claude",
   gemini: "Gemini",
   openrouter: "OpenRouter",
+  routerai: "RouterAI",
 };
 
 function readPinned(): string[] {

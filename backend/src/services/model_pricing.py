@@ -6,7 +6,7 @@ up once per task and stored in the ledger, so later FX or catalog changes never 
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import ROUND_CEILING, Decimal
 from typing import Any
 
@@ -116,7 +116,17 @@ def canonical_model(provider: str, model: str) -> tuple[str, str]:
 
 
 def get_model_price(provider: str, model: str) -> ModelPrice | None:
-    return _PRICES.get(canonical_model(provider, model))
+    key = canonical_model(provider, model)
+    found = _PRICES.get(key)
+    if found is not None:
+        return found
+    name = provider.strip().lower()
+    if name == "routerai":
+        slug = model.rsplit("/", 1)[-1].strip().lower()
+        openai_price = _PRICES.get(canonical_model("openai", slug))
+        if openai_price is not None:
+            return replace(openai_price, provider="routerai", model=model.strip())
+    return None
 
 
 def is_selectable_model(provider: str, model: str) -> bool:

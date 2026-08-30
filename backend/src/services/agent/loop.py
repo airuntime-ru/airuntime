@@ -11,7 +11,11 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 
-from src.services.agent.codex_runtime import CODEX_ELIGIBLE_PROVIDERS, CodexAgentSession
+from src.services.agent.codex_runtime import (
+    CODEX_ELIGIBLE_PROVIDERS,
+    CodexAgentSession,
+    resolve_codex_base_url,
+)
 from src.services.agent.events import AgentDone, TextDelta, ToolCallRequested, ToolCallResult
 from src.services.agent.providers import get_agent_provider
 from src.services.agent.tools import TOOL_DEFS, WorkspaceTools
@@ -69,8 +73,7 @@ class CodingAgentSession:
         self.correlation_id = correlation_id
         # Codex CLI (running in its own Docker container - see codex_runtime.py) replaces the
         # HTTP provider loop below for the providers it can drive. Anything else (an explicit
-        # anthropic/gemini/openrouter pick, or openai falling back because it's the only one
-        # configured) keeps using the old per-provider streaming adapters.
+        # anthropic/gemini/openrouter pick) keeps using the old per-provider streaming adapters.
         self.use_codex = provider_name in CODEX_ELIGIBLE_PROVIDERS
         if not self.use_codex:
             self.provider = get_agent_provider(provider_name)
@@ -98,6 +101,10 @@ class CodingAgentSession:
                 system_prompt=self.system_prompt,
                 correlation_id=self.correlation_id,
                 reasoning_effort=self.reasoning_effort,
+                api_key=self.api_key,
+                openai_base_url=resolve_codex_base_url(
+                    provider_name=self.provider_name, api_key=self.api_key
+                ),
             )
             async for event in session.run(
                 history=_normalize_history(history),

@@ -46,7 +46,7 @@ from docker.errors import APIError, DockerException, ImageNotFound, NotFound
 from redis import Redis
 
 from src.core.config import settings
-from src.services.system_settings import resolve_api_key_for_provider
+from src.services.system_settings import resolve_platform_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -116,17 +116,39 @@ def _remove_failed_start_container(client: docker.DockerClient, container_name: 
         pass
 
 
-def _codex_model_id(model: str) -> str:
+_UNSET = object()
+
+
+def _job_api_key(job: dict) -> str | None:
+    raw = job.get("api_key")
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    return resolve_platform_api_key("openai") or settings.openai_api_key
+
+
+def _job_base_url(job: dict) -> str | None:
+    """Per-job proxy URL. Missing key = platform default. JSON null / empty = official OpenAI."""
+    if "openai_base_url" not in job:
+        return (settings.openai_base_url or "").strip().rstrip("/") or None
+    raw = job.get("openai_base_url")
+    if not isinstance(raw, str):
+        return None
+    return raw.strip().rstrip("/") or None
+
+
+def _codex_model_id(model: str, base_url: str | None | object = _UNSET) -> str:
     """RouterAI (and other OpenAI-compatible proxies) identify OpenAI models as ``openai/<id>``."""
-    if not (settings.openai_base_url or "").strip():
+    effective = settings.openai_base_url if base_url is _UNSET else base_url
+    if not (effective or "").strip():
         return model
     if "/" in model:
         return model
     return f"openai/{model}"
 
 
-def _codex_config_toml() -> str | None:
-    base = (settings.openai_base_url or "").strip().rstrip("/")
+def _codex_config_toml(base_url: str | None | object = _UNSET) -> str | None:
+    raw = settings.openai_base_url if base_url is _UNSET else base_url
+    base = (raw or "").strip().rstrip("/")
     if not base:
         return None
     return (
@@ -178,7 +200,9 @@ def _remap_under_workspace(path_str: str, old_root: str) -> str:
     return str(PurePosixPath(_WORKSPACE_MOUNT) / relative)
 
 
-def _login_and_exec_command(argv: list[str]) -> list[str]:
+def _login_and_exec_command(
+    argv: list[str], *, base_url: str | None | object = _UNSET
+) -> list[str]:
     """`codex exec` does not read OPENAI_API_KEY itself - confirmed against a real run, which
     401'd until this was added. Auth is a separate step that persists to ~/.codex/auth.json
     inside the container (`codex login --with-api-key`, fed the key over stdin); once logged in,
@@ -189,12 +213,12 @@ def _login_and_exec_command(argv: list[str]) -> list[str]:
     round-trip) rather than trying to persist/cache auth across runs - simplest way to stay
     correct if the admin rotates the key.
 
-    When ``settings.openai_base_url`` is set the key is a third-party proxy token (RouterAI),
-    not an OpenAI key: ``codex login`` talks to OpenAI and would 401. Write a user-level
-    ``config.toml`` instead and skip login; Codex sends the env key as Bearer to the proxy.
+    When a proxy ``base_url`` is set the key is a third-party token (RouterAI), not an OpenAI
+    key: ``codex login`` talks to OpenAI and would 401. Write a user-level ``config.toml``
+    instead and skip login; Codex sends the env key as Bearer to the proxy.
     """
     exec_cmd = shlex.join(argv)
-    config = _codex_config_toml()
+    config = _codex_config_toml(base_url)
     if config is not None:
         script = (
             "mkdir -p /root/.codex && cat > /root/.codex/config.toml << 'AIRUNTIME_CODEX_EOF'\n"
@@ -250,10 +274,11 @@ def iter_codex_events(job: dict) -> Iterator[dict]:
     container = None
     client: docker.DockerClient | None = None
     try:
-        api_key = resolve_api_key_for_provider("openai") or settings.openai_api_key
+        api_key = _job_api_key(job)
         if not api_key:
             yield {"type": "infra_error", "message": "OpenAI API key is not configured"}
             return
+        base_url = _job_base_url(job)
 
         old_cwd = job.get("cwd")
         logger.info(
@@ -314,11 +339,11 @@ def iter_codex_events(job: dict) -> Iterator[dict]:
             effective_cwd = None
             effective_images = []
 
-        model = _codex_model_id(job.get("model") or settings.default_model_openai)
+        model = _codex_model_id(job.get("model") or settings.default_model_openai, base_url)
         argv = _build_argv(
             {**job, "image_paths": effective_images}, model=model, remapped_cwd=effective_cwd
         )
-        command = _login_and_exec_command(argv)
+        command = _login_and_exec_command(argv, base_url=base_url)
 
         container_name = f"airuntime-codex-{job.get('job_id') or uuid.uuid4().hex[:12]}"
         try:

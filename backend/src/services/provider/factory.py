@@ -19,6 +19,7 @@ from typing import Any
 from src.core.config import (
     CURATED_TOP_MODELS,
     OPENAI_MODEL_FLOOR,
+    SUPPORTED_LLM_PROVIDERS,
     settings,
 )
 from src.services.model_pricing import is_selectable_model
@@ -26,10 +27,10 @@ from src.services.provider.base import ProviderClient
 from src.services.provider.external import ExternalProviderClient
 from src.services.system_settings import (
     get_system_setting_json,
-    resolve_api_key_for_provider,
+    resolve_platform_api_key,
 )
 
-_SUPPORTED = ("openai", "anthropic", "gemini", "openrouter")
+_SUPPORTED = SUPPORTED_LLM_PROVIDERS
 
 _OPENAI_BLOCKED_SUBSTRINGS = (
     "mini",
@@ -70,10 +71,12 @@ def meets_openai_floor(model: str) -> bool:
 
 def _provider_api_key(provider_name: str) -> str | None:
     try:
-        admin_key = resolve_api_key_for_provider(provider_name)
+        return resolve_platform_api_key(provider_name)
     except Exception:
-        admin_key = None
-    return admin_key or getattr(settings, f"{provider_name}_api_key", None)
+        key = getattr(settings, f"{provider_name}_api_key", None)
+        if not key and provider_name == "routerai":
+            return settings.openai_api_key
+        return key
 
 
 def _provider_configured(provider_name: str) -> bool:
@@ -87,6 +90,7 @@ def _default_model_for_provider(provider_name: str) -> str:
         "anthropic": settings.default_model_anthropic,
         "gemini": settings.default_model_gemini,
         "openrouter": settings.default_model_openrouter,
+        "routerai": settings.default_model_routerai,
     }
     return mapping.get(provider_name, settings.default_model_openai)
 
@@ -94,9 +98,9 @@ def _default_model_for_provider(provider_name: str) -> str:
 def _passes_floor(provider: str, model: str) -> bool:
     if provider == "openai":
         return meets_openai_floor(model)
-    if provider == "openrouter":
+    if provider in {"openrouter", "routerai"}:
         slug = _slug(model)
-        # Only enforce the floor on OpenAI-family OpenRouter routes.
+        # Only enforce the floor on OpenAI-family routes.
         if slug.startswith("gpt-") or slug.startswith("o3") or slug.startswith("o4"):
             return meets_openai_floor(model)
     return True
@@ -133,8 +137,8 @@ def _parse_preferred_models(raw: Any) -> list[tuple[str, str]]:
                 rest = rest.strip()
                 if provider in {"openai", "anthropic", "gemini"} and rest:
                     entries.append((provider, rest))
-                elif provider == "openrouter" and rest:
-                    entries.append(("openrouter", rest))
+                elif provider in {"openrouter", "routerai"} and rest:
+                    entries.append((provider, rest))
                 elif text.count("/") >= 1:
                     entries.append(("openrouter", text))
         return entries
@@ -164,7 +168,7 @@ def _parse_preferred_models(raw: Any) -> list[tuple[str, str]]:
 def _curated_ranked_list() -> list[tuple[str, str]]:
     """Interleave curated per-provider lists in a coding-friendly provider order."""
     entries: list[tuple[str, str]] = []
-    preference = ("openai", "anthropic", "gemini", "openrouter")
+    preference = ("openai", "anthropic", "gemini", "openrouter", "routerai")
     max_depth = max((len(CURATED_TOP_MODELS.get(p, [])) for p in preference), default=0)
     for depth in range(max_depth):
         for provider in preference:

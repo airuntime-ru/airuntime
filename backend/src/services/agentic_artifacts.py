@@ -6,7 +6,6 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from src.core.config import settings
 from src.db.models.chat import Chat
 from src.db.models.message import Message
 from src.db.models.project import Project
@@ -20,7 +19,7 @@ from src.services.artifacts import (
 )
 from src.services.project_git import commit_snapshot
 from src.services.provider.factory import resolve_provider_and_model
-from src.services.system_settings import resolve_api_key_for_provider
+from src.services.system_settings import resolve_platform_api_key
 from src.services.workspace import project_dir as _project_dir
 
 MANIFEST_VERSION = 2
@@ -184,8 +183,7 @@ def unpin_missing_pip_versions(root: Path, build_error: str) -> list[str]:
 
 def _resolve_provider_and_key(provider_name: str | None = None) -> tuple[str, str, str]:
     name, model = resolve_provider_and_model(provider_override=provider_name)
-    key_field = f"{name}_api_key"
-    api_key = resolve_api_key_for_provider(name) or getattr(settings, key_field, None) or ""
+    api_key = resolve_platform_api_key(name) or ""
     return name, model, api_key
 
 

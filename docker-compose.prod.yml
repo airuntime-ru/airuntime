@@ -184,6 +184,7 @@ services:
       PROVIDER_NAME: ${PROVIDER_NAME:-openai}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://routerai.ru/api/v1}
+      ROUTERAI_API_KEY: ${ROUTERAI_API_KEY:-}
       SMTP_HOST: mailserver
       SMTP_PORT: 587
       SMTP_USERNAME: noreply@${APP_DOMAIN}
@@ -239,6 +240,7 @@ services:
       # container - see codex_worker.py) instead of only the backend process needing it.
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://routerai.ru/api/v1}
+      ROUTERAI_API_KEY: ${ROUTERAI_API_KEY:-}
       # The production Compose project attaches worker-launched Codex turns to the internal
       # network. The generic config default ("airuntime_default") only exists in local Compose.
       CODEX_NETWORK: ${CODEX_NETWORK:-airuntime_internal}

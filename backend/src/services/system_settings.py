@@ -101,6 +101,8 @@ def resolve_api_key_for_provider(provider_name: str) -> str | None:
         candidates = ["anthropic_api_key", "ANTHROPIC_API_KEY", "anthropic", "ANTHROPIC"]
     elif provider_name == "gemini":
         candidates = ["gemini_api_key", "GEMINI_API_KEY", "gemini", "GEMINI"]
+    elif provider_name == "routerai":
+        candidates = ["routerai_api_key", "ROUTERAI_API_KEY", "routerai", "ROUTERAI"]
     else:
         candidates = [provider_name]
 
@@ -108,4 +110,19 @@ def resolve_api_key_for_provider(provider_name: str) -> str | None:
         value = get_system_setting_value(key)
         if value:
             return value
+    return None
+
+
+def resolve_platform_api_key(provider_name: str) -> str | None:
+    """Admin setting, then env. RouterAI falls back to the OpenAI/proxy token."""
+    from src.core.config import settings
+
+    name = (provider_name or "").strip().lower()
+    value = resolve_api_key_for_provider(name) or getattr(settings, f"{name}_api_key", None)
+    if value and str(value).strip():
+        return str(value).strip()
+    if name == "routerai":
+        fallback = resolve_api_key_for_provider("openai") or settings.openai_api_key
+        if fallback and str(fallback).strip():
+            return str(fallback).strip()
     return None

@@ -52,6 +52,11 @@ def valid_key(monkeypatch: pytest.MonkeyPatch) -> None:
 # --------------------------------------------------------------------------- C1
 
 
+def test_routerai_is_a_supported_byok_provider() -> None:
+    assert "routerai" in byok.SUPPORTED_PROVIDERS
+    assert "openai" in byok.SUPPORTED_PROVIDERS
+
+
 def test_key_is_stored_encrypted_never_in_plaintext(db: Session, user: User, valid_key: None):
     byok.upsert_credential(db, user, "openai", REAL_KEY)
 

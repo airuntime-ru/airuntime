@@ -127,3 +127,55 @@ def test_direct_openai_still_logs_in(monkeypatch) -> None:
     monkeypatch.setattr(settings, "openai_base_url", None)
     command = codex_worker._login_and_exec_command(["codex", "exec", "--json", "prompt"])
     assert "codex login --with-api-key" in command[-1]
+
+
+def test_job_uses_per_turn_api_key_instead_of_platform() -> None:
+    assert (
+        codex_worker._job_api_key({"api_key": "sk-user-openai"}) == "sk-user-openai"
+    )
+
+
+def test_job_base_url_null_means_official_openai(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "openai_base_url", "https://routerai.ru/api/v1")
+    assert codex_worker._job_base_url({"openai_base_url": None}) is None
+    assert (
+        codex_worker._job_base_url({}) == "https://routerai.ru/api/v1"
+    )
+
+
+def test_job_base_url_override_skips_login() -> None:
+    command = codex_worker._login_and_exec_command(
+        ["codex", "exec", "--json", "prompt"],
+        base_url="https://routerai.ru/api/v1",
+    )
+    assert "codex login" not in command[-1]
+    command = codex_worker._login_and_exec_command(
+        ["codex", "exec", "--json", "prompt"],
+        base_url=None,
+    )
+    assert "codex login --with-api-key" in command[-1]
+
+
+def test_openai_byok_uses_official_openai(monkeypatch) -> None:
+    from src.services.agent.codex_runtime import resolve_codex_base_url
+
+    monkeypatch.setattr(settings, "openai_base_url", "https://routerai.ru/api/v1")
+    monkeypatch.setattr(settings, "openai_api_key", "sk-platform-routerai")
+
+    def _no_admin(_name: str) -> None:
+        return None
+
+    monkeypatch.setattr(
+        "src.services.agent.codex_runtime.resolve_api_key_for_provider", _no_admin
+    )
+    assert (
+        resolve_codex_base_url(provider_name="openai", api_key="sk-user-openai") is None
+    )
+    assert (
+        resolve_codex_base_url(provider_name="openai", api_key="sk-platform-routerai")
+        == "https://routerai.ru/api/v1"
+    )
+    assert (
+        resolve_codex_base_url(provider_name="routerai", api_key="sk-user-routerai")
+        == "https://routerai.ru/api/v1"
+    )

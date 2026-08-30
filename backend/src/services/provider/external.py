@@ -24,6 +24,8 @@ class ExternalProviderClient(ProviderClient):
             return await self._openai_chat(messages=messages, model=model)
         if self.provider_name == "openrouter":
             return await self._openrouter_chat(messages=messages, model=model)
+        if self.provider_name == "routerai":
+            return await self._routerai_chat(messages=messages, model=model)
         if self.provider_name == "anthropic":
             return await self._anthropic_chat(messages=messages, model=model)
         if self.provider_name == "gemini":
@@ -52,6 +54,23 @@ class ExternalProviderClient(ProviderClient):
             response = await client.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers={"Authorization": f"Bearer {openrouter_key}"},
+                json={"model": model, "messages": messages},
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data["choices"][0]["message"]["content"]
+
+    async def _routerai_chat(self, *, messages: list[dict], model: str) -> str:
+        from src.services.system_settings import resolve_platform_api_key
+
+        routerai_key = resolve_platform_api_key("routerai")
+        if not routerai_key:
+            raise RuntimeError("RouterAI key is not configured")
+        base = (settings.openai_base_url or "https://routerai.ru/api/v1").rstrip("/")
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(
+                f"{base}/chat/completions",
+                headers={"Authorization": f"Bearer {routerai_key}"},
                 json={"model": model, "messages": messages},
             )
             response.raise_for_status()

@@ -3,6 +3,8 @@ from typing import Literal
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+ROUTERAI_DEFAULT_BASE_URL = "https://routerai.ru/api/v1"
+
 
 class Settings(BaseSettings):
     app_name: str = "AIRuntime API"
@@ -33,16 +35,19 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     # When set, Codex CLI talks to this OpenAI-compatible Responses endpoint instead of
     # api.openai.com (login is skipped; auth is a Bearer token from OPENAI_API_KEY).
-    openai_base_url: str | None = "https://routerai.ru/api/v1"
+    openai_base_url: str | None = ROUTERAI_DEFAULT_BASE_URL
     anthropic_api_key: str | None = None
     gemini_api_key: str | None = None
     openrouter_api_key: str | None = None
+    # Optional dedicated RouterAI platform key. Empty = reuse OPENAI_API_KEY (the proxy token).
+    routerai_api_key: str | None = None
     # Quality-first coding defaults. Cost/latency are deliberately secondary for the primary
     # OpenAI path; gpt-5.6-sol is the current frontier model for complex coding work.
     default_model_openai: str = "gpt-5.6-sol"
     default_model_anthropic: str = "claude-sonnet-5"
     default_model_gemini: str = "gemini-2.5-pro"
     default_model_openrouter: str = "openai/gpt-5.6-sol"
+    default_model_routerai: str = "openai/gpt-5.6-sol"
 
     app_domain: str = "airuntime.ru"
     frontend_url: str = "http://localhost:3000"
@@ -214,6 +219,8 @@ settings.validate_production()
 # OpenAI auto-select floor (product / API slug).
 OPENAI_MODEL_FLOOR = "gpt-5.6-sol"
 
+SUPPORTED_LLM_PROVIDERS = ("openai", "anthropic", "gemini", "openrouter", "routerai")
+
 # Ranked allowlists for auto-select when admin has no preferred_models list.
 # Newest / strongest coding-capable models first. This is intentionally quality-first.
 CURATED_TOP_MODELS: dict[str, list[str]] = {
@@ -237,5 +244,10 @@ CURATED_TOP_MODELS: dict[str, list[str]] = {
         "openai/gpt-5.6-luna",
         "anthropic/claude-sonnet-5",
         "google/gemini-2.5-pro",
+    ],
+    "routerai": [
+        "openai/gpt-5.6-sol",
+        "openai/gpt-5.6-terra",
+        "openai/gpt-5.6-luna",
     ],
 }
