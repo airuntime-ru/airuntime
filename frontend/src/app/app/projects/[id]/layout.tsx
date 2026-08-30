@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import {
@@ -80,6 +80,22 @@ function navActive(pathname: string | null, item: NavItem) {
   return pathname === item.href || pathname.startsWith(`${item.href}/`);
 }
 
+function streamBannerKey(snap: ChatStreamSnapshot | null) {
+  if (!snap) return "";
+  return `${snap.loading}:${snap.agentStatus?.phase}:${snap.agentStatus?.label}:${snap.agentStatus?.state}`;
+}
+
+const bannerCache = new Map<string, { key: string; snap: ChatStreamSnapshot | null }>();
+
+function getBannerSnapshot(projectId: string): ChatStreamSnapshot | null {
+  const snap = getActiveProjectChatStream(projectId);
+  const key = streamBannerKey(snap);
+  const prev = bannerCache.get(projectId);
+  if (prev && prev.key === key) return prev.snap;
+  bannerCache.set(projectId, { key, snap });
+  return snap;
+}
+
 function ProjectNavLinks({
   items,
   pathname,
@@ -124,7 +140,30 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
   const [project, setProject] = useState<ProjectType | null>(null);
   const [statusModalOpen, setStatusModalOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [chatStream, setChatStream] = useState<ChatStreamSnapshot | null>(null);
+  const [navPath, setNavPath] = useState(pathname);
+  const onChatTab = pathname?.includes("/chat") ?? false;
+
+  if (navPath !== pathname) {
+    setNavPath(pathname);
+    setMobileNavOpen(false);
+  }
+
+  const subscribeChatBanner = useCallback(
+    (onStoreChange: () => void) => {
+      if (!projectId || onChatTab) return () => {};
+      return subscribeProjectStreams(projectId, onStoreChange);
+    },
+    [projectId, onChatTab]
+  );
+  const getChatBannerSnapshot = useCallback(() => {
+    if (!projectId || onChatTab) return null;
+    return getBannerSnapshot(projectId);
+  }, [projectId, onChatTab]);
+  const chatStream = useSyncExternalStore(
+    subscribeChatBanner,
+    getChatBannerSnapshot,
+    () => null
+  );
 
   useEffect(() => {
     let active = true;
@@ -156,31 +195,6 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
   }, [projectId, project?.status, pageVisible]);
 
   useEffect(() => {
-    if (!projectId) return undefined;
-    // Banner is hidden on the chat tab - no need to re-render the whole layout on every chunk.
-    if (pathname?.includes("/chat")) {
-      setChatStream(null);
-      return undefined;
-    }
-    let lastKey = "";
-    const refresh = () => {
-      const snap = getActiveProjectChatStream(projectId);
-      const key = snap
-        ? `${snap.loading}:${snap.agentStatus?.phase}:${snap.agentStatus?.label}:${snap.agentStatus?.state}`
-        : "";
-      if (key === lastKey) return;
-      lastKey = key;
-      setChatStream(snap);
-    };
-    refresh();
-    return subscribeProjectStreams(projectId, refresh);
-  }, [projectId, pathname]);
-
-  useEffect(() => {
-    setMobileNavOpen(false);
-  }, [pathname]);
-
-  useEffect(() => {
     if (!mobileNavOpen) return undefined;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") setMobileNavOpen(false);
@@ -198,7 +212,6 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
   }
 
   const base = `/app/projects/${projectId}`;
-  const onChatTab = pathname?.includes("/chat") ?? false;
   const tabs: NavItem[] = [
     { href: base, label: "Обзор", icon: LayoutDashboard, exact: true },
     { href: `${base}/chat`, label: "Чат", icon: MessageSquare },
