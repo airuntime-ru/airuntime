@@ -51,6 +51,13 @@
   <div>
     <strong>{{ project.name }}</strong>
     <span style="color:var(--body-quiet-color); margin-left:8px;">{{ project.user.email }}</span>
+    {% if product_links %}
+      <span style="margin-left:12px;">
+        {% for label, href, text in product_links %}
+          <a class="button" href="{{ href }}" target="_blank" rel="noopener noreferrer">{{ label }} · {{ text }}</a>
+        {% endfor %}
+      </span>
+    {% endif %}
   </div>
   <div class="an-range">
     <a href="?days=7&hours={{ hours }}" class="{% if days == 7 %}is-active{% endif %}">7 дней</a>

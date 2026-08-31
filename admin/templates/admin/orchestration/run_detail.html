@@ -60,6 +60,11 @@
       <div class="an-meta__value">
         {% if project %}
         <a href="{% url 'admin_orchestration_project_dashboard' project.id %}">{{ project.name }}</a>
+        {% if product_links %}
+          {% for label, href, text in product_links %}
+            · <a href="{{ href }}" target="_blank" rel="noopener noreferrer">{{ label }} · {{ text }}</a>
+          {% endfor %}
+        {% endif %}
         {% else %}
         {{ run.project_id }}
         {% endif %}

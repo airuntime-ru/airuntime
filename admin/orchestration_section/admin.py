@@ -10,6 +10,7 @@ from django.utils import timezone
 from django.utils.html import format_html
 
 from core.models import Project
+from domain.product_links import collect_product_links, link_display_text
 from orchestration_section import reporting
 from orchestration_section.models import DomainOrchestrationRun
 
@@ -32,6 +33,14 @@ def _json(value) -> str:
     return json.dumps(value, ensure_ascii=False, default=reporting.decimal_default)
 
 
+def _product_link_rows(project) -> list[tuple[str, str, str]]:
+    if project is None:
+        return []
+    return [
+        (label, href, link_display_text(href)) for label, href in collect_product_links(project)
+    ]
+
+
 def project_dashboard_view(request, project_id):
     """Дашборд оркестрации для одного проекта."""
     project = Project.objects.filter(id=project_id).first()
@@ -47,6 +56,7 @@ def project_dashboard_view(request, project_id):
         **admin.site.each_context(request),
         "title": f"Оркестрация — {project.name}",
         "project": project,
+        "product_links": _product_link_rows(project),
         "days": days,
         "hours": hours,
         "summary_json": _json(summary),
@@ -71,6 +81,7 @@ def run_detail_view(request, run_id):
         "title": f"Запуск {run_id}",
         "run": run,
         "project": project,
+        "product_links": _product_link_rows(project),
         "tasks": data["tasks"],
         "events": data["events"],
         "run_json": _json(data),

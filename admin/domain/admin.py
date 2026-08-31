@@ -1,6 +1,6 @@
 from django.contrib import admin, messages
 from django.urls import reverse
-from django.utils.html import format_html
+from django.utils.html import format_html, format_html_join
 
 from core.models import ModerationEvent
 from domain.models import (
@@ -16,6 +16,7 @@ from domain.models import (
     DomainSecret,
     DomainUserProviderCredential,
 )
+from domain.product_links import collect_product_links, link_display_text
 
 
 @admin.register(DomainAppUser)
@@ -73,15 +74,76 @@ class DomainAppUserAdmin(admin.ModelAdmin):
         self.message_user(request, f"Разблокировано пользователей: {updated}", messages.SUCCESS)
 
 
+def _product_links_html(obj) -> str:
+    pairs = collect_product_links(obj)
+    if not pairs:
+        return "—"
+    return format_html_join(
+        " · ",
+        '<a href="{}" target="_blank" rel="noopener noreferrer">{} · {}</a>',
+        ((href, label, link_display_text(href)) for label, href in pairs),
+    )
+
+
 @admin.register(DomainProject)
 class DomainProjectAdmin(admin.ModelAdmin):
-    list_display = ("name", "type", "status", "user", "orchestration_link", "created_at")
-    search_fields = ("name", "description")
+    list_display = (
+        "name",
+        "type",
+        "status",
+        "product_links",
+        "user",
+        "orchestration_link",
+        "created_at",
+    )
+    search_fields = ("name", "description", "deployment_url", "deploy_subdomain")
     list_filter = ("type", "status")
-    readonly_fields = ("id", "created_at", "updated_at", "orchestration_dashboard_link")
+    readonly_fields = (
+        "id",
+        "created_at",
+        "updated_at",
+        "product_links",
+        "orchestration_dashboard_link",
+    )
+    fieldsets = (
+        (
+            None,
+            {
+                "fields": (
+                    "name",
+                    "type",
+                    "status",
+                    "user",
+                    "product_links",
+                    "orchestration_dashboard_link",
+                )
+            },
+        ),
+        ("Описание", {"fields": ("description",)}),
+        ("Деплой", {"fields": ("deployment_url", "deploy_subdomain")}),
+        (
+            "Служебное",
+            {
+                "fields": (
+                    "id",
+                    "logs",
+                    "git_history",
+                    "blocked_reason",
+                    "created_at",
+                    "updated_at",
+                )
+            },
+        ),
+    )
 
     def get_queryset(self, request):
         return super().get_queryset(request).exclude(status="blocked")
+
+    @admin.display(description="Сайт / бот")
+    def product_links(self, obj) -> str:
+        if obj is None:
+            return "—"
+        return _product_links_html(obj)
 
     @admin.display(description="Оркестрация")
     def orchestration_link(self, obj) -> str:
@@ -103,9 +165,18 @@ class DomainProjectAdmin(admin.ModelAdmin):
 
 @admin.register(BlockedProject)
 class BlockedProjectAdmin(admin.ModelAdmin):
-    list_display = ("name", "type", "owner_email", "short_reason", "updated_at")
-    search_fields = ("name", "description", "blocked_reason")
-    readonly_fields = ("id", "name", "type", "user", "blocked_reason", "created_at", "updated_at")
+    list_display = ("name", "type", "product_links", "owner_email", "short_reason", "updated_at")
+    search_fields = ("name", "description", "blocked_reason", "deployment_url")
+    readonly_fields = (
+        "id",
+        "name",
+        "type",
+        "user",
+        "product_links",
+        "blocked_reason",
+        "created_at",
+        "updated_at",
+    )
     actions = ["unblock_projects"]
 
     def get_queryset(self, request):
@@ -118,6 +189,12 @@ class BlockedProjectAdmin(admin.ModelAdmin):
         return obj.user.email
 
     owner_email.short_description = "Владелец"
+
+    @admin.display(description="Сайт / бот")
+    def product_links(self, obj) -> str:
+        if obj is None:
+            return "—"
+        return _product_links_html(obj)
 
     def short_reason(self, obj) -> str:
         return (obj.blocked_reason or "")[:120]

@@ -105,6 +105,8 @@ class Project(models.Model):
     logs = models.TextField()
     deployment_url = models.CharField(max_length=512, null=True, blank=True)
     deploy_subdomain = models.CharField(max_length=63, null=True, blank=True)
+    custom_domain = models.CharField(max_length=253, null=True, blank=True)
+    custom_domain_status = models.CharField(max_length=20, default="none")
     git_history = models.TextField()
     blocked_reason = models.TextField(null=True, blank=True)
     created_at = models.DateTimeField()
