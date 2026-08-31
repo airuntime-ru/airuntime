@@ -324,6 +324,9 @@ class TestExhaustedAttempts:
             ]
         )
         _install_fake_executor(monkeypatch, fake)
+        # Loop parking (identical validation fingerprints) is covered elsewhere; this test is
+        # specifically the exhausted-attempts -> replan path.
+        monkeypatch.setattr(engine.LoopDetector, "any_loop_detected", lambda self: False)
 
         async def _fake_generate_replan(**kwargs):
             from src.services.orchestration.planner import PlanGenerationResult
@@ -372,10 +375,103 @@ class TestExhaustedAttempts:
         assert "plan_revised" in _events(db, run.id)
 
     @pytest.mark.asyncio
+    async def test_task_crash_replans_instead_of_internal_error(
+        self, db: Session, db_factory, project: Project, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A single executor crash must fail/replan that task, not mark the whole run
+        internal_error (the production alert on воздух / пекарня / сиз)."""
+        run = _make_run(db, project, original_request="Сделай лендинг для кофейни")
+        run_id = run.id
+        db.commit()
+
+        class _BoomThenOk:
+            calls = 0
+
+            async def execute(self, contract, context: TaskContext, cancellation):
+                self.calls += 1
+                if self.calls == 1:
+                    raise RuntimeError("codex container died")
+                (context.workspace_root / f"output_{self.calls}.txt").write_text(
+                    f"attempt {self.calls}", encoding="utf-8"
+                )
+                return _ok_result()
+
+        fake = _BoomThenOk()
+        _install_fake_executor(monkeypatch, fake)
+
+        async def _fake_generate_replan(**kwargs):
+            from src.services.orchestration.planner import PlanGenerationResult
+
+            plan = ExecutionPlan(
+                goal="revised goal",
+                complexity="simple",
+                tasks=[
+                    PlannedTask(
+                        local_id="retry_main",
+                        title="Retry",
+                        role=SpecialistRole.IMPLEMENTER,
+                        goal="revised goal",
+                        reason="replanned after executor crash",
+                        acceptance_criteria=[
+                            AcceptanceCriterion(
+                                id="c1", description="builds", verification_method="build"
+                            )
+                        ],
+                    )
+                ],
+                estimated_budget=ExecutionBudget(),
+            )
+            return PlanGenerationResult(plan=plan, source="llm")
+
+        monkeypatch.setattr(engine, "generate_replan", _fake_generate_replan)
+
+        await engine.run_orchestration(
+            run_id, db_factory=db_factory, provider_name="openai", model="m", api_key="k"
+        )
+
+        db.expire_all()
+        refreshed = OrchestrationRunRepository(db).get(run_id)
+        assert refreshed.status == "completed"
+        assert refreshed.error_code != "internal_error"
+        all_tasks = AgentTaskRepository(db).list_by_run(run_id)
+        original = next(t for t in all_tasks if t.local_id == "main")
+        retried = next(t for t in all_tasks if t.local_id == "retry_main")
+        assert original.status == "failed"
+        assert original.error_code == "internal_error"
+        assert "RuntimeError" in (original.error_message or "")
+        assert retried.status == "completed"
+
+    @pytest.mark.asyncio
+    async def test_run_level_crash_persists_exception_message(
+        self, db: Session, db_factory, project: Project, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        run = _make_run(db, project, original_request="Сделай лендинг для кофейни")
+        run_id = run.id
+        db.commit()
+        _install_fake_executor(monkeypatch, _FakeExecutor(script=[_ok_result()]))
+
+        def _boom(*_args, **_kwargs):
+            raise RuntimeError("finalize exploded")
+
+        monkeypatch.setattr(engine, "_walk_run_to_completed", _boom)
+
+        await engine.run_orchestration(
+            run_id, db_factory=db_factory, provider_name="openai", model="m", api_key="k"
+        )
+
+        db.expire_all()
+        refreshed = OrchestrationRunRepository(db).get(run_id)
+        assert refreshed.status == "failed"
+        assert refreshed.error_code == "internal_error"
+        assert "RuntimeError" in (refreshed.error_message or "")
+        assert "finalize exploded" in (refreshed.error_message or "")
+
+    @pytest.mark.asyncio
     async def test_parks_at_waiting_for_user_when_replan_limit_is_reached(
         self, db: Session, db_factory, project: Project, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(engine.settings, "orchestration_max_replans", 0)
+        monkeypatch.setattr(engine.LoopDetector, "any_loop_detected", lambda self: False)
         run = _make_run(db, project, original_request="Сделай лендинг для кофейни")
         db.commit()
         _install_fake_executor(monkeypatch, _FakeExecutor(script=[_build_failed_result()]))

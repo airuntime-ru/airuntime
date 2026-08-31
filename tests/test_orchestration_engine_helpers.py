@@ -146,3 +146,15 @@ class TestPrepareRunForResume:
 
         assert run.error_code is None
         assert run.error_message is None
+
+
+class TestFormatEngineError:
+    def test_includes_exception_type_and_message(self) -> None:
+        formatted = engine._format_engine_error(RuntimeError("codex container died"))
+        assert formatted.startswith("RuntimeError:")
+        assert "codex container died" in formatted
+
+    def test_collapses_whitespace_and_truncates(self) -> None:
+        formatted = engine._format_engine_error(ValueError("a" * 500), limit=40)
+        assert formatted.startswith("ValueError:")
+        assert len(formatted) <= 40

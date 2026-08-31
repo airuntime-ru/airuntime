@@ -91,7 +91,9 @@ _TASK_FORWARD_EDGES: dict[str, frozenset[str]] = {
     # parked (not skipped - skipped is terminal and would silently drop the work) until the user
     # tops up and resumes. See engine.py's BudgetStatus.EXCEEDED branch.
     "ready": frozenset({"running", "skipped", "waiting_for_user"}),
-    "running": frozenset({"collecting_evidence", "ready"}),
+    # running -> waiting_for_user: budget/cancel can land after the task has already started
+    # (wave member exception containment parks rather than crashing the whole run).
+    "running": frozenset({"collecting_evidence", "ready", "waiting_for_user"}),
     "collecting_evidence": frozenset({"validating"}),
     "validating": frozenset({"completed", "repairing", "waiting_for_user"}),
     # repairing -> waiting_for_user: budget can run out between validation retries (engine.py

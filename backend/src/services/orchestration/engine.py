@@ -559,6 +559,11 @@ def _walk_run_to_completed(db: Session, run: OrchestrationRun) -> None:
     responsibility (chat.py wiring), exactly as it already is for the non-orchestrated path,
     rather than engine.py reaching into that project-wide subsystem itself."""
     run_repo = OrchestrationRunRepository(db)
+    # Completion pipeline is legal from `running`. A run that finished its last task while
+    # still in planning/replanning/waiting_for_user would otherwise raise IllegalStatusTransition
+    # here and become an `internal_error`.
+    if run.status in ("planning", "replanning", "waiting_for_user"):
+        run_repo.transition(run, "running")
     # Each phase gets its own event so the run's durable log (and the UI replaying it) shows the
     # same phases the run status walks through, instead of jumping straight from the last task
     # to run_completed with no trace of why.
@@ -569,6 +574,8 @@ def _walk_run_to_completed(db: Session, run: OrchestrationRun) -> None:
         "verifying_runtime": "runtime_verification_started",
     }
     for status in ("validating", "integrating", "building", "deploying", "verifying_runtime"):
+        if run.status == status:
+            continue
         run_repo.transition(run, status)
         event_type = phase_events.get(status)
         if event_type is not None:
@@ -649,6 +656,69 @@ class _TaskAttemptOutcome:
     # Human-readable "why" for a run_should_stop, e.g. the exceeded budget dimension - surfaced
     # to the user on OrchestrationRun.error_message rather than left only in the logs.
     detail: str | None = None
+
+
+def _format_engine_error(exc: BaseException, *, limit: int = 400) -> str:
+    """Compact exception text for OrchestrationRun/AgentTask.error_message (ops alerts)."""
+    text = f"{type(exc).__name__}: {exc}".strip()
+    text = " ".join(text.split())
+    return (text[:limit] or type(exc).__name__).strip()
+
+
+def _fail_task_after_unhandled_error(
+    db_factory: Callable[[], Session],
+    *,
+    task_id: uuid.UUID | str,
+    run_id: uuid.UUID | str,
+    exc: BaseException,
+    replanning_enabled: bool,
+) -> _TaskAttemptOutcome:
+    """Turn a bug inside one task into a task-level failure instead of failing the whole run.
+
+    Production `internal_error` alerts were almost always a single task throwing
+    (DetachedInstanceError, IllegalStatusTransition, executor crash). Swallowing that at the
+    run boundary hid the real exception and killed unrelated in-flight work.
+    """
+    message = _format_engine_error(exc)
+    db = db_factory()
+    try:
+        task = AgentTaskRepository(db).get(task_id)
+        if task is None:
+            return _TaskAttemptOutcome("failed")
+        if task.status == "completed":
+            return _TaskAttemptOutcome("completed")
+        if task.status == "waiting_for_user":
+            return _TaskAttemptOutcome("waiting_for_user")
+        if not is_task_terminal(task.status):
+            AgentTaskRepository(db).transition(
+                task,
+                "failed",
+                error_code="internal_error",
+                error_message=message,
+            )
+            events_bus.emit(
+                db,
+                run_id=run_id,
+                task_id=task.id,
+                event_type="task_failed",
+                payload={"reason": "internal_error", "error": message},
+            )
+            db.commit()
+    except Exception:  # noqa: BLE001 - failure-marking itself must never raise into the gather
+        logger.exception("run_orchestration: failed to mark task %s failed after crash", task_id)
+    finally:
+        db.close()
+
+    evaluation = FailureEvaluation(
+        failure_class=FailureClass.AGENT_ERROR,
+        decision=FailureDecision.REPLAN if replanning_enabled else FailureDecision.FAIL,
+        loop_detected=False,
+        reason=message,
+    )
+    return _TaskAttemptOutcome(
+        "replan" if replanning_enabled else "failed",
+        evaluation=evaluation,
+    )
 
 
 def _record_run_usage_charge(
@@ -895,7 +965,14 @@ async def _run_one_task(
             )
             db.commit()
 
-        agent_result = await executor.execute(contract, task_context, cancellation)
+        try:
+            agent_result = await executor.execute(contract, task_context, cancellation)
+        except Exception:
+            try:
+                await asyncio.to_thread(git_txn.abort, handle)
+            except Exception:  # noqa: BLE001 - lease TTL is the fallback if abort also fails
+                logger.exception("run_orchestration: failed to abort git txn for task %s", task.id)
+            raise
 
         # A persisted cancellation may have arrived while the executor was blocked in a model
         # turn. Observe it before any build/preview fallback can create fresh resources during
@@ -995,33 +1072,42 @@ async def _run_one_task(
                 payload={"note": f"Подключаю сервисы: {', '.join(service_requests)}"},
             )
 
-        dep_build, dep_preview, dep_runtime = _inherit_evidence_from_dependencies(dependency_tasks)
-        build_result = await _ensure_build_evidence(
-            contract=contract,
-            project_id=project.id,
-            existing=agent_result.build_result or dep_build,
-        )
-        preview_result, runtime_health_result = await _ensure_preview_and_runtime_evidence(
-            contract=contract,
-            project_id=project.id,
-            build_result=build_result,
-            preview_existing=agent_result.preview_result or dep_preview,
-            runtime_existing=agent_result.runtime_health_result or dep_runtime,
-        )
-        outcome = await asyncio.to_thread(
-            git_txn.complete,
-            handle,
-            result=agent_result.task_result,
-            build_result=build_result,
-            lint_result=agent_result.lint_result,
-            test_result=agent_result.test_result,
-            preview_result=preview_result,
-            runtime_health_result=runtime_health_result,
-            service_requests=service_requests,
-            secret_requests=secret_requests,
-            usage=agent_result.usage,
-            raw_logs=agent_result.raw_logs or None,
-        )
+        try:
+            dep_build, dep_preview, dep_runtime = _inherit_evidence_from_dependencies(
+                dependency_tasks
+            )
+            build_result = await _ensure_build_evidence(
+                contract=contract,
+                project_id=project.id,
+                existing=agent_result.build_result or dep_build,
+            )
+            preview_result, runtime_health_result = await _ensure_preview_and_runtime_evidence(
+                contract=contract,
+                project_id=project.id,
+                build_result=build_result,
+                preview_existing=agent_result.preview_result or dep_preview,
+                runtime_existing=agent_result.runtime_health_result or dep_runtime,
+            )
+            outcome = await asyncio.to_thread(
+                git_txn.complete,
+                handle,
+                result=agent_result.task_result,
+                build_result=build_result,
+                lint_result=agent_result.lint_result,
+                test_result=agent_result.test_result,
+                preview_result=preview_result,
+                runtime_health_result=runtime_health_result,
+                service_requests=service_requests,
+                secret_requests=secret_requests,
+                usage=agent_result.usage,
+                raw_logs=agent_result.raw_logs or None,
+            )
+        except Exception:
+            try:
+                await asyncio.to_thread(git_txn.abort, handle)
+            except Exception:  # noqa: BLE001 - lease TTL is the fallback if abort also fails
+                logger.exception("run_orchestration: failed to abort git txn for task %s", task.id)
+            raise
 
         task_repo.transition(
             task,
@@ -1201,24 +1287,40 @@ async def _run_task_wave_member(
             # Can't happen in practice - all four were just read, moments ago, from the same DB
             # rows the caller's own session saw. Fail safe rather than crash the whole wave.
             return task_id, _TaskAttemptOutcome("failed"), None
-        outcome = await _run_one_task(
-            db,
-            run=run,
-            project=project,
-            task=task,
-            plan=plan,
-            context_engine=ContextEngine(db),
-            isolation=WorkspaceIsolationManager(db),
-            provider_name=provider_name,
-            model=model,
-            api_key=api_key,
-            run_images=run_images,
-            cancellation=cancellation,
-            loop_detector=loop_detector,
-            budget=budget,
-            replanning_enabled=replanning_enabled,
-        )
-        return task_id, outcome, task.evidence_json
+        try:
+            outcome = await _run_one_task(
+                db,
+                run=run,
+                project=project,
+                task=task,
+                plan=plan,
+                context_engine=ContextEngine(db),
+                isolation=WorkspaceIsolationManager(db),
+                provider_name=provider_name,
+                model=model,
+                api_key=api_key,
+                run_images=run_images,
+                cancellation=cancellation,
+                loop_detector=loop_detector,
+                budget=budget,
+                replanning_enabled=replanning_enabled,
+            )
+            return task_id, outcome, task.evidence_json
+        except Exception as exc:  # noqa: BLE001 - one task crash must not fail the whole run
+            logger.exception(
+                "run_orchestration: unhandled error in task %s of run %s", task_id, run_id
+            )
+            return (
+                task_id,
+                _fail_task_after_unhandled_error(
+                    db_factory,
+                    task_id=task_id,
+                    run_id=run_id,
+                    exc=exc,
+                    replanning_enabled=replanning_enabled,
+                ),
+                None,
+            )
     finally:
         db.close()
 
@@ -1292,10 +1394,11 @@ async def run_orchestration(
             api_key=api_key,
             cancellation=cancellation,
         )
-    except Exception:  # noqa: BLE001 - a run must never get stuck non-terminal because of an
+    except Exception as exc:  # noqa: BLE001 - a run must never get stuck non-terminal because of an
         # unexpected bug here; best-effort mark it failed in a FRESH session (the one that raised
         # may be unusable) rather than leaving it silently stalled forever.
         logger.exception("run_orchestration: unhandled error for run %s", run_id)
+        error_message = _format_engine_error(exc)
         try:
             db = db_factory()
             try:
@@ -1305,13 +1408,13 @@ async def run_orchestration(
                         run,
                         "failed",
                         error_code="internal_error",
-                        error_message="unhandled engine error",
+                        error_message=error_message,
                     )
                     events_bus.emit(
                         db,
                         run_id=run.id,
                         event_type="run_failed",
-                        payload={"reason": "internal_error"},
+                        payload={"reason": "internal_error", "error": error_message},
                     )
                     db.commit()
             finally:
