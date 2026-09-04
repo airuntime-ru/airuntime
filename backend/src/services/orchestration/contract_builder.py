@@ -103,24 +103,36 @@ def derive_validation_steps(
 ) -> list[ValidationStep]:
     policy = get_role_policy(role)
     steps: list[ValidationStep] = []
-    if policy.write_scope_ceiling != WriteScope.NONE:
-        steps.append(
-            ValidationStep(
-                kind="scope",
-                description="Изменения не выходят за allowed_paths и не затрагивают forbidden_paths",
-                required=True,
+    if policy.write_scope_ceiling == WriteScope.NONE:
+        # Reviewers report on evidence. They must not be hard-failed by the site's own
+        # preview/build issues — that retried the same QA node until loop_detected.
+        if role == SpecialistRole.SECURITY_REVIEWER:
+            steps.append(
+                ValidationStep(
+                    kind="security",
+                    description="Явная проверка security-инвариантов",
+                    required=True,
+                )
             )
+        return steps
+
+    steps.append(
+        ValidationStep(
+            kind="scope",
+            description="Изменения не выходят за allowed_paths и не затрагивают forbidden_paths",
+            required=True,
         )
-        # Required (not advisory) for anything that writes: validation.py only treats a finding as
-        # blocking when its step is declared here, so without this row a syntactically broken .py
-        # or malformed package.json would be recorded in the evidence and then accepted anyway.
-        steps.append(
-            ValidationStep(
-                kind="static",
-                description="Изменённые .py/.json файлы синтаксически корректны",
-                required=True,
-            )
+    )
+    # Required (not advisory) for anything that writes: validation.py only treats a finding as
+    # blocking when its step is declared here, so without this row a syntactically broken .py
+    # or malformed package.json would be recorded in the evidence and then accepted anyway.
+    steps.append(
+        ValidationStep(
+            kind="static",
+            description="Изменённые .py/.json файлы синтаксически корректны",
+            required=True,
         )
+    )
     methods = {c.verification_method for c in planned_task.acceptance_criteria}
     build_roles = (
         SpecialistRole.IMPLEMENTER,
@@ -144,12 +156,6 @@ def derive_validation_steps(
         steps.append(
             ValidationStep(
                 kind="runtime", description="Рантайм-проверка после деплоя", required=True
-            )
-        )
-    if role == SpecialistRole.SECURITY_REVIEWER:
-        steps.append(
-            ValidationStep(
-                kind="security", description="Явная проверка security-инвариантов", required=True
             )
         )
     return steps

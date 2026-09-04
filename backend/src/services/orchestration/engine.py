@@ -306,7 +306,7 @@ def _try_recover_qa_deadlock(
     """
     if not any(t.status == "completed" and t.role in _DELIVERABLE_TASK_ROLES for t in plan_tasks):
         return False
-    stuck = [t for t in non_terminal if t.status in ("blocked", "pending")]
+    stuck = [t for t in non_terminal if t.status in ("blocked", "pending", "waiting_for_user")]
     if not stuck or not all(t.role in _REVIEW_TASK_ROLES for t in stuck):
         return False
     for task in stuck:
@@ -1607,6 +1607,16 @@ async def _run_orchestration_inner(
                 non_terminal = [t for t in plan_tasks if not is_task_terminal(t.status)]
                 waiting = [t for t in non_terminal if t.status == "waiting_for_user"]
                 if waiting:
+                    if _try_recover_qa_deadlock(
+                        db,
+                        run=run,
+                        plan_id=plan.id,
+                        plan_tasks=plan_tasks,
+                        non_terminal=non_terminal,
+                        task_repo=task_repo,
+                    ):
+                        db.commit()
+                        continue
                     loop_task = next((t for t in waiting if t.error_code == "loop_detected"), None)
                     if run.status != "waiting_for_user":
                         park_fields: dict[str, object] = {}

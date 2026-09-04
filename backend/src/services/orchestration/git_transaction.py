@@ -10,9 +10,9 @@ job: an executor (executors.py) runs between `begin()` capturing the base SHA + 
     5. check scope        -> complete(): validation.run_validation() (includes scope)
     6. run validation     -> complete(): validation.run_validation()
     7. commit on success  -> complete(): project_git.commit_snapshot(), airuntime(...) message
-    8. repair or rollback -> complete(): project_git.discard_uncommitted_changes() on failure
-       (repair itself is a NEW transaction the caller starts via failure_policy's decision, not
-       something this module does internally)
+       8. repair or rollback -> complete(): discard_uncommitted_changes() only for unsafe
+          failures (scope/static/build). Preview/product quality failures keep the working
+          tree so the next repair attempt can iterate instead of rewriting from scratch.
     9. save accepted SHA  -> complete(): TransactionOutcome.accepted_commit_sha
     10. release lease     -> complete(): WorkspaceIsolationManager.release()
 
@@ -39,7 +39,7 @@ from src.services.orchestration.schemas import (
     ValidationFinding,
     ValidationResult,
 )
-from src.services.orchestration.validation import run_validation
+from src.services.orchestration.validation import run_validation, should_discard_uncommitted_work
 from src.services.orchestration.workspace_isolation import (
     AcquiredWorkspace,
     WorkspaceIsolationManager,
@@ -180,8 +180,9 @@ class GitTransactionManager:
                     }
                 )
 
-        if not committed and handle.acquired.mode in ("shared", "isolated"):
-            discard_uncommitted_changes(handle.acquired.workspace_root)
+        if not committed and should_discard_uncommitted_work(validation_result):
+            if handle.acquired.mode in ("shared", "isolated"):
+                discard_uncommitted_changes(handle.acquired.workspace_root)
 
         if release_lease:
             self.isolation.release(handle.acquired)

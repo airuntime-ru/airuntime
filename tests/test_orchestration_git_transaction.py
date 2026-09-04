@@ -24,6 +24,7 @@ from src.services.orchestration.schemas import (
     TaskBudget,
     TaskContract,
     TaskResult,
+    ValidationStep,
 )
 from src.services.orchestration.workspace_isolation import WorkspaceIsolationManager, make_holder_id
 from src.services.project_git import (
@@ -236,6 +237,62 @@ class TestGitTransactionHappyPath:
             "an unaccepted change must be discarded, not left dangling"
         )
         assert (tmp_path / "existing.txt").read_text(encoding="utf-8") == "original"
+
+    def test_preview_failure_keeps_written_files_for_repair(
+        self, db: Session, project: Project, run: OrchestrationRun, plan, tmp_path
+    ) -> None:
+        init_repo_if_needed(tmp_path)
+        from src.services.project_git import commit_snapshot
+
+        (tmp_path / "seed.txt").write_text("seed", encoding="utf-8")
+        commit_snapshot(tmp_path, message="seed")
+
+        isolation = WorkspaceIsolationManager(db)
+        txn = GitTransactionManager(db, isolation)
+        task = _make_task(db, run, plan, local_id="preview-keep")
+        contract = _contract(task, allowed_paths=["public/"])
+        contract = contract.model_copy(
+            update={
+                "validation_steps": [
+                    ValidationStep(kind="preview", description="must preview", required=True)
+                ]
+            }
+        )
+        handle = txn.begin(
+            task=task,
+            contract=contract,
+            project_id=project.id,
+            run_id=run.id,
+            project_root=tmp_path,
+            holder=make_holder_id(),
+            ttl_seconds=60,
+        )
+        public = tmp_path / "public"
+        public.mkdir()
+        (public / "index.html").write_text("<h1>hello</h1>", encoding="utf-8")
+
+        outcome = txn.complete(
+            handle,
+            result=TaskResult(status="completed", summary="done"),
+            preview_result={
+                "status": "issues_found",
+                "fatal_errors": [],
+                "pages": [
+                    {
+                        "url": "/",
+                        "console_errors": ["Uncaught TypeError"],
+                        "network_errors": [],
+                        "overflow_elements": [],
+                        "broken_images": [],
+                    }
+                ],
+            },
+        )
+        assert outcome.committed is False
+        assert outcome.validation_result.accepted is False
+        assert (public / "index.html").exists(), (
+            "preview-only failures must keep the working tree so repair can iterate"
+        )
 
     def test_abort_discards_and_releases(
         self, db: Session, project: Project, run: OrchestrationRun, plan, tmp_path

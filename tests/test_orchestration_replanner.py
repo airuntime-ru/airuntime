@@ -64,6 +64,7 @@ class TestBuildReplanUserMessage:
         assert "Frontend" in message
         assert "build_error" in message
         assert "frontend/app.py" in message
+        assert "Implementer или UI/UX Specialist" in message
 
     def test_handles_no_completed_tasks_and_missing_evidence(self) -> None:
         failed = _task("a", "Only task")

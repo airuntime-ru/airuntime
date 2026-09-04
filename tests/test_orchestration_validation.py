@@ -250,6 +250,100 @@ class TestRunValidation:
             for finding in result.findings
         )
 
+    def test_write_task_noop_on_existing_healthy_checkout_is_accepted(self) -> None:
+        contract = _contract(
+            allowed_paths=["public/"],
+            validation_steps=[
+                ValidationStep(kind="build", description="must build", required=True)
+            ],
+        )
+        contract = contract.model_copy(
+            update={
+                "current_state": contract.current_state.model_copy(
+                    update={"current_files": ["public/index.html"]}
+                )
+            }
+        )
+        evidence = _evidence(build_result={"ok": True})
+        result = v.run_validation(contract=contract, result=None, evidence=evidence)
+        assert result.accepted is True
+        assert any(
+            finding.step == "changes" and finding.passed and "no-op accepted" in finding.message
+            for finding in result.findings
+        )
+
+    def test_write_task_noop_still_rejected_when_preview_fails(self) -> None:
+        contract = _contract(
+            allowed_paths=["public/"],
+            validation_steps=[
+                ValidationStep(kind="preview", description="must preview", required=True)
+            ],
+        )
+        contract = contract.model_copy(
+            update={
+                "current_state": contract.current_state.model_copy(
+                    update={"current_files": ["public/index.html"]}
+                )
+            }
+        )
+        evidence = _evidence(
+            preview_result={
+                "status": "issues_found",
+                "fatal_errors": [],
+                "pages": [
+                    {
+                        "url": "/",
+                        "console_errors": ["Uncaught TypeError"],
+                        "network_errors": [],
+                        "overflow_elements": [],
+                        "broken_images": [],
+                    }
+                ],
+            }
+        )
+        result = v.run_validation(contract=contract, result=None, evidence=evidence)
+        assert result.accepted is False
+        assert any(finding.step == "changes" and not finding.passed for finding in result.findings)
+        assert any(
+            finding.step == "preview" and not finding.passed and "console" in finding.message
+            for finding in result.findings
+        )
+
+    def test_should_discard_unsafe_failures_but_keep_preview_work(self) -> None:
+        unsafe = v.run_validation(
+            contract=_contract(allowed_paths=["public/"]),
+            result=None,
+            evidence=_evidence(changed_files=[".env"]),
+        )
+        assert v.should_discard_uncommitted_work(unsafe) is True
+
+        preview_fail = v.run_validation(
+            contract=_contract(
+                allowed_paths=["public/"],
+                validation_steps=[
+                    ValidationStep(kind="preview", description="must preview", required=True)
+                ],
+            ),
+            result=None,
+            evidence=_evidence(
+                changed_files=["public/index.html"],
+                preview_result={
+                    "status": "issues_found",
+                    "fatal_errors": [],
+                    "pages": [
+                        {
+                            "console_errors": ["Uncaught TypeError"],
+                            "network_errors": [],
+                            "overflow_elements": [],
+                            "broken_images": [],
+                        }
+                    ],
+                },
+            ),
+        )
+        assert preview_fail.accepted is False
+        assert v.should_discard_uncommitted_work(preview_fail) is False
+
     def test_read_only_task_without_changes_can_still_pass(self) -> None:
         contract = _contract(
             role=SpecialistRole.QA_REVIEWER,

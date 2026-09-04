@@ -29,7 +29,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.services.orchestration.preview_gate import preview_passes_validation
+from src.services.orchestration.preview_gate import (
+    preview_passes_validation,
+    summarize_preview_issues,
+)
 from src.services.orchestration.schemas import (
     ClaimedAcceptanceResult,
     RiskLevel,
@@ -162,18 +165,46 @@ def validate_static(evidence: TaskEvidence) -> ValidationFinding:
     )
 
 
+def _existing_deliverable_files(contract: TaskContract) -> list[str]:
+    files = contract.current_state.current_files
+    return [path for path in files if path and not path.startswith(".")]
+
+
 def validate_changes(contract: TaskContract, evidence: TaskEvidence) -> ValidationFinding | None:
-    """Reject a write task that only inspected and rebuilt the pre-existing checkout."""
+    """Reject a write task that only inspected an empty or still-broken checkout.
+
+    Follow-up turns on an already-shipped site often inspect and decide nothing needs changing.
+    Hard-failing those no-ops produced identical `write-capable task produced no file changes`
+    fingerprints until loop_detected parked the run. A no-op is accepted only when the
+    checkout already has deliverable files and every quality gate that actually ran still
+    passed — a brand-new empty project, a failed build, or a failing preview still reject.
+    """
     if contract.forbidden_paths == ["*"]:
         return None
     touched = [*evidence.changed_files, *evidence.created_files, *evidence.deleted_files]
+    if touched:
+        return ValidationFinding(
+            step="changes",
+            passed=True,
+            message="task produced file changes",
+            evidence_ref="changed_files",
+        )
+    build_ok = evidence.build_result is None or bool(evidence.build_result.get("ok"))
+    preview_ok = evidence.preview_result is None or preview_passes_validation(
+        evidence.preview_result
+    )
+    if _existing_deliverable_files(contract) and build_ok and preview_ok:
+        return ValidationFinding(
+            step="changes",
+            passed=True,
+            message="no-op accepted: existing checkout already satisfies the task",
+            evidence_ref="changed_files",
+        )
     return ValidationFinding(
         step="changes",
-        passed=bool(touched),
+        passed=False,
         severity=RiskLevel.HIGH,
-        message="task produced file changes"
-        if touched
-        else "write-capable task produced no file changes",
+        message="write-capable task produced no file changes",
         evidence_ref="changed_files",
     )
 
@@ -212,9 +243,12 @@ def validate_preview(evidence: TaskEvidence) -> ValidationFinding:
     preview = evidence.preview_result
     ok = preview_passes_validation(preview)
     status = preview.get("status")
-    message = f"preview status={status}"
     if ok and status == "issues_found":
         message = "preview issues_found (external font CDN only; ignored)"
+    elif ok:
+        message = f"preview status={status}"
+    else:
+        message = summarize_preview_issues(preview)
     return ValidationFinding(
         step="preview",
         passed=ok,
@@ -308,4 +342,20 @@ def run_validation(
     accepted = not any(not f.passed and _is_hard_required(f) for f in findings)
     return ValidationResult(
         accepted=accepted, findings=findings, acceptance_results=acceptance_results
+    )
+
+
+# Scope/static/build failures leave an unsafe or broken checkout — rollback so the next
+# attempt starts from the last accepted commit. Preview/product findings are quality gates
+# on otherwise-valid work: discarding them forced the agent to rewrite the site from
+# scratch every retry, which is how production runs hit loop_detected with no progress.
+_UNSAFE_DISCARD_STEPS = frozenset({"scope", "static", "build"})
+
+
+def should_discard_uncommitted_work(validation_result: ValidationResult) -> bool:
+    if validation_result.accepted:
+        return False
+    return any(
+        not finding.passed and finding.step in _UNSAFE_DISCARD_STEPS
+        for finding in validation_result.findings
     )

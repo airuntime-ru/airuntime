@@ -74,6 +74,30 @@ class TestTryRecoverQaDeadlock:
         task_repo.refresh_readiness.assert_called_once_with(plan_id)
         emit.assert_called_once()
 
+    def test_skips_looped_waiting_qa_after_deliverable_completed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        run = SimpleNamespace(id=uuid.uuid4())
+        plan_id = uuid.uuid4()
+        plan_tasks = [
+            _task(role="implementer", status="completed"),
+            _task(role="qa_reviewer", status="waiting_for_user"),
+        ]
+        task_repo = MagicMock()
+        monkeypatch.setattr(engine.events_bus, "emit", MagicMock())
+
+        recovered = engine._try_recover_qa_deadlock(
+            MagicMock(),
+            run=run,
+            plan_id=plan_id,
+            plan_tasks=plan_tasks,
+            non_terminal=[plan_tasks[1]],
+            task_repo=task_repo,
+        )
+
+        assert recovered is True
+        task_repo.transition.assert_called_once()
+
     def test_no_recovery_without_completed_deliverable(self) -> None:
         plan_tasks = [
             _task(role="implementer", status="running"),

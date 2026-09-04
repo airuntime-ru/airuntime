@@ -47,3 +47,38 @@ def preview_passes_validation(preview_result: dict) -> bool:
     if not isinstance(pages, list) or not pages:
         return False
     return all(not _page_issues_blocking(page) for page in pages if isinstance(page, dict))
+
+
+def _clip_issue(value: object, *, limit: int = 160) -> str:
+    text = " ".join(str(value).split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1] + "…"
+
+
+def summarize_preview_issues(preview_result: dict, *, limit: int = 8) -> str:
+    """Compact, fingerprint-stable summary so retries see *what* failed, not just the status."""
+    parts: list[str] = []
+    for error in preview_result.get("fatal_errors") or []:
+        parts.append(f"fatal: {_clip_issue(error)}")
+    pages = preview_result.get("pages")
+    if isinstance(pages, list):
+        for index, page in enumerate(pages):
+            if not isinstance(page, dict):
+                continue
+            label = page.get("url") or page.get("path") or f"page[{index}]"
+            for error in page.get("console_errors") or []:
+                parts.append(f"{label} console: {_clip_issue(error)}")
+            for error in blocking_network_errors(page.get("network_errors") or []):
+                parts.append(f"{label} network: {_clip_issue(error)}")
+            for item in page.get("overflow_elements") or []:
+                parts.append(f"{label} overflow: {_clip_issue(item)}")
+            for item in page.get("broken_images") or []:
+                parts.append(f"{label} broken_image: {_clip_issue(item)}")
+    if not parts:
+        status = preview_result.get("status") or "unknown"
+        return f"preview status={status}"
+    shown = parts[:limit]
+    extra = len(parts) - len(shown)
+    suffix = f" (+{extra} more)" if extra > 0 else ""
+    return "; ".join(shown) + suffix

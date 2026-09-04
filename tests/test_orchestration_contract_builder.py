@@ -148,6 +148,14 @@ class TestDeriveValidationSteps:
         )
         assert "preview" in {s.kind for s in steps}
 
+    def test_readonly_preview_criterion_does_not_block_qa(self) -> None:
+        steps = derive_validation_steps(
+            SpecialistRole.QA_REVIEWER,
+            self._planned(SpecialistRole.QA_REVIEWER, ["preview"]),
+        )
+        assert "preview" not in {s.kind for s in steps}
+        assert "build" not in {s.kind for s in steps}
+
     def test_security_reviewer_gets_security_step(self) -> None:
         steps = derive_validation_steps(
             SpecialistRole.SECURITY_REVIEWER, self._planned(SpecialistRole.SECURITY_REVIEWER, [])

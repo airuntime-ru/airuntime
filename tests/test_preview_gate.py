@@ -7,6 +7,7 @@ from src.services.orchestration.preview_gate import (
     blocking_network_errors,
     is_benign_preview_network_error,
     preview_passes_validation,
+    summarize_preview_issues,
 )
 from src.services.orchestration.skills.preview_review import _deterministic_gate
 
@@ -53,3 +54,24 @@ def test_deterministic_gate_ignores_font_cdn_only() -> None:
         ],
     )
     assert _deterministic_gate(preview) is None
+
+
+def test_summarize_preview_issues_includes_console_and_overflow() -> None:
+    summary = summarize_preview_issues(
+        {
+            "status": "issues_found",
+            "fatal_errors": [],
+            "pages": [
+                {
+                    "url": "/",
+                    "console_errors": ["Uncaught TypeError: x is not a function"],
+                    "network_errors": [],
+                    "overflow_elements": [".hero"],
+                    "broken_images": [],
+                }
+            ],
+        }
+    )
+    assert "console" in summary
+    assert "overflow" in summary
+    assert "TypeError" in summary
