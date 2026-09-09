@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
+import { ConsentBanner } from "@/components/legal/consent-banner";
 import { ProductAnalytics } from "@/components/product-analytics";
 import { seoCopy } from "@/lib/landing/content";
 
@@ -71,6 +72,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col bg-[var(--background)] text-[var(--foreground)]">
         <ProductAnalytics />
         {children}
+        <ConsentBanner />
       </body>
     </html>
   );

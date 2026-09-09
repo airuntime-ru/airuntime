@@ -1,3 +1,5 @@
+import { hasAnalyticsConsent } from "@/lib/consent";
+
 export type LandingEventName =
   | "hero_start_project"
   | "hero_view_process"
@@ -13,9 +15,10 @@ declare global {
   }
 }
 
-/** Lightweight landing analytics: CustomEvent + optional dataLayer if present. */
+/** Landing analytics: only after analytics consent. */
 export function trackLandingEvent(name: LandingEventName, payload: LandingEventPayload = {}) {
   if (typeof window === "undefined") return;
+  if (!hasAnalyticsConsent()) return;
 
   window.dispatchEvent(
     new CustomEvent("airuntime:landing", {

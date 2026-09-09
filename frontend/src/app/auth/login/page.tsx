@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Mail, ShieldCheck } from "lucide-react";
 
@@ -16,6 +17,7 @@ export default function LoginPage() {
   const [step, setStep] = useState<Step>("email");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [resendIn, setResendIn] = useState(0);
@@ -28,6 +30,10 @@ export default function LoginPage() {
   }, [resendIn]);
 
   const sendCode = async () => {
+    if (!acceptedTerms) {
+      setError("Нужно согласие с офертой и политикой конфиденциальности");
+      return;
+    }
     setLoading(true);
     setError("");
     try {
@@ -90,7 +96,30 @@ export default function LoginPage() {
                 if (event.key === "Enter") void onSubmitEmail();
               }}
             />
-            <Button variant="accent" className="w-full" onClick={onSubmitEmail} disabled={loading || !email.trim()}>
+            <label className="flex cursor-pointer items-start gap-3 text-left text-sm leading-5 text-[var(--ar-mist)]">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 shrink-0 rounded border-black/20 accent-[var(--ar-sky)]"
+                checked={acceptedTerms}
+                onChange={(event) => setAcceptedTerms(event.target.checked)}
+              />
+              <span>
+                Я соглашаюсь с{" "}
+                <Link href="/legal/offer" className="text-[var(--ar-sky)] hover:underline" target="_blank">
+                  публичной офертой
+                </Link>{" "}
+                и{" "}
+                <Link href="/legal/privacy" className="text-[var(--ar-sky)] hover:underline" target="_blank">
+                  политикой конфиденциальности
+                </Link>
+              </span>
+            </label>
+            <Button
+              variant="accent"
+              className="w-full"
+              onClick={onSubmitEmail}
+              disabled={loading || !email.trim() || !acceptedTerms}
+            >
               {loading ? "Отправляем..." : "Получить код"}
             </Button>
           </div>

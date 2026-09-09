@@ -1,3 +1,5 @@
+import { hasAnalyticsConsent } from "@/lib/consent";
+
 export type AnalyticsPlatform = "web" | "telegram" | "ios" | "android";
 
 type AnalyticsEventName = "session_start" | "screen_view" | "screen_leave";
@@ -36,6 +38,7 @@ const INGEST_KEY = (process.env.NEXT_PUBLIC_ANALYTICS_INGEST_KEY ?? "").trim();
 let platform: AnalyticsPlatform = "web";
 let userId: string | null = null;
 let sessionStarted = false;
+let initialized = false;
 const queue: QueuedEvent[] = [];
 let intervalTimer: ReturnType<typeof setInterval> | null = null;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -131,6 +134,7 @@ function sanitizeProps(
 }
 
 function scheduleFlush(keepalive = false): void {
+  if (!hasAnalyticsConsent()) return;
   if (debounceTimer) clearTimeout(debounceTimer);
   debounceTimer = setTimeout(() => {
     debounceTimer = null;
@@ -139,6 +143,7 @@ function scheduleFlush(keepalive = false): void {
 }
 
 function enqueue(event: QueuedEvent): void {
+  if (!hasAnalyticsConsent()) return;
   queue.push(event);
   if (queue.length >= MAX_BATCH) {
     void flushAnalytics();
@@ -180,7 +185,7 @@ async function sendBatch(payload: BatchPayload, keepalive = false): Promise<void
 }
 
 export async function flushAnalytics(keepalive = false): Promise<void> {
-  if (!queue.length || !API_BASE) return;
+  if (!hasAnalyticsConsent() || !queue.length || !API_BASE) return;
   const payload = buildBatch();
   try {
     await sendBatch(payload, keepalive);
@@ -204,6 +209,9 @@ function leaveCurrentScreen(): void {
 
 export function initProductAnalytics(): void {
   if (typeof window === "undefined") return;
+  if (!hasAnalyticsConsent()) return;
+  if (initialized) return;
+  initialized = true;
   platform = "web";
   getAnonymousId();
   getSessionId();
@@ -232,6 +240,10 @@ export function initProductAnalytics(): void {
 }
 
 export function setAnalyticsUserId(next: string | null | undefined): void {
+  if (!hasAnalyticsConsent()) {
+    userId = null;
+    return;
+  }
   userId = next?.trim() ? next.trim() : null;
 }
 
@@ -239,6 +251,7 @@ export function trackScreenView(
   screen: string,
   opts?: { tab?: string; props?: Record<string, unknown> }
 ): void {
+  if (!hasAnalyticsConsent()) return;
   const normalized = screen.slice(0, 64);
   if (currentScreen === normalized) return;
   leaveCurrentScreen();

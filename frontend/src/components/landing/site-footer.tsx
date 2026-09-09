@@ -2,6 +2,8 @@ import Link from "next/link";
 
 import { Logo } from "@/components/brand/logo";
 import { LOGIN_HREF, navItems } from "@/lib/landing/content";
+import { legalLinks } from "@/lib/legal";
+import { operator } from "@/lib/legal/operator";
 
 export function SiteFooter() {
   return (
@@ -32,9 +34,22 @@ export function SiteFooter() {
         </nav>
       </div>
       <div className="border-t border-white/[0.06]">
-        <p className="mx-auto max-w-6xl px-5 py-6 text-xs text-white/45 sm:px-8">
-          © {new Date().getFullYear()} AIRuntime
-        </p>
+        <div className="mx-auto flex max-w-6xl flex-col gap-4 px-5 py-6 text-xs text-white/45 sm:flex-row sm:items-center sm:justify-between sm:px-8">
+          <p>
+            © {new Date().getFullYear()} AIRuntime · {operator.fullName} · ИНН {operator.inn}
+          </p>
+          <nav aria-label="Юридические документы" className="flex flex-wrap gap-x-5 gap-y-2">
+            {legalLinks.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+              >
+                {item.label}
+              </Link>
+            ))}
+          </nav>
+        </div>
       </div>
     </footer>
   );
