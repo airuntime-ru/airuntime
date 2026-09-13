@@ -19,7 +19,7 @@ type PublicPlan = {
 
 /**
  * Mirrors the seeded plans so the page still renders if the API is unreachable at build time.
- * Kept in sync with migration 0021's PLAN_DEFAULTS.
+ * Kept in sync with production plans (free / pro / business / team / studio / ultra).
  */
 const FALLBACK_PLANS: PublicPlan[] = [
   {
@@ -49,6 +49,36 @@ const FALLBACK_PLANS: PublicPlan[] = [
     monthly_budget_rub: 2200,
     max_projects: 50,
     max_concurrent_projects: 20,
+    grant_renews: true,
+    allowed_models: null,
+  },
+  {
+    key: "team",
+    name: "Команда",
+    price_rub: 7990,
+    monthly_budget_rub: 5600,
+    max_projects: 80,
+    max_concurrent_projects: 40,
+    grant_renews: true,
+    allowed_models: null,
+  },
+  {
+    key: "studio",
+    name: "Студия",
+    price_rub: 14990,
+    monthly_budget_rub: 10500,
+    max_projects: 90,
+    max_concurrent_projects: 70,
+    grant_renews: true,
+    allowed_models: null,
+  },
+  {
+    key: "ultra",
+    name: "Ultra",
+    price_rub: 30000,
+    monthly_budget_rub: 20000,
+    max_projects: 100,
+    max_concurrent_projects: 100,
     grant_renews: true,
     allowed_models: null,
   },
@@ -106,7 +136,7 @@ export async function PricingSection() {
         align="center"
       />
 
-      <ul className="mt-14 grid gap-5 lg:grid-cols-3">
+      <ul className="mt-14 grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
         {plans.map((plan, index) => {
           const highlighted = plan.key === "pro";
           return (
