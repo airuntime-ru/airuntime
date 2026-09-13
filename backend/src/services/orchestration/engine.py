@@ -115,6 +115,15 @@ from src.services.orchestration.repository import (
     OrchestrationPlanRepository,
     OrchestrationRunRepository,
 )
+from src.services.orchestration.review_handoff import (
+    build_judge_fix_planned_tasks,
+    can_enqueue_judge_fix,
+    collect_review_todos,
+    collect_todos_from_task_result,
+    judge_fix_round_count,
+    parse_task_result_json,
+    verdict_from_task_result,
+)
 from src.services.orchestration.role_policy import get_role_policy
 from src.services.orchestration.schemas import (
     CapabilityContext,
@@ -292,6 +301,7 @@ def _inherit_evidence_from_dependencies(
 
 _DELIVERABLE_TASK_ROLES = frozenset({"implementer", "ui_ux_specialist", "integration_agent"})
 _REVIEW_TASK_ROLES = frozenset({"qa_reviewer", "security_reviewer"})
+_QA_JUDGE_ROLES = frozenset({"qa_reviewer"})
 
 
 def _try_recover_qa_deadlock(
@@ -480,6 +490,169 @@ async def _materialize_plan_tasks(
         )
         created.append(task)
     task_repo.refresh_readiness(plan.id)
+    return created
+
+
+async def _append_planned_tasks(
+    db: Session,
+    *,
+    run: OrchestrationRun,
+    plan: OrchestrationPlan,
+    project: Project,
+    planned_tasks: list[PlannedTask],
+    router: CapabilityRouter,
+) -> list[AgentTask]:
+    """Add follow-up nodes to the *current* plan without a full LLM replan."""
+    if not planned_tasks:
+        return []
+    execution_plan = ExecutionPlan.model_validate_json(plan.graph_json)
+    existing_ids = {task.local_id for task in execution_plan.tasks}
+    to_add = [task for task in planned_tasks if task.local_id not in existing_ids]
+    if not to_add:
+        return []
+    execution_plan.tasks.extend(to_add)
+    plan.graph_json = execution_plan.model_dump_json()
+    db.add(plan)
+    db.flush()
+
+    task_repo = AgentTaskRepository(db)
+    existing_rows = task_repo.list_by_plan(plan.id)
+    sequence = (max((task.sequence for task in existing_rows), default=-1)) + 1
+    mcp_repo = McpServerRepository(db)
+    created: list[AgentTask] = []
+    for planned in to_add:
+        pairs = await mcp_registry.list_capabilities_for_role(mcp_repo, role=planned.role)
+        decision = await router.route(
+            planned_task=planned,
+            project_type=project.type,
+            specialist_agents_enabled=True,
+            skills_enabled=True,
+            mcp_enabled=True,
+            mcp_capability_ids=frozenset(cap.id for _server, cap in pairs),
+        )
+        created.append(
+            task_repo.create(
+                run_id=run.id,
+                plan_id=plan.id,
+                local_id=planned.local_id,
+                sequence=sequence,
+                title=planned.title,
+                role=decision.effective_role.value,
+                execution_kind=decision.execution_kind.value,
+                status="pending",
+                max_attempts=get_role_policy(decision.effective_role).default_max_attempts,
+                depends_on_json=json.dumps(planned.dependencies),
+                skill_id=decision.skill_id,
+                capability_id=decision.capability_id,
+                workspace_mode=_select_workspace_mode(
+                    decision.effective_role,
+                    planned,
+                    concurrent_write_task_count=1,
+                ),
+            )
+        )
+        sequence += 1
+    newly_ready = task_repo.refresh_readiness(plan.id)
+    for task in newly_ready:
+        events_bus.emit(
+            db,
+            run_id=run.id,
+            task_id=task.id,
+            event_type="task_ready",
+            payload={"local_id": task.local_id, "title": task.title},
+        )
+    return created
+
+
+async def _maybe_enqueue_judge_fix_from_completed_reviews(
+    db: Session,
+    *,
+    run: OrchestrationRun,
+    plan: OrchestrationPlan,
+    project: Project,
+    completed_task_ids: set[uuid.UUID | str],
+) -> list[AgentTask]:
+    """After a judge wave: one implementer punch-list, optional second judge, then ship."""
+    task_repo = AgentTaskRepository(db)
+    plan_tasks = task_repo.list_by_plan(plan.id)
+    if not can_enqueue_judge_fix(plan_tasks, max_rounds=settings.orchestration_max_review_rounds):
+        return []
+
+    execution_plan = ExecutionPlan.model_validate_json(plan.graph_json)
+    planned_by_id = {task.local_id: task for task in execution_plan.tasks}
+    completed_ids = {str(task_id) for task_id in completed_task_ids}
+    revising: list[AgentTask] = []
+    todos: list[str] = []
+    for task in plan_tasks:
+        if task.role not in _QA_JUDGE_ROLES or task.status != "completed":
+            continue
+        if str(task.id) not in completed_ids:
+            continue
+        claimed = parse_task_result_json(task.result_json)
+        item_todos = collect_todos_from_task_result(claimed)
+        verdict = verdict_from_task_result(claimed)
+        if verdict not in {"revise", "blocked"} and not item_todos:
+            continue
+        revising.append(task)
+        todos.extend(item_todos)
+
+    todos = collect_review_todos({"verdict": "revise", "todos": todos})
+    if not revising or not todos:
+        return []
+
+    room = settings.orchestration_max_plan_tasks - len(plan_tasks)
+    if room < 1:
+        return []
+
+    relevant_paths: list[str] = []
+    suggested_skills: list[str] = []
+    for qa_task in revising:
+        planned = planned_by_id.get(qa_task.local_id)
+        if planned is None:
+            continue
+        for dep_id in planned.dependencies:
+            dep = planned_by_id.get(dep_id)
+            if dep is not None:
+                relevant_paths.extend(dep.relevant_paths)
+        suggested_skills.extend(planned.suggested_skills)
+        if qa_task.skill_id:
+            suggested_skills.append(qa_task.skill_id)
+    if not relevant_paths:
+        relevant_paths = ["public/index.html", "Dockerfile"]
+    if not suggested_skills:
+        suggested_skills = ["visual_preview_review"]
+    # Preserve order while dropping duplicates.
+    relevant_paths = list(dict.fromkeys(relevant_paths))
+    suggested_skills = list(dict.fromkeys(suggested_skills))
+
+    planned_tasks = build_judge_fix_planned_tasks(
+        todos=todos,
+        qa_local_ids=[task.local_id for task in revising],
+        relevant_paths=relevant_paths,
+        suggested_skills=suggested_skills,
+        round_number=judge_fix_round_count(plan_tasks) + 1,
+        include_followup_qa=room >= 2,
+    )
+    created = await _append_planned_tasks(
+        db,
+        run=run,
+        plan=plan,
+        project=project,
+        planned_tasks=planned_tasks,
+        router=CapabilityRouter(skill_registry=skill_registry),
+    )
+    if created:
+        events_bus.emit(
+            db,
+            run_id=run.id,
+            event_type="trace",
+            payload={
+                "category": "scheduling",
+                "action": "judge_handoff",
+                "todos": todos,
+                "local_ids": [task.local_id for task in created],
+            },
+        )
     return created
 
 
@@ -1161,6 +1334,29 @@ async def _run_one_task(
             db.commit()
             return _TaskAttemptOutcome("waiting_for_user")
 
+        # A judge verdict is a punch list, not a run failure. Completing the QA node lets the
+        # scheduler hand TODOs to one implementer pass instead of Ralph-looping through replan.
+        if task.role in _QA_JUDGE_ROLES:
+            task_repo.transition(
+                task,
+                "completed",
+                attempt=task.attempt + 1,
+                accepted_commit_sha=outcome.accepted_commit_sha,
+            )
+            events_bus.emit(
+                db,
+                run_id=run.id,
+                task_id=task.id,
+                event_type="task_completed",
+                payload={
+                    "local_id": task.local_id,
+                    "commit_sha": outcome.accepted_commit_sha,
+                    "judge_handoff": True,
+                },
+            )
+            db.commit()
+            return _TaskAttemptOutcome("completed")
+
         error_message = "; ".join(
             f.message for f in outcome.validation_result.findings if not f.passed
         ) or (agent_result.error or "validation did not accept this attempt")
@@ -1732,6 +1928,7 @@ async def _run_orchestration_inner(
             db = db_factory()
             run = OrchestrationRunRepository(db).get(run_id)
             project = db.query(Project).filter(Project.id == project_id).one_or_none()
+            plan = OrchestrationPlanRepository(db).get(plan_id)
 
             stopped = next((r for r in results if r[1].signal == "run_should_stop"), None)
             if stopped is not None:
@@ -1772,6 +1969,17 @@ async def _run_orchestration_inner(
                     )
                 db.commit()
                 return
+
+            if run is not None and plan is not None and project is not None:
+                await _maybe_enqueue_judge_fix_from_completed_reviews(
+                    db,
+                    run=run,
+                    plan=plan,
+                    project=project,
+                    completed_task_ids={
+                        tid for tid, outcome, _ in results if outcome.signal == "completed"
+                    },
+                )
 
             # If several wave members request a replan at once, the first (wave order) is used -
             # replanning replaces the rest of the plan wholesale regardless of how many tasks

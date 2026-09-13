@@ -437,6 +437,31 @@ class TestSkillExecutor:
         assert "mobile CTA below fold" in result.task_result.unresolved
 
     @pytest.mark.asyncio
+    async def test_visual_review_todos_are_handed_to_implementer_first(self) -> None:
+        provider = _FakeCapabilityProvider(
+            CapabilityResult(
+                status="failed",
+                error="review verdict=revise",
+                output={
+                    "review": {
+                        "verdict": "revise",
+                        "todos": ["public/styles.css: убери overflow на 390px"],
+                        "critical_issues": [],
+                        "major_issues": ["generic hero"],
+                        "recommended_fixes": ["rework composition"],
+                    }
+                },
+            )
+        )
+        executor = SkillExecutor(provider)
+        contract = _contract(allowed_skills=["visual_preview_review"])
+
+        result = await executor.execute(contract, _task_context(), cancellation=None)
+
+        assert result.task_result.status == "partial"
+        assert result.task_result.unresolved[0] == "public/styles.css: убери overflow на 390px"
+
+    @pytest.mark.asyncio
     async def test_runtime_health_result_only_for_that_specific_skill(self) -> None:
         provider = _FakeCapabilityProvider(
             CapabilityResult(status="completed", output={"restart_count": 0})

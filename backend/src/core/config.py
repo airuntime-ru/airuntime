@@ -115,8 +115,13 @@ class Settings(BaseSettings):
     # chunks against one shared workspace.
     orchestration_max_plan_tasks: int = 16
     # Loop-detection ceiling (failure_policy.py) - a run that would need more replans than this
-    # to converge stops and asks the user instead of grinding forever.
+    # to converge stops and asks the user instead of grinding forever. Build/compile failures
+    # still replan; QA taste is no longer a Ralph loop (see orchestration_max_review_rounds).
     orchestration_max_replans: int = 5
+    # After the first independent QA verdict the engine may enqueue at most this many
+    # implementer fix rounds (each optionally followed by one more judge pass). 1 = judge →
+    # TODO list → implementer → optional second judge → ship, even if that judge still revises.
+    orchestration_max_review_rounds: int = 1
     orchestration_max_task_attempts: int = 3
     # None = no per-run cap beyond the user's own credit balance (billing.py still gates that).
     orchestration_default_credit_budget: int | None = None

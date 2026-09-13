@@ -44,7 +44,10 @@ _SYSTEM_PROMPT = """Ты - независимый QA-лид и product reviewer 
 
 Не ставь pass по обещанию автора или потому что проект «в целом похож». Недоказанный,
 монолитный, шаблонный или неполный критический сценарий = revise. blocked — только когда
-проверке объективно не хватает инфраструктуры/секрета."""
+проверке объективно не хватает инфраструктуры/секрета.
+
+При revise заполни todos 3-8 конкретными пунктами (файл/модуль + что сделать). Не предлагай
+переписать продукт с нуля. Платформа отдаст этот список исполнителю один раз."""
 
 _TEXT_SUFFIXES = {
     ".css",
@@ -181,6 +184,15 @@ def _quality_gate(review: ReviewResult, *, missing_paths: list[str]) -> ReviewRe
         and not deterministic
     ):
         return review
+    extra_todos: list[str] = []
+    if missing_paths:
+        extra_todos.append(
+            "Добавь недостающие обязательные файлы проекта: " + ", ".join(missing_paths)
+        )
+    extra_todos.extend(
+        f"Закрой разрыв по {item.split('=')[0]}: доведи сценарий до рабочего кода, не заглушки."
+        for item in failed
+    )
     return review.model_copy(
         update={
             "verdict": "blocked" if review.verdict == "blocked" else "revise",
@@ -189,6 +201,7 @@ def _quality_gate(review: ReviewResult, *, missing_paths: list[str]) -> ReviewRe
                 *deterministic,
                 *[f"quality threshold not met: {item}" for item in failed],
             ],
+            "todos": review.todos or extra_todos,
         }
     )
 

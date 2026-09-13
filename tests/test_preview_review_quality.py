@@ -66,3 +66,4 @@ def test_visual_score_below_floor_forces_revision() -> None:
 
     assert gated.verdict == "revise"
     assert any("visual_hierarchy=70" in issue for issue in gated.major_issues)
+    assert any("visual_hierarchy" in item for item in gated.todos)

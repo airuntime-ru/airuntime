@@ -528,9 +528,10 @@ class SkillExecutor:
         output = result.output if isinstance(result.output, dict) else {}
         review = output.get("review") if isinstance(output.get("review"), dict) else {}
         review_issues = [
+            *review.get("todos", []),
+            *review.get("recommended_fixes", []),
             *review.get("critical_issues", []),
             *review.get("major_issues", []),
-            *review.get("recommended_fixes", []),
         ]
         review_issues = [str(item) for item in review_issues if str(item).strip()]
         review_verdict = review.get("verdict")

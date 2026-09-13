@@ -49,7 +49,12 @@ _REVIEW_SYSTEM_PROMPT = """Ты - независимый арт-директор
 - нет битых изображений, 4xx/5xx, console errors и горизонтального скролла.
 
 Не ставь pass из вежливости. Generic, визуально бедный или недоказанный результат = revise.
-Ставь высокие баллы только когда это подтверждается скриншотами обоих viewport."""
+Ставь высокие баллы только когда это подтверждается скриншотами обоих viewport.
+
+При revise заполни todos 3-8 конкретными пунктами: файл или область + что сделать
+(например «public/index.html: подними CTA выше сгиба», «public/styles.css: убери
+горизонтальный overflow на 390px»). Не предлагай переписать сайт с нуля. Платформа
+отдаст этот список исполнителю один раз — не устраивай бесконечный цикл правок."""
 
 _ACCESSIBILITY_SYSTEM_PROMPT = """Ты - независимый ревьюер доступности (accessibility) на
 платформе AIRuntime. Тебе НЕ показывают код - только результат автоматической проверки в
@@ -80,16 +85,34 @@ def _deterministic_gate(preview: PreviewResult) -> ReviewResult | None:
             verdict="blocked", critical_issues=list(preview.fatal_errors) or ["preview failed"]
         )
     if any(page.broken_images for page in preview.pages):
-        return ReviewResult(verdict="revise", major_issues=["broken images detected in preview"])
+        return ReviewResult(
+            verdict="revise",
+            major_issues=["broken images detected in preview"],
+            todos=[
+                "Почини битые изображения: поправь src/пути или замени ассеты, чтобы preview не показывал broken images."
+            ],
+        )
     deterministic_issues: list[str] = []
+    deterministic_todos: list[str] = []
     if any(page.console_errors for page in preview.pages):
         deterministic_issues.append("browser console errors detected")
+        deterministic_todos.append("Убери ошибки в browser console, которые видны в preview.")
     if any(blocking_network_errors(page.network_errors) for page in preview.pages):
         deterministic_issues.append("4xx/5xx or failed network requests detected")
+        deterministic_todos.append(
+            "Убери 4xx/5xx и failed network requests из preview (локальные ассеты, без внешних CDN)."
+        )
     if any(blocking_overflow_elements(page.overflow_elements) for page in preview.pages):
         deterministic_issues.append("horizontal overflow detected")
+        deterministic_todos.append(
+            "Убери горизонтальный overflow документа на desktop и mobile (ширина контента не должна превышать viewport)."
+        )
     if deterministic_issues:
-        return ReviewResult(verdict="revise", major_issues=deterministic_issues)
+        return ReviewResult(
+            verdict="revise",
+            major_issues=deterministic_issues,
+            todos=deterministic_todos,
+        )
     return None
 
 
@@ -140,6 +163,10 @@ def _apply_score_gate(review: ReviewResult, *, floors: dict[str, int]) -> Review
     if not failed and not hard_issues and review.verdict == "pass":
         return review
     additions = [f"quality threshold not met: {item}" for item in failed]
+    score_todos = [
+        f"Подтяни {item.split('=')[0]} по скриншотам: конкретная композиция, типографика или copy, не общий редизайн."
+        for item in failed
+    ]
     return review.model_copy(
         update={
             "verdict": "blocked" if review.verdict == "blocked" else "revise",
@@ -148,6 +175,7 @@ def _apply_score_gate(review: ReviewResult, *, floors: dict[str, int]) -> Review
                 *review.recommended_fixes,
                 *[f"Raise {item.split('=')[0]} above the review threshold" for item in failed],
             ],
+            "todos": review.todos or score_todos,
         }
     )
 

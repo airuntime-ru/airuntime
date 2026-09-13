@@ -325,6 +325,13 @@ class ContextEngine:
                     claimed = json.loads(task.result_json)
                     summary = str(claimed.get("summary", ""))[:800]
                     key_outputs = [str(f) for f in claimed.get("claimed_changed_files", [])][:20]
+                    unresolved = [
+                        str(item).strip()
+                        for item in claimed.get("unresolved", [])
+                        if str(item).strip()
+                    ][:8]
+                    if unresolved:
+                        summary = (summary + " TODO судьи: " + " | ".join(unresolved))[:800]
                 except (ValueError, TypeError):
                     pass
             results.append(

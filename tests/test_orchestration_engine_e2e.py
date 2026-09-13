@@ -1351,3 +1351,153 @@ class TestEnsurePreviewAndRuntimeEvidence:
             '"ok": true' in (task.evidence_json or "").lower()
             or '"ok":true' in (task.evidence_json or "").lower()
         )
+
+
+def _website_with_qa_plan(user_message: str) -> ExecutionPlan:
+    return ExecutionPlan(
+        goal=user_message,
+        complexity="compound",
+        tasks=[
+            PlannedTask(
+                local_id="main",
+                title="Сделать сайт",
+                role=SpecialistRole.IMPLEMENTER,
+                goal=user_message,
+                reason="основная реализация",
+                write_scope="full_workspace",
+                relevant_paths=["public/index.html"],
+                acceptance_criteria=[
+                    AcceptanceCriterion(
+                        id="main_build",
+                        description="build succeeds",
+                        verification_method="build",
+                    )
+                ],
+            ),
+            PlannedTask(
+                local_id="qa",
+                title="Проверить сайт",
+                role=SpecialistRole.QA_REVIEWER,
+                goal="Независимый visual review",
+                reason="судья",
+                dependencies=["main"],
+                suggested_skills=["visual_preview_review"],
+                acceptance_criteria=[
+                    AcceptanceCriterion(
+                        id="qa_visual",
+                        description="preview reviewed",
+                        verification_method="llm_review",
+                    )
+                ],
+            ),
+        ],
+        estimated_budget=ExecutionBudget(),
+    )
+
+
+@dataclass
+class _JudgeScriptExecutor:
+    contracts: list = field(default_factory=list)
+    qa_calls: int = 0
+    implementer_calls: int = 0
+
+    async def execute(self, contract, context: TaskContext, cancellation) -> AgentExecutionResult:
+        self.contracts.append(contract)
+        if contract.role == SpecialistRole.QA_REVIEWER:
+            self.qa_calls += 1
+            todo = (
+                "Убери горизонтальный скролл в hero на 390px"
+                if self.qa_calls == 1
+                else "Всё ещё мало воздуха в секциях"
+            )
+            return AgentExecutionResult(
+                task_result=TaskResult(
+                    status="partial",
+                    summary=f"skill visual_preview_review: failed; review=revise; {todo}",
+                    unresolved=[todo],
+                )
+            )
+        self.implementer_calls += 1
+        (context.workspace_root / f"output_{self.implementer_calls}.txt").write_text(
+            f"attempt {self.implementer_calls}", encoding="utf-8"
+        )
+        return _ok_result()
+
+
+class TestJudgeTodoHandoff:
+    @pytest.mark.asyncio
+    async def test_first_revise_injects_implementer_todos_then_ships_after_second_revise(
+        self, db: Session, db_factory, project: Project, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from src.services.orchestration.planner import PlanGenerationResult
+
+        async def _generate_plan(**kwargs):  # noqa: ANN003
+            return PlanGenerationResult(
+                plan=_website_with_qa_plan(kwargs["user_message"]),
+                source="heuristic_simple",
+            )
+
+        monkeypatch.setattr(engine, "generate_plan", _generate_plan)
+        fake = _JudgeScriptExecutor()
+        monkeypatch.setattr(engine, "_build_executor", lambda kind, *, db, mcp_repo: fake)
+        run = _make_run(db, project, original_request="Сделай лендинг для кофейни")
+        db.commit()
+
+        await engine.run_orchestration(
+            run.id, db_factory=db_factory, provider_name="openai", model="m", api_key="k"
+        )
+
+        db.expire_all()
+        refreshed = OrchestrationRunRepository(db).get(run.id)
+        assert refreshed.status == "completed"
+        tasks = AgentTaskRepository(db).list_by_run(run.id)
+        local_ids = [task.local_id for task in tasks]
+        assert local_ids == ["main", "qa", "judge_fix_1", "judge_qa_1"]
+        assert all(task.status == "completed" for task in tasks)
+        assert fake.qa_calls == 2
+        assert fake.implementer_calls == 2
+        fix_contract = next(
+            contract for contract in fake.contracts if "TODO судьи" in contract.task_goal
+        )
+        assert "Убери горизонтальный скролл в hero на 390px" in fix_contract.task_goal
+
+    @pytest.mark.asyncio
+    async def test_pass_verdict_does_not_enqueue_a_fix_round(
+        self, db: Session, db_factory, project: Project, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from src.services.orchestration.planner import PlanGenerationResult
+
+        async def _generate_plan(**kwargs):  # noqa: ANN003
+            return PlanGenerationResult(
+                plan=_website_with_qa_plan(kwargs["user_message"]),
+                source="heuristic_simple",
+            )
+
+        class _PassingJudge(_JudgeScriptExecutor):
+            async def execute(self, contract, context, cancellation):
+                if contract.role == SpecialistRole.QA_REVIEWER:
+                    self.qa_calls += 1
+                    return AgentExecutionResult(
+                        task_result=TaskResult(
+                            status="completed",
+                            summary="skill visual_preview_review: completed; review=pass",
+                        )
+                    )
+                return await super().execute(contract, context, cancellation)
+
+        monkeypatch.setattr(engine, "generate_plan", _generate_plan)
+        fake = _PassingJudge()
+        monkeypatch.setattr(engine, "_build_executor", lambda kind, *, db, mcp_repo: fake)
+        run = _make_run(db, project, original_request="Сделай лендинг для кофейни")
+        db.commit()
+
+        await engine.run_orchestration(
+            run.id, db_factory=db_factory, provider_name="openai", model="m", api_key="k"
+        )
+
+        db.expire_all()
+        tasks = AgentTaskRepository(db).list_by_run(run.id)
+        assert [task.local_id for task in tasks] == ["main", "qa"]
+        assert OrchestrationRunRepository(db).get(run.id).status == "completed"
+        assert fake.qa_calls == 1
+        assert fake.implementer_calls == 1

@@ -121,3 +121,10 @@ class ReviewResult(BaseModel):
     major_issues: list[str] = Field(default_factory=list)
     minor_issues: list[str] = Field(default_factory=list)
     recommended_fixes: list[str] = Field(default_factory=list)
+    todos: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Short actionable punch list for the implementer (file or area + what to change). "
+            "Required when verdict is revise. Do not ask to rewrite the whole product."
+        ),
+    )

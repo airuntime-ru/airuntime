@@ -21,6 +21,7 @@ Module map:
   validation.py            - scope/static/build/product/preview/runtime validation levels
   failure_policy.py        - failure classification + retry/repair/replan/rollback decisions
   replanner.py              - builds new plan versions from failures, preserves accepted work
+  review_handoff.py         - QA verdict → implementer TODO list (1-2 review rounds, no Ralph loop)
   workspace_isolation.py    - DB-backed leases + git worktree isolation
   git_transaction.py        - base_sha -> lease -> execute -> evidence -> validate -> commit/rollback
   executors.py               - AgentExecutor protocol + Codex/HTTP/deterministic/skill/mcp executors
