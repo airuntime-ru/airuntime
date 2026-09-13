@@ -686,6 +686,7 @@ export type BillingSummaryType = {
   billing_period_end: string | null;
   plan: PlanType | null;
   pending_plan_request: PlanChangeRequestType | null;
+  robokassa_enabled: boolean;
 };
 
 export type CreditTopUpType = {
@@ -695,6 +696,7 @@ export type CreditTopUpType = {
   status: "pending" | "paid" | "cancelled";
   created_at: string;
   paid_at: string | null;
+  payment_url: string | null;
 };
 
 export async function listPlans(): Promise<PlanType[]> {

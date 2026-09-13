@@ -367,6 +367,40 @@ def request_topup(db: Session, user: User, credits: int) -> CreditTopUp:
     return invoice
 
 
+def credit_paid_topup(db: Session, invoice: CreditTopUp, *, now: datetime) -> None:
+    """Grant credits for a paid invoice. Idempotent: no-op if already credited or unpaid."""
+    if invoice.status != "paid" or invoice.credited_at is not None:
+        return
+    user = db.get(User, invoice.user_id)
+    if not user:
+        return
+    user.credits_balance += invoice.credits
+    invoice.credited_at = now
+    db.add(user)
+    db.add(invoice)
+    record_ledger_entry(db, user, amount=invoice.credits, reason="topup")
+    content = credits_topup_paid_email(
+        credits=invoice.credits,
+        amount_rub=invoice.amount_rub,
+        new_balance=user.credits_balance,
+    )
+    send_branded_email(
+        to=user.email, subject=content.subject, plain=content.plain, html=content.html
+    )
+
+
+def mark_topup_paid(db: Session, invoice: CreditTopUp, *, now: datetime | None = None) -> None:
+    """Mark an invoice paid and credit immediately. Safe to call repeatedly."""
+    if invoice.status == "cancelled":
+        raise ValueError("cancelled invoice cannot be marked paid")
+    moment = now or datetime.now(UTC)
+    if invoice.status != "paid":
+        invoice.status = "paid"
+        invoice.paid_at = moment
+        db.add(invoice)
+    credit_paid_topup(db, invoice, now=moment)
+
+
 def _renew_period_if_due(db: Session, user: User, *, now: datetime) -> None:
     if not user.billing_period_end or user.billing_period_end > now:
         return
@@ -452,22 +486,7 @@ def _credit_paid_topups(db: Session, *, now: datetime) -> None:
         .all()
     )
     for invoice in pending:
-        user = db.get(User, invoice.user_id)
-        if not user:
-            continue
-        user.credits_balance += invoice.credits
-        invoice.credited_at = now
-        db.add(user)
-        db.add(invoice)
-        record_ledger_entry(db, user, amount=invoice.credits, reason="topup")
-        content = credits_topup_paid_email(
-            credits=invoice.credits,
-            amount_rub=invoice.amount_rub,
-            new_balance=user.credits_balance,
-        )
-        send_branded_email(
-            to=user.email, subject=content.subject, plain=content.plain, html=content.html
-        )
+        credit_paid_topup(db, invoice, now=now)
 
 
 def run_billing_maintenance(db: Session) -> None:

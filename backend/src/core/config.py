@@ -165,11 +165,25 @@ class Settings(BaseSettings):
     # Optional shared secret for POST /analytics/batch. Empty = accept all (dev default).
     analytics_ingest_key: str | None = None
 
+    # Robokassa merchant credentials. Empty = invoices stay manual (admin marks paid).
+    # Password #1 signs the payment form and Success URL; #2 verifies Result URL;
+    # #3 is the XML API password (status checks / refunds) — stored for later use.
+    robokassa_merchant_login: str | None = None
+    robokassa_password1: str | None = None
+    robokassa_password2: str | None = None
+    robokassa_password3: str | None = None
+    robokassa_test_mode: bool = False
+    robokassa_hash_algorithm: str = "md5"
+
     @field_validator(
         "s3_endpoint_url",
         "s3_public_endpoint_url",
         "openai_base_url",
         "analytics_ingest_key",
+        "robokassa_merchant_login",
+        "robokassa_password1",
+        "robokassa_password2",
+        "robokassa_password3",
         mode="before",
     )
     @classmethod
@@ -189,6 +203,12 @@ class Settings(BaseSettings):
     @property
     def resolved_api_url(self) -> str:
         return self.api_url
+
+    @property
+    def robokassa_enabled(self) -> bool:
+        return bool(
+            self.robokassa_merchant_login and self.robokassa_password1 and self.robokassa_password2
+        )
 
     def build_project_url(self, subdomain: str) -> str:
         return f"https://{subdomain}.{self.resolved_app_domain}"

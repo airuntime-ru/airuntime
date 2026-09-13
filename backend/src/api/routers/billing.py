@@ -1,11 +1,14 @@
+import logging
 import uuid
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import PlainTextResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from src.api.dependencies.auth import get_current_user
+from src.core.config import settings
 from src.db.models.credit_ledger import CreditLedgerEntry
 from src.db.models.credit_topup import CreditTopUp
 from src.db.models.plan import Plan
@@ -14,6 +17,7 @@ from src.db.models.user import User
 from src.db.session import get_db
 from src.services.billing import (
     list_ledger,
+    mark_topup_paid,
     plan_grant_credits,
     request_topup,
     usage_credits_to_rub,
@@ -25,6 +29,17 @@ from src.services.plan_requests import (
     get_pending_request,
     list_requests,
 )
+from src.services.robokassa import (
+    amounts_match,
+    extract_shp,
+    parse_inv_id,
+    payment_url_for_invoice,
+    result_signature,
+    signatures_match,
+    success_signature,
+)
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -73,7 +88,7 @@ def _plan_request_response(row: PlanChangeRequest, plans: dict[str, Plan]) -> di
     }
 
 
-def _topup_response(invoice: CreditTopUp) -> dict:
+def _topup_response(invoice: CreditTopUp, *, email: str | None = None) -> dict:
     return {
         "id": str(invoice.id),
         "credits": invoice.credits,
@@ -81,6 +96,7 @@ def _topup_response(invoice: CreditTopUp) -> dict:
         "status": invoice.status,
         "created_at": invoice.created_at,
         "paid_at": invoice.paid_at,
+        "payment_url": payment_url_for_invoice(invoice, email=email),
     }
 
 
@@ -129,6 +145,7 @@ def get_my_billing(
         "pending_plan_request": (
             _plan_request_response(pending, _plan_index(db)) if pending else None
         ),
+        "robokassa_enabled": settings.robokassa_enabled,
     }
 
 
@@ -139,7 +156,7 @@ def create_topup(
     db: Session = Depends(get_db),
 ) -> dict:
     invoice = request_topup(db, current_user, payload.credits)
-    return _topup_response(invoice)
+    return _topup_response(invoice, email=current_user.email)
 
 
 @router.get("/topups")
@@ -152,7 +169,84 @@ def list_topups(
         .order_by(CreditTopUp.created_at.desc())
         .all()
     )
-    return [_topup_response(row) for row in rows]
+    return [_topup_response(row, email=current_user.email) for row in rows]
+
+
+async def _robokassa_payload(request: Request) -> dict[str, str]:
+    payload = {key: value for key, value in request.query_params.items()}
+    if request.method == "POST":
+        form = await request.form()
+        for key, value in form.items():
+            payload[str(key)] = str(value)
+    return payload
+
+
+def _profile_redirect(status: str, method: str) -> RedirectResponse:
+    url = f"{settings.resolved_frontend_url.rstrip('/')}/app/profile?payment={status}"
+    code = 303 if method == "POST" else 302
+    return RedirectResponse(url, status_code=code)
+
+
+@router.api_route("/robokassa/result", methods=["GET", "POST"])
+async def robokassa_result(request: Request, db: Session = Depends(get_db)) -> PlainTextResponse:
+    """Robokassa Result URL: server-to-server notice that money was captured.
+
+    Must answer with the exact body `OK{InvId}` or Robokassa will retry.
+    """
+    if not settings.robokassa_password2:
+        logger.error("Robokassa Result URL called but ROBOKASSA_PASSWORD2 is not set")
+        return PlainTextResponse("bad request", status_code=400)
+
+    payload = await _robokassa_payload(request)
+    out_sum = (payload.get("OutSum") or "").strip()
+    inv_id = parse_inv_id(payload.get("InvId"))
+    if not out_sum or inv_id is None:
+        logger.warning("Robokassa result missing OutSum/InvId")
+        return PlainTextResponse("bad request", status_code=400)
+
+    expected = result_signature(out_sum=out_sum, inv_id=inv_id, shp=extract_shp(payload))
+    if not signatures_match(expected, payload.get("SignatureValue")):
+        logger.warning("Robokassa result inv_id=%s invalid signature", inv_id)
+        return PlainTextResponse("bad signature", status_code=400)
+
+    invoice = db.query(CreditTopUp).filter(CreditTopUp.inv_id == inv_id).first()
+    if invoice is None:
+        logger.warning("Robokassa result inv_id=%s invoice not found", inv_id)
+        return PlainTextResponse("bad request", status_code=400)
+    if invoice.status == "cancelled":
+        logger.warning("Robokassa result inv_id=%s invoice cancelled", inv_id)
+        return PlainTextResponse("bad request", status_code=400)
+    if not amounts_match(out_sum, invoice.amount_rub):
+        logger.warning(
+            "Robokassa result inv_id=%s amount mismatch out_sum=%s expected=%s",
+            inv_id,
+            out_sum,
+            invoice.amount_rub,
+        )
+        return PlainTextResponse("bad request", status_code=400)
+
+    mark_topup_paid(db, invoice)
+    db.commit()
+    logger.info("Robokassa result inv_id=%s credited", inv_id)
+    return PlainTextResponse(f"OK{inv_id}")
+
+
+@router.api_route("/robokassa/success", methods=["GET", "POST"])
+async def robokassa_success(request: Request) -> RedirectResponse:
+    payload = await _robokassa_payload(request)
+    out_sum = (payload.get("OutSum") or "").strip()
+    inv_id = parse_inv_id(payload.get("InvId"))
+    if settings.robokassa_password1 and out_sum and inv_id is not None:
+        expected = success_signature(out_sum=out_sum, inv_id=inv_id, shp=extract_shp(payload))
+        if not signatures_match(expected, payload.get("SignatureValue")):
+            logger.warning("Robokassa success inv_id=%s invalid signature", inv_id)
+            return _profile_redirect("fail", request.method)
+    return _profile_redirect("success", request.method)
+
+
+@router.api_route("/robokassa/fail", methods=["GET", "POST"])
+async def robokassa_fail(request: Request) -> RedirectResponse:
+    return _profile_redirect("fail", request.method)
 
 
 def _plan_index(db: Session) -> dict[str, Plan]:

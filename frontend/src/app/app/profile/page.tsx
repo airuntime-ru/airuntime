@@ -122,6 +122,7 @@ export default function ProfilePage() {
   const [confirmPlan, setConfirmPlan] = useState<PlanType | null>(null);
   const [planBusy, setPlanBusy] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
+  const [paymentNotice, setPaymentNotice] = useState<"success" | "fail" | null>(null);
 
   const loadUsage = useCallback(async (page: number, direction: LedgerDirection) => {
     setUsageLoading(true);
@@ -153,6 +154,22 @@ export default function ProfilePage() {
   }, [loadBilling]);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const payment = params.get("payment");
+    if (payment !== "success" && payment !== "fail") return;
+    setPaymentNotice(payment);
+    window.history.replaceState({}, "", window.location.pathname);
+    if (payment !== "success") return;
+    let tries = 0;
+    const poll = window.setInterval(() => {
+      tries += 1;
+      void loadBilling();
+      if (tries >= 6) window.clearInterval(poll);
+    }, 2000);
+    return () => window.clearInterval(poll);
+  }, [loadBilling]);
+
+  useEffect(() => {
     const timer = window.setTimeout(() => {
       void loadUsage(usagePage, usageDirection);
     }, 0);
@@ -170,7 +187,11 @@ export default function ProfilePage() {
     setTopupBusy(true);
     setTopupError(null);
     try {
-      await createTopUp(topupCredits);
+      const invoice = await createTopUp(topupCredits);
+      if (invoice.payment_url) {
+        window.location.assign(invoice.payment_url);
+        return;
+      }
       setUsagePage(0);
       await loadBilling();
       await loadUsage(0, usageDirection);
@@ -224,6 +245,17 @@ export default function ProfilePage() {
       </header>
 
       {error ? <p className="text-sm text-rose-600">{error}</p> : null}
+
+      {paymentNotice === "success" ? (
+        <p className="rounded-[0.7rem] border border-emerald-500/25 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          Оплата прошла. Кредиты появятся на балансе в течение нескольких секунд.
+        </p>
+      ) : null}
+      {paymentNotice === "fail" ? (
+        <p className="rounded-[0.7rem] border border-rose-500/25 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+          Оплата не завершена. Можно попробовать ещё раз — счёт останется в списке, пока его не оплатите.
+        </p>
+      ) : null}
 
       {profile ? (
         <Card hover={false} className="flex flex-wrap items-center gap-x-4 gap-y-3 p-5">
@@ -336,13 +368,23 @@ export default function ProfilePage() {
                     <span className="font-medium text-[var(--ar-black)]">
                       {invoice.credits.toLocaleString("ru-RU")} кредитов · {invoice.amount_rub} ₽
                     </span>
-                    <span
-                      className={cn(
-                        "rounded-full border px-2.5 py-1 text-xs font-semibold",
-                        TOPUP_STATUS_TONE[invoice.status]
-                      )}
-                    >
-                      {TOPUP_STATUS_LABEL[invoice.status]}
+                    <span className="flex items-center gap-2">
+                      {invoice.status === "pending" && invoice.payment_url ? (
+                        <a
+                          href={invoice.payment_url}
+                          className="text-xs font-semibold text-[var(--ar-sky)] hover:underline"
+                        >
+                          Оплатить
+                        </a>
+                      ) : null}
+                      <span
+                        className={cn(
+                          "rounded-full border px-2.5 py-1 text-xs font-semibold",
+                          TOPUP_STATUS_TONE[invoice.status]
+                        )}
+                      >
+                        {TOPUP_STATUS_LABEL[invoice.status]}
+                      </span>
                     </span>
                   </li>
                 ))}
@@ -454,7 +496,11 @@ export default function ProfilePage() {
         open={topupOpen}
         onClose={() => setTopupOpen(false)}
         title="Пополнить баланс"
-        description="Выберите объём кредитов. После создания счёта администратор подтвердит оплату вручную и кредиты зачислятся автоматически."
+        description={
+          billing?.robokassa_enabled
+            ? "Выберите объём кредитов. Откроется оплата через Robokassa — после успешного платежа кредиты зачислятся автоматически."
+            : "Выберите объём кредитов. После создания счёта администратор подтвердит оплату вручную и кредиты зачислятся автоматически."
+        }
       >
         <div className="space-y-4">
           <div className="grid grid-cols-3 gap-2">
@@ -486,7 +532,13 @@ export default function ProfilePage() {
               Отмена
             </Button>
             <Button variant="accent" onClick={() => void onRequestTopup()} disabled={topupBusy}>
-              {topupBusy ? "Создаём счёт…" : "Создать счёт"}
+              {topupBusy
+                ? billing?.robokassa_enabled
+                  ? "Переходим к оплате…"
+                  : "Создаём счёт…"
+                : billing?.robokassa_enabled
+                  ? "Оплатить"
+                  : "Создать счёт"}
             </Button>
           </div>
         </div>

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Identity, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -9,12 +9,19 @@ from src.db.session import Base
 
 
 class CreditTopUp(Base):
-    """A manually-fulfilled invoice for extra credits: user requests it, admin marks it paid
-    and the worker's billing sweep credits the balance and emails the confirmation."""
+    """Invoice for extra credits.
+
+    Paid either by Robokassa Result URL (automatic) or by an admin marking it paid. The
+    worker sweep still credits any row that is paid but missing `credited_at`.
+    """
 
     __tablename__ = "credit_topups"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Robokassa InvId must be a 32-bit integer; this is independent of the UUID primary key.
+    inv_id: Mapped[int] = mapped_column(
+        Integer, Identity(always=False), unique=True, nullable=False
+    )
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
     )

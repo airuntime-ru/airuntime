@@ -98,6 +98,12 @@ services:
       S3_ACCESS_KEY: airuntime
       S3_SECRET_KEY: airuntime-secret
       S3_BUCKET: airuntime-files
+      ROBOKASSA_MERCHANT_LOGIN: ${ROBOKASSA_MERCHANT_LOGIN:-}
+      ROBOKASSA_PASSWORD1: ${ROBOKASSA_PASSWORD1:-}
+      ROBOKASSA_PASSWORD2: ${ROBOKASSA_PASSWORD2:-}
+      ROBOKASSA_PASSWORD3: ${ROBOKASSA_PASSWORD3:-}
+      ROBOKASSA_TEST_MODE: ${ROBOKASSA_TEST_MODE:-true}
+      ROBOKASSA_HASH_ALGORITHM: ${ROBOKASSA_HASH_ALGORITHM:-md5}
     volumes:
       - airruntime_projects_data:/data/airruntime-projects
     ports:

@@ -260,6 +260,7 @@ class CreditTopUp(models.Model):
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    inv_id = models.IntegerField(null=True, blank=True)
     user = models.ForeignKey(AppUser, on_delete=models.DO_NOTHING, db_column="user_id")
     credits = models.IntegerField()
     amount_rub = models.IntegerField()

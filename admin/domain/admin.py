@@ -298,10 +298,10 @@ class DomainPlanAdmin(admin.ModelAdmin):
 
 @admin.register(DomainCreditTopUp)
 class DomainCreditTopUpAdmin(admin.ModelAdmin):
-    list_display = ("user", "credits", "amount_rub", "status", "created_at", "paid_at")
+    list_display = ("user", "inv_id", "credits", "amount_rub", "status", "created_at", "paid_at")
     list_filter = ("status",)
     search_fields = ("user__email",)
-    readonly_fields = ("id", "user", "credits", "amount_rub", "created_at", "credited_at")
+    readonly_fields = ("id", "inv_id", "user", "credits", "amount_rub", "created_at", "credited_at")
     actions = ["mark_paid", "mark_cancelled"]
 
     @admin.action(description="Отметить как оплаченные")
