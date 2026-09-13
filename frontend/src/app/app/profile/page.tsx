@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   CheckCircle2,
   ChevronLeft,
@@ -122,7 +123,9 @@ export default function ProfilePage() {
   const [confirmPlan, setConfirmPlan] = useState<PlanType | null>(null);
   const [planBusy, setPlanBusy] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
-  const [paymentNotice, setPaymentNotice] = useState<"success" | "fail" | null>(null);
+  const searchParams = useSearchParams();
+  const payment = searchParams.get("payment");
+  const paymentNotice = payment === "success" || payment === "fail" ? payment : null;
 
   const loadUsage = useCallback(async (page: number, direction: LedgerDirection) => {
     setUsageLoading(true);
@@ -154,12 +157,7 @@ export default function ProfilePage() {
   }, [loadBilling]);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const payment = params.get("payment");
-    if (payment !== "success" && payment !== "fail") return;
-    setPaymentNotice(payment);
-    window.history.replaceState({}, "", window.location.pathname);
-    if (payment !== "success") return;
+    if (paymentNotice !== "success") return;
     let tries = 0;
     const poll = window.setInterval(() => {
       tries += 1;
@@ -167,7 +165,7 @@ export default function ProfilePage() {
       if (tries >= 6) window.clearInterval(poll);
     }, 2000);
     return () => window.clearInterval(poll);
-  }, [loadBilling]);
+  }, [paymentNotice, loadBilling]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {

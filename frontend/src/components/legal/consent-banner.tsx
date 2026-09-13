@@ -1,25 +1,30 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 import {
   getAnalyticsConsent,
   setAnalyticsConsent,
+  subscribeAnalyticsConsent,
   type AnalyticsConsent,
 } from "@/lib/consent";
+
+function readConsent(): AnalyticsConsent | null | "pending" {
+  return getAnalyticsConsent();
+}
+
+function pendingConsent(): AnalyticsConsent | null | "pending" {
+  return "pending";
+}
 
 /**
  * Asks for consent before product analytics / similar non-essential storage.
  * Necessary login tokens are set only after auth and are not gated here.
  */
 export function ConsentBanner() {
-  const [choice, setChoice] = useState<AnalyticsConsent | null | "pending">("pending");
-
-  useEffect(() => {
-    setChoice(getAnalyticsConsent());
-  }, []);
+  const choice = useSyncExternalStore(subscribeAnalyticsConsent, readConsent, pendingConsent);
 
   if (choice === "pending" || choice !== null) return null;
 
@@ -50,20 +55,14 @@ export function ConsentBanner() {
           <Button
             variant="outline"
             className="w-full sm:w-auto"
-            onClick={() => {
-              setAnalyticsConsent("denied");
-              setChoice("denied");
-            }}
+            onClick={() => setAnalyticsConsent("denied")}
           >
             Только необходимые
           </Button>
           <Button
             variant="accent"
             className="w-full sm:w-auto"
-            onClick={() => {
-              setAnalyticsConsent("granted");
-              setChoice("granted");
-            }}
+            onClick={() => setAnalyticsConsent("granted")}
           >
             Принять
           </Button>

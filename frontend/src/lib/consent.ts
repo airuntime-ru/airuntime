@@ -18,6 +18,15 @@ export function getAnalyticsConsent(): AnalyticsConsent | null {
   return null;
 }
 
+export function subscribeAnalyticsConsent(onChange: () => void): () => void {
+  window.addEventListener("airuntime:consent", onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    window.removeEventListener("airuntime:consent", onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
+
 export function setAnalyticsConsent(value: AnalyticsConsent): void {
   if (typeof window === "undefined") return;
   try {
