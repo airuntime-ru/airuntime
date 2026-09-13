@@ -59,7 +59,7 @@ from src.services.project_intent import (
     update_project_type_from_prompt,
 )
 from src.services.project_runtime import RunningProjectLimitError, block_project, unblock_project
-from src.services.project_services import is_likely_service_credential_key
+from src.services.project_services import user_facing_secret_keys
 from src.services.project_subdomain import (
     assert_subdomain_available,
     ensure_deploy_subdomain,
@@ -778,9 +778,10 @@ async def _orchestration_event_source(
                 .all()
             }
             lines = []
-            for key in payload.get("requested_secrets") or []:
-                if is_likely_service_credential_key(key, existing_service_kinds):
-                    continue
+            for key in user_facing_secret_keys(
+                list(payload.get("requested_secrets") or []),
+                service_kinds=existing_service_kinds,
+            ):
                 secret_row, created = ensure_secret_placeholder(
                     db, project, key, "Требуется для продолжения выполнения задачи"
                 )
@@ -792,7 +793,13 @@ async def _orchestration_event_source(
                     "\n\nЧтобы продолжить, заполните в настройках проекта "
                     "(вкладка «Настройки») эти значения:\n" + "\n".join(lines)
                 )
-            yield _sse_status("needs_configuration", "Нужны данные от вас", "error")
+                yield _sse_status("needs_configuration", "Нужны данные от вас", "error")
+            else:
+                yield append_visible(
+                    "\n\nАгент запросил данные, которые платформа создаёт сама. "
+                    "Напишите «продолжить» — секреты сервиса заполнять не нужно."
+                )
+                yield _sse_status("questions", "Нужен ответ от вас", "error")
         elif event_type == "waiting_for_user":
             reason = str(payload.get("reason") or "").strip().lower()
             detail = str(payload.get("detail") or "").strip()
@@ -805,12 +812,12 @@ async def _orchestration_event_source(
                 yield _sse_status("limit", "Закончились кредиты", "error")
             elif detail:
                 yield append_visible(f"\n\n{detail}")
-                yield _sse_status("needs_configuration", "Нужен ответ от вас", "error")
+                yield _sse_status("questions", "Нужен ответ от вас", "error")
             else:
                 yield append_visible(
                     "\n\nВыполнение приостановлено — нужно ваше действие, чтобы продолжить."
                 )
-                yield _sse_status("needs_configuration", "Нужен ответ от вас", "error")
+                yield _sse_status("questions", "Нужен ответ от вас", "error")
 
         if event_type in _CHAT_STREAM_STOPPING_EVENT_TYPES:
             terminal_event_type = event_type

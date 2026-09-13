@@ -47,13 +47,20 @@ def _blocking_network_errors(network_errors: list[str]) -> list[str]:
     return [entry for entry in network_errors if not _is_benign_cdn_network_error(entry)]
 
 
+def _is_document_horizontal_overflow(item: str) -> bool:
+    lower = item.lower()
+    return "scrollwidth" in lower or lower.startswith("document ")
+
+
 def _page_has_blocking_issues(page_result: dict) -> bool:
+    overflow = page_result.get("overflow_elements") or []
     return bool(
         page_result.get("console_errors")
         or _blocking_network_errors(page_result.get("network_errors") or [])
-        or page_result.get("overflow_elements")
+        or any(_is_document_horizontal_overflow(item) for item in overflow)
         or page_result.get("broken_images")
     )
+
 
 _OVERFLOW_SCRIPT = """
 () => {

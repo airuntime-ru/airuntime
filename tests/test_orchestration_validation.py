@@ -48,6 +48,16 @@ def _evidence(**overrides) -> TaskEvidence:  # noqa: ANN003
     return TaskEvidence(**overrides)
 
 
+class TestPathMatchesAny:
+    def test_env_does_not_match_env_example(self) -> None:
+        assert v.path_matches_any(".env", [".env"])
+        assert v.path_matches_any("config/.env", [".env"])
+        assert not v.path_matches_any(".env.example", [".env"])
+        assert not v.path_matches_any(".gitignore", [".git"])
+        assert v.path_matches_any(".git/config", [".git"])
+        assert v.path_matches_any("public/index.html", ["public"])
+
+
 class TestValidateScope:
     def test_changes_within_allowed_paths_pass(self) -> None:
         contract = _contract(allowed_paths=["public/"])
@@ -67,6 +77,18 @@ class TestValidateScope:
         findings = v.validate_scope(contract, evidence)
         critical = [f for f in findings if not f.passed and f.severity.value == "critical"]
         assert critical
+
+    def test_env_example_is_not_the_forbidden_env_file(self) -> None:
+        contract = _contract(allowed_paths=["*"], forbidden_paths=[".env", ".git"])
+        evidence = _evidence(changed_files=[".env.example", ".gitignore"])
+        findings = v.validate_scope(contract, evidence)
+        assert all(f.passed for f in findings)
+
+    def test_nested_env_file_is_still_forbidden(self) -> None:
+        contract = _contract(allowed_paths=["*"], forbidden_paths=[".env"])
+        evidence = _evidence(changed_files=["config/.env"])
+        findings = v.validate_scope(contract, evidence)
+        assert any(not f.passed and "forbidden" in f.message for f in findings)
 
     def test_readonly_role_git_diff_does_not_fail(self) -> None:
         contract = _contract(

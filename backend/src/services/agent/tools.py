@@ -611,6 +611,17 @@ class WorkspaceTools:
         key = key.strip()
         if not key:
             return ToolExecutionResult(ok=False, summary="key must not be empty")
+        from src.services.project_services import is_platform_managed_secret_key
+
+        if is_platform_managed_secret_key(key):
+            return ToolExecutionResult(
+                ok=False,
+                summary=(
+                    f"{key} is created by request_service, not filled in by the user. "
+                    "Call request_service for postgres/redis/mysql/mongo/rabbitmq and read "
+                    "the injected DATABASE_URL/REDIS_URL from the environment."
+                ),
+            )
         self.requested_secrets.append((key, reason.strip()))
         return ToolExecutionResult(
             ok=True,

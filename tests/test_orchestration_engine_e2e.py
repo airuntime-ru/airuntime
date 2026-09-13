@@ -520,6 +520,25 @@ class TestWaitingForSecret:
         assert resumed.status == "completed"
         assert fake.calls == 2
 
+    @pytest.mark.asyncio
+    async def test_database_url_secret_does_not_pause_the_run(
+        self, db: Session, db_factory, project: Project, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        run = _make_run(db, project, original_request="Сделай CRM с базой")
+        db.commit()
+        fake = _FakeExecutor(script=[_secret_request_result("DATABASE_URL"), _ok_result()])
+        _install_fake_executor(monkeypatch, fake)
+
+        await engine.run_orchestration(
+            run.id, db_factory=db_factory, provider_name="openai", model="m", api_key="k"
+        )
+
+        db.expire_all()
+        refreshed = OrchestrationRunRepository(db).get(run.id)
+        assert refreshed.status == "completed"
+        assert "waiting_for_secret" not in _events(db, run.id)
+        assert fake.calls == 2
+
 
 async def _two_task_plan(**kwargs):
     """Two independent Implementer tasks - shared by the budget tests, which need a second task

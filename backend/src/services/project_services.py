@@ -61,6 +61,63 @@ _CREDENTIAL_KEY_MARKERS = (
     "CONNECTION",
 )
 
+# Generic DB connection names the platform injects after request_service(postgres/mysql/mongo).
+# "POSTGRES" is not a substring of DATABASE_URL, so the kind-in-key check misses these.
+_GENERIC_DB_SECRET_KEYS = frozenset(
+    {
+        "DATABASE_URL",
+        "DATABASE_URI",
+        "DB_URL",
+        "DB_URI",
+        "DB_HOST",
+        "DB_PORT",
+        "DB_USER",
+        "DB_USERNAME",
+        "DB_PASSWORD",
+        "DB_NAME",
+    }
+)
+
+_PLATFORM_MANAGED_SECRET_KEYS = _GENERIC_DB_SECRET_KEYS | frozenset(
+    {
+        "POSTGRES_URL",
+        "POSTGRES_URI",
+        "POSTGRES_HOST",
+        "POSTGRES_PORT",
+        "POSTGRES_USER",
+        "POSTGRES_PASSWORD",
+        "POSTGRES_DB",
+        "PGHOST",
+        "PGPORT",
+        "PGUSER",
+        "PGPASSWORD",
+        "PGDATABASE",
+        "REDIS_URL",
+        "REDIS_URI",
+        "REDIS_HOST",
+        "REDIS_PORT",
+        "REDIS_PASSWORD",
+        "MYSQL_URL",
+        "MYSQL_HOST",
+        "MYSQL_PORT",
+        "MYSQL_USER",
+        "MYSQL_PASSWORD",
+        "MYSQL_ROOT_PASSWORD",
+        "MYSQL_DATABASE",
+        "MONGO_URL",
+        "MONGO_URI",
+        "MONGODB_URI",
+        "MONGO_HOST",
+        "MONGO_PASSWORD",
+        "RABBITMQ_URL",
+        "RABBITMQ_URI",
+        "RABBITMQ_HOST",
+        "RABBITMQ_DEFAULT_USER",
+        "RABBITMQ_DEFAULT_PASS",
+        "RABBITMQ_PASSWORD",
+    }
+)
+
 
 def is_likely_service_credential_key(key: str, service_kinds: set[str]) -> bool:
     """True if `key` looks like a credential/connection-detail for a service kind the project
@@ -69,12 +126,37 @@ def is_likely_service_credential_key(key: str, service_kinds: set[str]) -> bool:
     up automatically, and the secret request should be suppressed rather than shown to the user.
     """
     upper_key = key.upper()
+    db_kinds = service_kinds & {"postgres", "mysql", "mongo"}
+    if db_kinds and upper_key in _GENERIC_DB_SECRET_KEYS:
+        return True
     for kind in service_kinds:
         kind_upper = re.sub(r"[^A-Z0-9]+", "_", kind.upper()).strip("_")
         if kind_upper and kind_upper in upper_key:
             if any(marker in upper_key for marker in _CREDENTIAL_KEY_MARKERS):
                 return True
     return False
+
+
+def is_platform_managed_secret_key(key: str) -> bool:
+    """True for credentials the platform generates via request_service — never ask the user.
+
+    Unlike is_likely_service_credential_key, this does not require a ProjectService row:
+    agents often request DATABASE_URL / POSTGRES_PASSWORD *before* calling request_service,
+    which parked runs on empty secret placeholders ("просит несуществующие секреты").
+    """
+    upper_key = key.strip().upper()
+    if upper_key in _PLATFORM_MANAGED_SECRET_KEYS:
+        return True
+    return is_likely_service_credential_key(upper_key, set(KNOWN_PRESET_KINDS))
+
+
+def user_facing_secret_keys(keys: list[str], *, service_kinds: set[str] | None = None) -> list[str]:
+    kinds = service_kinds or set()
+    return [
+        key
+        for key in keys
+        if not (is_platform_managed_secret_key(key) or is_likely_service_credential_key(key, kinds))
+    ]
 
 
 def is_known_preset(kind: str) -> bool:

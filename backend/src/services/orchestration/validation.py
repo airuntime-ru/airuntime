@@ -44,17 +44,39 @@ from src.services.orchestration.schemas import (
 )
 
 
+def _normalize_rel_path(path: str) -> str:
+    text = path.strip().replace("\\", "/")
+    while text.startswith("./"):
+        text = text[2:]
+    return text.lstrip("/")
+
+
 def path_matches_any(path: str, patterns: list[str]) -> bool:
     """Public (not `_`-prefixed): also used by executors.py's ScopedWorkspaceTools to enforce
     a TaskContract's allowed/forbidden paths PREVENTIVELY, at tool-call time - this module's
     own validate_scope() is the DETECTIVE half of the same rule, checked again afterward
-    against real evidence regardless of whether prevention worked, as defense in depth."""
-    for pattern in patterns:
-        pattern = pattern.strip("/")
+    against real evidence regardless of whether prevention worked, as defense in depth.
+
+    Patterns match a path prefix or an exact path component, never a substring. `.env` must
+    not match `.env.example`, and `.git` must not match `.gitignore` — that substring bug
+    discarded whole implementer attempts in production (crm для агро wrote `.env.example`).
+    """
+    normalized = _normalize_rel_path(path)
+    parts = [part for part in normalized.split("/") if part and part != "."]
+    for raw in patterns:
+        pattern = _normalize_rel_path(raw).strip("/")
         if not pattern or pattern == "*":
             return True
-        if path == pattern or path.startswith(pattern + "/") or pattern in path:
+        if normalized == pattern or normalized.startswith(pattern + "/"):
             return True
+        pattern_parts = [part for part in pattern.split("/") if part]
+        if len(pattern_parts) == 1 and pattern_parts[0] in parts:
+            return True
+        span = len(pattern_parts)
+        if span > 1:
+            for index in range(len(parts) - span + 1):
+                if parts[index : index + span] == pattern_parts:
+                    return True
     return False
 
 

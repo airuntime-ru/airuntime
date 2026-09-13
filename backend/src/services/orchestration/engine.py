@@ -130,7 +130,11 @@ from src.services.orchestration.schemas import ExecutionKind as _ExecutionKind
 from src.services.orchestration.skills.base import registry as skill_registry
 from src.services.orchestration.status import is_run_terminal, is_task_terminal
 from src.services.orchestration.workspace_isolation import WorkspaceIsolationManager, make_holder_id
-from src.services.project_services import ProjectServiceError, ensure_service_request
+from src.services.project_services import (
+    ProjectServiceError,
+    ensure_service_request,
+    user_facing_secret_keys,
+)
 from src.services.system_settings import resolve_platform_api_key
 from src.services.workspace import project_dir as project_workspace_dir
 
@@ -1144,14 +1148,15 @@ async def _run_one_task(
             db.commit()
             return _TaskAttemptOutcome("completed")
 
-        if secret_requests:
+        user_secrets = user_facing_secret_keys(secret_requests)
+        if user_secrets:
             task_repo.transition(task, "waiting_for_user", attempt=task.attempt + 1)
             events_bus.emit(
                 db,
                 run_id=run.id,
                 task_id=task.id,
                 event_type="waiting_for_secret",
-                payload={"requested_secrets": secret_requests},
+                payload={"requested_secrets": user_secrets},
             )
             db.commit()
             return _TaskAttemptOutcome("waiting_for_user")

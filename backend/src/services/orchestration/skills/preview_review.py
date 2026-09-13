@@ -20,7 +20,10 @@ from src.services.agent.pipeline_llm import complete_structured
 from src.services.agent.pipeline_models import PreviewResult, ReviewResult
 from src.services.docker_control_queue import submit_control_job
 from src.services.file_context import MAX_IMAGE_BYTES, ImageAttachment
-from src.services.orchestration.preview_gate import blocking_network_errors
+from src.services.orchestration.preview_gate import (
+    blocking_network_errors,
+    blocking_overflow_elements,
+)
 from src.services.orchestration.schemas import (
     RetryPolicy,
     RiskLevel,
@@ -83,7 +86,7 @@ def _deterministic_gate(preview: PreviewResult) -> ReviewResult | None:
         deterministic_issues.append("browser console errors detected")
     if any(blocking_network_errors(page.network_errors) for page in preview.pages):
         deterministic_issues.append("4xx/5xx or failed network requests detected")
-    if any(page.overflow_elements for page in preview.pages):
+    if any(blocking_overflow_elements(page.overflow_elements) for page in preview.pages):
         deterministic_issues.append("horizontal overflow detected")
     if deterministic_issues:
         return ReviewResult(verdict="revise", major_issues=deterministic_issues)

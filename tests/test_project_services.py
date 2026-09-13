@@ -17,9 +17,11 @@ from src.services.project_services import (
     ensure_service_request,
     host_volume_path,
     is_likely_service_credential_key,
+    is_platform_managed_secret_key,
     network_name,
     project_volumes_root,
     teardown_service_containers,
+    user_facing_secret_keys,
 )
 from src.services.secrets import encrypt_secret
 
@@ -201,14 +203,21 @@ def test_ensure_service_request_accepts_arbitrary_image(client, db):
     ],
 )
 def test_is_likely_service_credential_key_flags_component_credentials(key):
-    assert is_likely_service_credential_key(key, {"postgres", "mysql", "redis"}) == (
-        any(kind in key for kind in ("POSTGRES", "MYSQL", "REDIS"))
-    )
+    assert is_likely_service_credential_key(key, {"postgres", "mysql", "redis"}) is True
 
 
 def test_is_likely_service_credential_key_ignores_unrelated_secret():
     assert not is_likely_service_credential_key("STRIPE_SECRET_KEY", {"postgres"})
     assert not is_likely_service_credential_key("TELEGRAM_BOT_TOKEN", {"postgres", "redis"})
+
+
+def test_platform_managed_secrets_do_not_need_a_service_row():
+    assert is_platform_managed_secret_key("DATABASE_URL")
+    assert is_platform_managed_secret_key("POSTGRES_PASSWORD")
+    assert is_platform_managed_secret_key("REDIS_URL")
+    assert not is_platform_managed_secret_key("STRIPE_SECRET_KEY")
+    assert not is_platform_managed_secret_key("TELEGRAM_BOT_TOKEN")
+    assert user_facing_secret_keys(["DATABASE_URL", "STRIPE_SECRET_KEY"]) == ["STRIPE_SECRET_KEY"]
 
 
 def test_build_connection_env_postgres_and_redis(client, db):

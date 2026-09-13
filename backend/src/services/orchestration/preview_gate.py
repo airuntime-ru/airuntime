@@ -22,13 +22,28 @@ def blocking_network_errors(network_errors: list[str]) -> list[str]:
     return [entry for entry in network_errors if not is_benign_preview_network_error(entry)]
 
 
+def is_document_horizontal_overflow(item: str) -> bool:
+    """True only for page-level horizontal scroll, not a decorative box past the viewport."""
+    lower = item.lower()
+    return "scrollwidth" in lower or lower.startswith("document ")
+
+
+def blocking_overflow_elements(overflow_elements: list[str]) -> list[str]:
+    """Ignore abs-positioned decorations (orbit/hero blobs) that do not expand scrollWidth.
+
+    Production runs (crm для агро) looped for hours on `div.demo-orbit (right 1610 > 1440)`
+    even though the document itself did not scroll horizontally.
+    """
+    return [item for item in overflow_elements if is_document_horizontal_overflow(item)]
+
+
 def _page_issues_blocking(page: dict) -> list[str]:
     issues: list[str] = []
     if page.get("console_errors"):
         issues.append("console_errors")
     if blocking_network_errors(page.get("network_errors") or []):
         issues.append("network_errors")
-    if page.get("overflow_elements"):
+    if blocking_overflow_elements(page.get("overflow_elements") or []):
         issues.append("overflow")
     if page.get("broken_images"):
         issues.append("broken_images")
@@ -71,7 +86,7 @@ def summarize_preview_issues(preview_result: dict, *, limit: int = 8) -> str:
                 parts.append(f"{label} console: {_clip_issue(error)}")
             for error in blocking_network_errors(page.get("network_errors") or []):
                 parts.append(f"{label} network: {_clip_issue(error)}")
-            for item in page.get("overflow_elements") or []:
+            for item in blocking_overflow_elements(page.get("overflow_elements") or []):
                 parts.append(f"{label} overflow: {_clip_issue(item)}")
             for item in page.get("broken_images") or []:
                 parts.append(f"{label} broken_image: {_clip_issue(item)}")
