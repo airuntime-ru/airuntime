@@ -231,8 +231,6 @@ def project_metrics(project_id: UUID | str, window_hours: int = 24) -> dict:
 
     loop_failures = runs.filter(error_code__in=("loop_detected", "no_progress")).count()
 
-    mcp_calls = events.get("capability_started", 0)
-
     return {
         "window_hours": window_hours,
         "runs_total": runs_total,
@@ -248,15 +246,12 @@ def project_metrics(project_id: UUID | str, window_hours: int = 24) -> dict:
         "first_attempt_success_rate": _rate(first_try, tasks_completed),
         "repair_success_rate": _rate(repaired, repair_attempted),
         "replan_rate": _rate(replanned, runs_total),
-        "build_success_rate": _rate(events.get("run_completed", 0), events.get("build_started", 0)),
-        "deploy_success_rate": _rate(
-            events.get("run_completed", 0), events.get("deploy_started", 0)
-        ),
-        "runtime_verification_success_rate": _rate(
-            events.get("run_completed", 0), events.get("runtime_verification_started", 0)
-        ),
+        # Phase-start events do not record the outcome of the real build/deploy checks.
+        "build_success_rate": None,
+        "deploy_success_rate": None,
+        "runtime_verification_success_rate": None,
         "skill_match_rate": _rate(tasks_by_kind.get("skill", 0), tasks_total),
-        "mcp_error_rate": _rate(events.get("task_failed", 0), mcp_calls) if mcp_calls else None,
+        "mcp_error_rate": None,
         "repeated_failure_loops": loop_failures,
         "average_credits_per_successful_run": (
             round(float(completed_agg["avg_credits"]), 2)
@@ -386,10 +381,8 @@ def fleet_health_metrics(window_hours: int = 24) -> dict:
         "task_acceptance_rate": _rate(tasks_completed, tasks_completed + tasks_failed),
         "first_attempt_success_rate": _rate(first_try, tasks_completed),
         "replan_rate": _rate(replanned, runs_total),
-        "build_success_rate": _rate(events.get("run_completed", 0), events.get("build_started", 0)),
-        "deploy_success_rate": _rate(
-            events.get("run_completed", 0), events.get("deploy_started", 0)
-        ),
+        "build_success_rate": None,
+        "deploy_success_rate": None,
         "events_by_type": events,
         "tasks_by_execution_kind": dict(
             task_qs.values("execution_kind")

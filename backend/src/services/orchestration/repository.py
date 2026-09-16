@@ -234,6 +234,11 @@ class AgentTaskRepository:
     def transition(self, task: AgentTask, status: str, **fields: object) -> AgentTask:
         validate_task_transition(task.status, status)
         now = datetime.now(UTC)
+        if status == "completed":
+            # A repaired task can still carry the error from an earlier attempt.
+            # Keeping it makes successful runs look failed in admin/debug views.
+            fields.setdefault("error_code", None)
+            fields.setdefault("error_message", None)
         if task.status != status:
             if status == "running" and task.started_at is None:
                 fields.setdefault("started_at", now)

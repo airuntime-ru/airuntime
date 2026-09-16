@@ -163,8 +163,6 @@
     ["Task acceptance", health.task_acceptance_rate],
     ["First attempt OK", health.first_attempt_success_rate],
     ["Replan rate", health.replan_rate],
-    ["Build success", health.build_success_rate],
-    ["Deploy success", health.deploy_success_rate],
   ];
   document.getElementById("health-metrics").innerHTML =
     `<table class="an-table"><tbody>${healthRows.map(([k,v]) =>

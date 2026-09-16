@@ -113,6 +113,41 @@ def test_check_routerai_balance_skips_daily_before_report_hour(tmp_path: Path, m
     tg.send_message.assert_not_called()
 
 
+def test_check_routerai_balance_alerts_after_repeated_failures_and_recovers(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr("ops_bot.monitors.docker.from_env", lambda: None)
+    settings = _settings(tmp_path)
+    tg = MagicMock()
+    state = StateStore(settings.state_path)
+    monitor = OpsMonitor(settings, tg, state)
+    morning = datetime(2026, 9, 16, 10, 0, tzinfo=ZoneInfo("Europe/Moscow"))
+    monkeypatch.setattr("ops_bot.monitors.datetime", MagicMock(now=lambda *_a, **_k: morning))
+    balances = iter([None, None, None, None, 500.0])
+    monkeypatch.setattr(
+        "ops_bot.monitors.fetch_balance_rub",
+        lambda *_args, **_kwargs: next(balances),
+    )
+
+    for _ in range(2):
+        monitor.check_routerai_balance()
+    tg.send_message.assert_not_called()
+
+    monitor.check_routerai_balance()
+    assert tg.send_message.call_count == 1
+    assert "не удаётся проверить баланс" in tg.send_message.call_args.args[1]
+    assert state.get("routerai_balance_unavailable_alerted") is True
+
+    monitor.check_routerai_balance()
+    assert tg.send_message.call_count == 1
+
+    monitor.check_routerai_balance()
+    assert tg.send_message.call_count == 2
+    assert "восстановилась" in tg.send_message.call_args.args[1]
+    assert state.get("routerai_balance_consecutive_failures") == 0
+    assert state.get("routerai_balance_unavailable_alerted") is False
+
+
 def test_fetch_balance_rub_parses_openrouter_shape() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/v1/credits"

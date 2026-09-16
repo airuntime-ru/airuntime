@@ -31,13 +31,22 @@ JSON_LEVEL_ERROR_RE = re.compile(
     r'(?:"level"|level)\s*[=:]\s*"?(?:error|critical|fatal)"?',
     re.IGNORECASE,
 )
+MALFORMED_NEXT_ACTION_ID_RE = re.compile(
+    r"^\s*Error: The Server Reference ID did not match the expected format\. "
+    r'Received "(?:\\.|[^"\\])*"\.\s*$'
+)
+FRONTEND_CONTAINER_RE = re.compile(r"(?:^|-)frontend-\d+$")
 
 RUN_TERMINAL = frozenset({"completed", "failed", "cancelled"})
 # Deliberately idle — not "stuck" (same exclusions as engine.recover_stranded_runs).
 RUN_NOT_STUCK = frozenset({"created", "waiting_for_user"})
 
 
-def is_error_log_line(line: str) -> bool:
+def is_error_log_line(line: str, container_name: str = "") -> bool:
+    # Next.js logs malformed client-supplied Server Action IDs as warnings. The
+    # frontend has no Server Actions, so these are rejected requests, not app errors.
+    if FRONTEND_CONTAINER_RE.search(container_name) and MALFORMED_NEXT_ACTION_ID_RE.fullmatch(line):
+        return False
     return bool(ERROR_RE.search(line) or JSON_LEVEL_ERROR_RE.search(line))
 
 
@@ -172,7 +181,7 @@ class OpsMonitor:
                 continue
             text = raw.decode("utf-8", errors="replace")
             for line in text.splitlines():
-                if is_error_log_line(line):
+                if is_error_log_line(line, name):
                     totals[name] += 1
                     if len(samples[name]) < 3:
                         samples[name].append(line.strip()[:180])
@@ -350,13 +359,30 @@ class OpsMonitor:
         if not self.settings.routerai_api_key:
             return
 
-        balance = fetch_balance_rub(
-            self._http,
-            api_key=self.settings.routerai_api_key,
-            base_url=self.settings.routerai_base_url,
-        )
+        # This runs hourly; a fresh connection avoids reusing the long-lived
+        # health-check client's transport after it has been idle to RouterAI.
+        with httpx.Client(timeout=15.0, follow_redirects=True) as balance_client:
+            balance = fetch_balance_rub(
+                balance_client,
+                api_key=self.settings.routerai_api_key,
+                base_url=self.settings.routerai_base_url,
+            )
         if balance is None:
+            failures = int(self.state.get("routerai_balance_consecutive_failures", 0) or 0) + 1
+            self.state.set("routerai_balance_consecutive_failures", failures)
+            if failures >= 3 and not self.state.get("routerai_balance_unavailable_alerted"):
+                self.send_code(
+                    "<b>Алерт: не удаётся проверить баланс RouterAI</b>\n"
+                    f"Проверка не прошла {failures} раза подряд. "
+                    "Последний успешный баланс может быть устаревшим."
+                )
+                self.state.set("routerai_balance_unavailable_alerted", True)
             return
+
+        self.state.set("routerai_balance_consecutive_failures", 0)
+        if self.state.get("routerai_balance_unavailable_alerted"):
+            self.send_code("<b>RouterAI: проверка баланса восстановилась</b>")
+            self.state.set("routerai_balance_unavailable_alerted", False)
 
         now_msk = datetime.now(ZoneInfo("Europe/Moscow"))
         today = now_msk.date().isoformat()

@@ -26,7 +26,6 @@ from sqlalchemy.orm import Session
 
 from src.db.models.agent_task import AgentTask
 from src.db.models.orchestration_run import OrchestrationRun
-from src.db.models.run_event import RunEvent
 from src.db.models.workspace_lease import WorkspaceLease
 
 # A run still non-terminal this long after it started has no plausible legitimate reason to be
@@ -214,24 +213,12 @@ def collect_metrics(
     skill_tasks = metrics.tasks_by_execution_kind.get("skill", 0)
     metrics.skill_match_rate = _rate(skill_tasks, metrics.tasks_total)
 
-    event_rows = db.execute(
-        select(RunEvent.event_type, func.count())
-        .join(OrchestrationRun, OrchestrationRun.id == RunEvent.run_id)
-        .where(*run_scope)
-        .group_by(RunEvent.event_type)
-    ).all()
-    events = {event_type: count for event_type, count in event_rows}
-    metrics.build_success_rate = _rate(
-        events.get("run_completed", 0), events.get("build_started", 0)
-    )
-    metrics.deploy_success_rate = _rate(
-        events.get("run_completed", 0), events.get("deploy_started", 0)
-    )
-    metrics.runtime_verification_success_rate = _rate(
-        events.get("run_completed", 0), events.get("runtime_verification_started", 0)
-    )
-    mcp_calls = events.get("capability_started", 0)
-    metrics.mcp_error_rate = _rate(events.get("task_failed", 0), mcp_calls) if mcp_calls else None
+    # These event names only mark immediate run-status transitions. Real build,
+    # deployment and runtime outcomes are checked elsewhere, so a run_completed
+    # count cannot serve as the success numerator for any of these rates.
+    # task_failed includes failures unrelated to MCP calls, so it cannot be used
+    # as an MCP error numerator either. Leave the field unset until call outcomes
+    # are recorded separately.
 
     # A run that failed with a loop-detector verdict - the "we are going in circles" signal that
     # matters most when tuning failure policy.
