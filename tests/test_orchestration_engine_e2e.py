@@ -1418,9 +1418,12 @@ class _JudgeScriptExecutor:
                 )
             )
         self.implementer_calls += 1
-        (context.workspace_root / f"output_{self.implementer_calls}.txt").write_text(
-            f"attempt {self.implementer_calls}", encoding="utf-8"
-        )
+        # Under public/, not the workspace root: the plan scopes the implementer (and the
+        # judge fix task that inherits its relevant_paths) to the website tree, so a root-level
+        # file is a scope violation that parks the run before the judge handoff is exercised.
+        output = context.workspace_root / "public" / f"output_{self.implementer_calls}.txt"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(f"attempt {self.implementer_calls}", encoding="utf-8")
         return _ok_result()
 
 
