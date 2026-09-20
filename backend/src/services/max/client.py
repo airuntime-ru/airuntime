@@ -179,6 +179,9 @@ class MaxBotClient:
     def list_subscriptions(self) -> dict[str, Any]:
         return self._request("GET", "/subscriptions")
 
+    def delete_subscription(self, url: str) -> None:
+        self._request("DELETE", "/subscriptions", params={"url": url})
+
     def send_message(
         self,
         *,

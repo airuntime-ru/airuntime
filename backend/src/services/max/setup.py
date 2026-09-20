@@ -47,6 +47,23 @@ def _describe(subscriptions: dict) -> str:
     )
 
 
+def _prune_stale_subscriptions(client: MaxBotClient, current_url: str) -> int:
+    """Drop our own superseded callbacks - e.g. after the webhook secret is rotated.
+
+    MAX keeps delivering to every registered URL, so a stale one means it retries against
+    a 404 forever. Scoped to this deployment's API on purpose: the hackathon bot is
+    shared, and another team's subscription is none of our business.
+    """
+    prefix = current_url.rsplit("/", 1)[0] + "/"
+    removed = 0
+    for row in client.list_subscriptions().get("subscriptions") or []:
+        url = str(row.get("url") or "")
+        if url.startswith(prefix) and url != current_url:
+            client.delete_subscription(url)
+            removed += 1
+    return removed
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Configure the MAX bot for this deployment")
     parser.add_argument(
@@ -116,6 +133,9 @@ def main(argv: list[str] | None = None) -> int:
             update_types=["bot_started", "bot_added", "message_created", "message_callback"],
         )
         print("webhook subscribed")
+        removed = _prune_stale_subscriptions(client, url)
+        if removed:
+            print(f"removed {removed} stale subscription(s) pointing at this API")
         print("subscriptions now:")
         print(_describe(client.list_subscriptions()))
     except MaxApiError as exc:
