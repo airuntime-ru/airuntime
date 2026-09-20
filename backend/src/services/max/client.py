@@ -6,8 +6,10 @@ Only the handful of calls the product actually makes. Notes that cost time to re
   removed by the platform;
 - production updates must arrive by webhook (``POST /subscriptions``) over HTTPS with a
   certificate from a trusted CA - long polling is documented as development-only;
-- the platform rate-limits to 30 rps, so every call here is a single request with a short
-  timeout and no retry storm.
+- the platform rate-limits to 30 rps, so a call is at most two requests, never a retry
+  storm: connecting to platform-api2.max.ru fails intermittently (the name resolves to
+  several nodes and the handshake occasionally just hangs), and one retry turns that from
+  a silently undelivered lead into a 200ms hiccup.
 
 Every method is fail-soft: a delivery problem must never take down the webhook handler,
 because MAX retries deliveries and a 500 from us just amplifies the load.
@@ -25,7 +27,13 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-REQUEST_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
+REQUEST_TIMEOUT = httpx.Timeout(20.0, connect=10.0)
+
+# Retried only for failures that prove the request never reached MAX. A ReadTimeout is
+# deliberately excluded: the platform may already have acted on it, and re-sending would
+# duplicate a message in someone's chat.
+_CONNECT_FAILURES = (httpx.ConnectError, httpx.ConnectTimeout)
+_CONNECT_ATTEMPTS = 2
 
 # Where the Ministry bundle can be found, most specific first. See infra/certs/README.md
 # for provenance and fingerprints.
@@ -113,17 +121,33 @@ class MaxBotClient:
     def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         if not self._token:
             raise MaxApiError("MAX bot token is not configured")
-        try:
-            response = httpx.request(
-                method,
-                f"{self._base_url}{path}",
-                headers={"Authorization": self._token},
-                timeout=REQUEST_TIMEOUT,
-                verify=self._verify,
-                **kwargs,
-            )
-        except httpx.HTTPError as exc:
-            raise MaxApiError(f"MAX API request failed: {exc}") from exc
+        last_connect_error: Exception | None = None
+        for attempt in range(1, _CONNECT_ATTEMPTS + 1):
+            try:
+                response = httpx.request(
+                    method,
+                    f"{self._base_url}{path}",
+                    headers={"Authorization": self._token},
+                    timeout=REQUEST_TIMEOUT,
+                    verify=self._verify,
+                    **kwargs,
+                )
+                break
+            except _CONNECT_FAILURES as exc:
+                last_connect_error = exc
+                logger.warning(
+                    "max_api_connect_failed attempt=%s/%s path=%s %s",
+                    attempt,
+                    _CONNECT_ATTEMPTS,
+                    path,
+                    type(exc).__name__,
+                )
+            except httpx.HTTPError as exc:
+                raise MaxApiError(f"MAX API request failed: {exc}") from exc
+        else:
+            raise MaxApiError(
+                f"MAX API unreachable after {_CONNECT_ATTEMPTS} attempts: {last_connect_error}"
+            ) from last_connect_error
 
         if response.status_code >= 400:
             # The body carries the platform's own reason; keep it, it is the only way to

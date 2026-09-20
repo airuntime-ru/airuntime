@@ -22,6 +22,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/alembic.ini ./alembic.ini
 COPY backend/entrypoint.sh ./entrypoint.sh
 COPY backend/src ./src
+# Operational tooling that has to run where the settings and the certificate live.
+COPY scripts/max_setup.py ./scripts/max_setup.py
 RUN chmod +x /app/entrypoint.sh
 
 EXPOSE 8000

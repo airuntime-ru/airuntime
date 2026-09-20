@@ -14,6 +14,7 @@ import time
 from typing import Any
 from urllib.parse import quote
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -21,7 +22,7 @@ from sqlalchemy.orm import Session
 from src.core.config import settings
 from src.db.models.max_platform import MaxLead, MaxOwner, MaxService
 from src.services.max import bot as max_bot
-from src.services.max.client import MaxBotClient
+from src.services.max.client import MaxApiError, MaxBotClient
 from src.services.max.init_data import InitDataError, verify_contact_hash, verify_init_data
 from src.services.max.schema import ServiceConfig, normalise, slugify
 
@@ -220,6 +221,74 @@ class TestInitDataVerification:
             received_hash=signature,
             bot_token=BOT_TOKEN,
         )
+
+
+# --------------------------------------------------------------------------------------
+# Transport
+# --------------------------------------------------------------------------------------
+
+
+class TestConnectRetry:
+    """platform-api2.max.ru resolves to several nodes and the handshake intermittently
+    hangs. One retry is the difference between a 200ms hiccup and a lead that silently
+    never reaches the owner's chat."""
+
+    def _client(self) -> MaxBotClient:
+        return MaxBotClient(BOT_TOKEN, base_url="https://platform-api2.max.ru")
+
+    def test_retries_once_when_the_connection_never_lands(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[str] = []
+
+        def request(method: str, url: str, **kwargs: Any) -> httpx.Response:
+            calls.append(method)
+            if len(calls) == 1:
+                raise httpx.ConnectTimeout("handshake timed out")
+            return httpx.Response(200, json={"user_id": 1, "username": "bot", "name": "Bot"})
+
+        monkeypatch.setattr(httpx, "request", request)
+        assert self._client().get_me().username == "bot"
+        assert len(calls) == 2
+
+    def test_gives_up_after_the_second_connect_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[str] = []
+
+        def request(method: str, url: str, **kwargs: Any) -> httpx.Response:
+            calls.append(method)
+            raise httpx.ConnectError("no route")
+
+        monkeypatch.setattr(httpx, "request", request)
+        with pytest.raises(MaxApiError, match="unreachable after 2 attempts"):
+            self._client().get_me()
+        assert len(calls) == 2
+
+    def test_does_not_retry_a_read_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        calls: list[str] = []
+
+        def request(method: str, url: str, **kwargs: Any) -> httpx.Response:
+            calls.append(method)
+            raise httpx.ReadTimeout("server went quiet")
+
+        monkeypatch.setattr(httpx, "request", request)
+        # The platform may already have sent the message; a retry would duplicate it.
+        with pytest.raises(MaxApiError):
+            self._client().send_message(chat_id=1, text="hi")
+        assert len(calls) == 1
+
+    def test_does_not_retry_a_rejected_request(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        calls: list[str] = []
+
+        def request(method: str, url: str, **kwargs: Any) -> httpx.Response:
+            calls.append(method)
+            return httpx.Response(401, text="bad token")
+
+        monkeypatch.setattr(httpx, "request", request)
+        with pytest.raises(MaxApiError, match="401"):
+            self._client().get_me()
+        assert len(calls) == 1
 
 
 # --------------------------------------------------------------------------------------
