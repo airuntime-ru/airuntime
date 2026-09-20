@@ -166,7 +166,7 @@ backend/src/services/max/
 backend/src/api/routers/max.py   POST /max/webhook/<secret> + /max/miniapp/*
 frontend/src/app/max/            мини-приложение (Next.js, MAX Bridge)
 frontend/src/lib/max/            обёртка над window.WebApp и API-клиент
-scripts/max_setup.py             регистрация команд и вебхука в MAX
+  setup.py        регистрация команд и вебхука (python -m src.services.max.setup)
 ```
 
 ### Две модели доверия
@@ -208,9 +208,10 @@ echo | openssl s_client -connect platform-api2.max.ru:443   -servername platform
 3. Накатите миграции: `alembic upgrade head` (ревизия `0027_max_platform`).
 4. Зарегистрируйте бота в MAX — из контейнера, где живут настройки и сертификат:
    ```bash
-   docker compose -f docker-compose.prod.yml --env-file .env      exec -T backend python /app/scripts/max_setup.py --apply
+   docker compose -f docker-compose.prod.yml --env-file .env      exec -T backend python -m src.services.max.setup --apply
    ```
    Без `--apply` команда только покажет текущее состояние и подписки.
+   Из чекаута то же самое делает `python scripts/max_setup.py --apply`.
 5. В кабинете MAX укажите адрес мини-приложения — `https://<домен>/max`.
 
 ### Ручная проверка

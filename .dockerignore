@@ -31,12 +31,7 @@ infra/traefik/letsencrypt/
 letsencrypt/
 
 # Ops / docs / tests not needed in images
-# Excluding the contents rather than the directory itself: Docker prunes an excluded
-# directory outright, and a `!` exception for a file inside it is then never reached.
-/scripts/*
-# ...except the MAX bot setup, which is an operational tool that has to run where the
-# app's settings and dependencies live (i.e. inside the backend container).
-!/scripts/max_setup.py
+/scripts/
 /logs/
 /output/
 *.md
