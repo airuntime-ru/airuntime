@@ -47,21 +47,21 @@ export function ProcessDemo({ className }: { className?: string }) {
         aria-hidden
       />
 
-      <div className="flex items-center gap-2.5 border-b border-white/8 px-4 py-3.5 sm:px-5">
+      <div className="flex items-center gap-2.5 border-b border-white/8 px-4 py-3.5 sm:px-5 2xl:px-6 2xl:py-4">
         <span className="flex gap-1.5" aria-hidden>
           <span className="h-2.5 w-2.5 rounded-full bg-white/15" />
           <span className="h-2.5 w-2.5 rounded-full bg-white/15" />
           <span className="h-2.5 w-2.5 rounded-full bg-white/15" />
         </span>
-        <p className="ml-1 text-[0.8rem] font-medium text-white/55">Чат проекта</p>
+        <p className="ml-1 text-[0.8rem] font-medium text-white/55 2xl:text-[0.88rem]">Чат проекта</p>
       </div>
 
-      <div className="space-y-4 p-4 sm:p-5">
-        <div className="ml-auto max-w-[88%] rounded-[1rem] rounded-br-sm bg-[linear-gradient(120deg,#2388ff,#6d6cff)] px-4 py-2.5 text-sm leading-relaxed text-white shadow-[0_12px_30px_-14px_rgba(45,130,255,0.9)]">
+      <div className="space-y-4 p-4 sm:p-5 2xl:space-y-5 2xl:p-7">
+        <div className="ml-auto max-w-[88%] rounded-[1rem] rounded-br-sm bg-[linear-gradient(120deg,#2388ff,#6d6cff)] px-4 py-2.5 text-sm leading-relaxed text-white shadow-[0_12px_30px_-14px_rgba(45,130,255,0.9)] 2xl:px-5 2xl:py-3 2xl:text-[0.98rem]">
           {demoScript.userMessage}
         </div>
 
-        <ul className="space-y-2.5" aria-live="polite">
+        <ul className="space-y-2.5 2xl:space-y-3.5" aria-live="polite">
           {demoScript.steps.map((step, index) => {
             const stepDone = visibleSteps > index;
             const active = visibleSteps === index && phase < 3;
@@ -69,13 +69,13 @@ export function ProcessDemo({ className }: { className?: string }) {
               <li
                 key={step}
                 className={cn(
-                  "flex items-center gap-3 text-sm transition-opacity duration-500",
+                  "flex items-center gap-3 text-sm transition-opacity duration-500 2xl:gap-3.5 2xl:text-[0.98rem]",
                   stepDone || active ? "opacity-100" : "opacity-25"
                 )}
               >
                 <span
                   className={cn(
-                    "flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold transition-colors duration-300",
+                    "flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold transition-colors duration-300 2xl:h-7 2xl:w-7 2xl:text-xs",
                     stepDone
                       ? "bg-[#5ce6b0]/18 text-[#5ce6b0] ring-1 ring-[#5ce6b0]/40"
                       : active
@@ -101,7 +101,7 @@ export function ProcessDemo({ className }: { className?: string }) {
 
         <div
           className={cn(
-            "flex items-center gap-3 rounded-[0.9rem] border px-4 py-3 transition-all duration-500",
+            "flex items-center gap-3 rounded-[0.9rem] border px-4 py-3 transition-all duration-500 2xl:px-5 2xl:py-4",
             done
               ? "translate-y-0 border-[#5ce6b0]/30 bg-[#5ce6b0]/[0.08] opacity-100"
               : "translate-y-1 border-transparent bg-transparent opacity-0"
@@ -117,7 +117,9 @@ export function ProcessDemo({ className }: { className?: string }) {
             <p className="text-[0.72rem] font-semibold uppercase tracking-[0.16em] text-[#5ce6b0]">
               Live
             </p>
-            <p className="truncate font-mono text-[0.82rem] text-white/85">{demoScript.url}</p>
+            <p className="truncate font-mono text-[0.82rem] text-white/85 2xl:text-[0.92rem]">
+              {demoScript.url}
+            </p>
           </div>
         </div>
       </div>

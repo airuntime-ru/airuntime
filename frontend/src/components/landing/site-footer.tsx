@@ -8,10 +8,10 @@ import { operator } from "@/lib/legal/operator";
 export function SiteFooter() {
   return (
     <footer className="border-t border-white/8 bg-[#05070f] text-white">
-      <div className="mx-auto flex max-w-6xl flex-col gap-8 px-5 py-12 sm:px-8 sm:py-14 lg:flex-row lg:items-start lg:justify-between">
+      <div className="landing-container flex flex-col gap-8 py-12 sm:py-14 lg:flex-row lg:items-start lg:justify-between 2xl:py-16">
         <div>
           <Logo href="/" variant="full" theme="light" size="sm" />
-          <p className="mt-4 max-w-sm text-sm leading-relaxed text-white/55">
+          <p className="mt-4 max-w-sm text-sm leading-relaxed text-white/55 2xl:max-w-md 2xl:text-[0.95rem]">
             Опишите идею. Получите работающий сайт или Telegram-бота.
           </p>
         </div>
@@ -34,7 +34,7 @@ export function SiteFooter() {
         </nav>
       </div>
       <div className="border-t border-white/[0.06]">
-        <div className="mx-auto flex max-w-6xl flex-col gap-4 px-5 py-6 text-xs text-white/45 sm:flex-row sm:items-center sm:justify-between sm:px-8">
+        <div className="landing-container flex flex-col gap-4 py-6 text-xs text-white/45 sm:flex-row sm:items-center sm:justify-between">
           <p>
             © {new Date().getFullYear()} AIRuntime · {operator.fullName} · ИНН {operator.inn}
           </p>

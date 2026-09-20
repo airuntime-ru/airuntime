@@ -43,12 +43,12 @@ export function Accordion({ items, onOpenChange }: AccordionProps) {
               <button
                 id={buttonId}
                 type="button"
-                className="flex w-full items-center justify-between gap-4 px-5 py-[1.1rem] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ar-sky)]/35 sm:px-6"
+                className="flex w-full items-center justify-between gap-4 px-5 py-[1.1rem] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ar-sky)]/35 sm:px-6 2xl:px-7 2xl:py-[1.35rem]"
                 aria-expanded={isOpen}
                 aria-controls={panelId}
                 onClick={() => toggle(index)}
               >
-                <span className="text-[1.02rem] font-medium text-[var(--ar-black)]">
+                <span className="text-[1.02rem] font-medium text-[var(--ar-black)] 2xl:text-[1.12rem]">
                   {item.question}
                 </span>
                 <span
@@ -79,7 +79,7 @@ export function Accordion({ items, onOpenChange }: AccordionProps) {
                   transition={{ duration: reduceMotion ? 0 : 0.28, ease: [0.22, 1, 0.36, 1] }}
                   className="overflow-hidden"
                 >
-                  <p className="px-5 pb-5 text-[0.95rem] leading-relaxed text-[var(--ar-mist)] sm:px-6">
+                  <p className="px-5 pb-5 text-[0.95rem] leading-relaxed text-[var(--ar-mist)] sm:px-6 2xl:px-7 2xl:pb-6 2xl:text-[1.05rem]">
                     {item.answer}
                   </p>
                 </motion.div>

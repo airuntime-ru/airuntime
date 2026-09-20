@@ -25,12 +25,18 @@ export function SectionHeading({
   const dark = tone === "dark";
 
   return (
-    <div className={cn("max-w-2xl", align === "center" && "mx-auto text-center", className)}>
+    <div
+      className={cn(
+        "max-w-2xl 2xl:max-w-3xl",
+        align === "center" && "mx-auto text-center 2xl:max-w-4xl",
+        className
+      )}
+    >
       {eyebrow ? (
         <Reveal>
           <p
             className={cn(
-              "mb-4 inline-flex items-center gap-2 text-[0.78rem] font-semibold uppercase tracking-[0.2em]",
+              "mb-4 inline-flex items-center gap-2 text-[0.78rem] font-semibold uppercase tracking-[0.2em] 2xl:text-[0.84rem]",
               dark ? "text-[#7fb6ff]" : "text-[var(--ar-sky)]"
             )}
           >
@@ -46,7 +52,7 @@ export function SectionHeading({
         <TitleTag
           id={id}
           className={cn(
-            "text-balance text-[2.15rem] font-semibold leading-[1.1] tracking-[-0.035em] sm:text-[2.75rem] lg:text-[3.15rem]",
+            "text-balance text-[2.15rem] font-semibold leading-[1.1] tracking-[-0.035em] sm:text-[2.75rem] lg:text-[3.15rem] 2xl:text-[3.5rem] 3xl:text-[3.9rem]",
             dark ? "text-white" : "text-[var(--ar-black)]"
           )}
         >
@@ -57,8 +63,8 @@ export function SectionHeading({
         <Reveal delay={120}>
           <p
             className={cn(
-              "mt-5 max-w-xl text-lg leading-relaxed",
-              align === "center" && "mx-auto",
+              "mt-5 max-w-xl text-lg leading-relaxed 2xl:max-w-2xl 2xl:text-xl",
+              align === "center" && "mx-auto text-balance",
               dark ? "text-white/55" : "text-[var(--ar-mist)]"
             )}
           >
@@ -90,14 +96,14 @@ export function LandingSection({
       id={id}
       aria-labelledby={ariaLabelledBy}
       className={cn(
-        "relative scroll-mt-24 py-20 sm:py-24 lg:py-28",
+        "relative scroll-mt-24 py-20 sm:py-24 lg:py-28 2xl:py-32 3xl:py-40",
         tone === "default" && "bg-white",
         tone === "muted" && "daylight",
         tone === "cosmos" && "cosmos cosmos-stars",
         className
       )}
     >
-      <div className="relative mx-auto w-full max-w-6xl px-5 sm:px-8">{children}</div>
+      <div className="landing-container relative">{children}</div>
     </section>
   );
 }

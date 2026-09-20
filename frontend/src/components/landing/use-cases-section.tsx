@@ -23,7 +23,7 @@ export function UseCasesSection() {
         align="center"
       />
 
-      <ul className="mt-14 grid gap-5 sm:grid-cols-2">
+      <ul className="mt-14 grid gap-5 sm:grid-cols-2 2xl:mt-16 2xl:grid-cols-4">
         {useCases.map((item, index) => {
           const Icon = icons[item.id] ?? Building2;
           return (
@@ -35,7 +35,7 @@ export function UseCasesSection() {
                 >
                   <Icon size={19} />
                 </span>
-                <h3 className="mt-5 text-lg font-semibold tracking-[-0.02em] text-[var(--ar-black)]">
+                <h3 className="mt-5 text-lg font-semibold tracking-[-0.02em] text-[var(--ar-black)] 2xl:text-xl">
                   {item.title}
                 </h3>
                 <p className="mt-2 text-[0.95rem] leading-relaxed text-[var(--ar-mist)]">

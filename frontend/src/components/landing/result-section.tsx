@@ -23,7 +23,7 @@ export function ResultSection() {
         align="center"
       />
 
-      <div className="mt-14 grid gap-6 lg:grid-cols-2">
+      <div className="mt-14 grid gap-6 lg:grid-cols-2 2xl:mx-auto 2xl:mt-16 2xl:max-w-[78rem] 2xl:gap-8">
         {/* Browser window */}
         <Reveal>
           <article className="sky-card sky-card-hover h-full rounded-[1.25rem]">
@@ -45,7 +45,7 @@ export function ResultSection() {
               <p className="text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-[var(--ar-sky)]">
                 Автосервис на Лесной
               </p>
-              <p className="mt-2.5 text-[1.6rem] font-semibold leading-[1.15] tracking-[-0.03em] text-[var(--ar-black)] sm:text-3xl">
+              <p className="mt-2.5 text-[1.6rem] font-semibold leading-[1.15] tracking-[-0.03em] text-[var(--ar-black)] sm:text-3xl 2xl:text-[2.1rem]">
                 Запишитесь <span className="text-daylight">за минуту</span>
               </p>
 
@@ -55,15 +55,17 @@ export function ResultSection() {
                     key={service.name}
                     className="flex items-center justify-between rounded-[0.7rem] border border-black/[0.06] bg-white px-3.5 py-2.5"
                   >
-                    <span className="text-sm text-[var(--ar-graphite)]">{service.name}</span>
-                    <span className="text-sm font-semibold tabular-nums text-[var(--ar-black)]">
+                    <span className="text-sm text-[var(--ar-graphite)] 2xl:text-[0.95rem]">
+                      {service.name}
+                    </span>
+                    <span className="text-sm font-semibold tabular-nums text-[var(--ar-black)] 2xl:text-[0.95rem]">
                       {service.price}
                     </span>
                   </li>
                 ))}
               </ul>
 
-              <p className="btn-glow mt-5 flex h-11 items-center justify-center rounded-[0.7rem] text-sm font-semibold">
+              <p className="btn-glow mt-5 flex h-11 items-center justify-center rounded-[0.7rem] text-sm font-semibold 2xl:h-12 2xl:text-[0.95rem]">
                 Записаться
               </p>
             </div>
@@ -95,13 +97,13 @@ export function ResultSection() {
             </div>
 
             <div className="flex flex-1 flex-col gap-2.5 bg-[linear-gradient(180deg,#f6f9ff,#eef4fd)] p-5 sm:p-7">
-              <p className="max-w-[88%] rounded-[1rem] rounded-bl-sm bg-white px-3.5 py-2.5 text-sm leading-relaxed text-[var(--ar-black)] shadow-[0_2px_8px_rgba(15,23,42,0.06)]">
+              <p className="w-fit max-w-[88%] rounded-[1rem] rounded-bl-sm bg-white px-3.5 py-2.5 text-sm leading-relaxed text-[var(--ar-black)] shadow-[0_2px_8px_rgba(15,23,42,0.06)] 2xl:text-[0.95rem]">
                 Запишите меня на завтра, 11:00
               </p>
-              <p className="ml-auto max-w-[88%] rounded-[1rem] rounded-br-sm bg-[linear-gradient(120deg,#2388ff,#6d6cff)] px-3.5 py-2.5 text-sm leading-relaxed text-white shadow-[0_10px_24px_-14px_rgba(45,130,255,0.9)]">
+              <p className="ml-auto w-fit max-w-[88%] rounded-[1rem] rounded-br-sm bg-[linear-gradient(120deg,#2388ff,#6d6cff)] px-3.5 py-2.5 text-sm leading-relaxed text-white shadow-[0_10px_24px_-14px_rgba(45,130,255,0.9)] 2xl:text-[0.95rem]">
                 Готово ✅ Завтра в 11:00, замена масла. Напомню за час.
               </p>
-              <p className="max-w-[88%] rounded-[1rem] rounded-bl-sm bg-white px-3.5 py-2.5 text-sm leading-relaxed text-[var(--ar-black)] shadow-[0_2px_8px_rgba(15,23,42,0.06)]">
+              <p className="w-fit max-w-[88%] rounded-[1rem] rounded-bl-sm bg-white px-3.5 py-2.5 text-sm leading-relaxed text-[var(--ar-black)] shadow-[0_2px_8px_rgba(15,23,42,0.06)] 2xl:text-[0.95rem]">
                 А цену подскажешь?
               </p>
               <p className="ml-auto inline-flex w-fit items-center rounded-[1rem] rounded-br-sm bg-[linear-gradient(120deg,#2388ff,#6d6cff)] px-4 py-3">
@@ -117,11 +119,11 @@ export function ResultSection() {
       </div>
 
       <Reveal delay={180}>
-        <ul className="mt-10 flex flex-wrap justify-center gap-2.5">
+        <ul className="mt-10 flex flex-wrap justify-center gap-2.5 2xl:mt-12 2xl:gap-3">
           {trustStrip.map((item) => (
             <li
               key={item}
-              className="inline-flex items-center gap-2 rounded-full border border-black/[0.07] bg-white px-4 py-2 text-[0.82rem] font-medium text-[var(--ar-graphite)]"
+              className="inline-flex items-center gap-2 rounded-full border border-black/[0.07] bg-white px-4 py-2 text-[0.82rem] font-medium text-[var(--ar-graphite)] 2xl:px-5 2xl:py-2.5 2xl:text-[0.9rem]"
             >
               <span className="text-emerald-500" aria-hidden>
                 ✓

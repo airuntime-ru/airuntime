@@ -136,7 +136,7 @@ export async function PricingSection() {
         align="center"
       />
 
-      <ul className="mt-14 grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+      <ul className="mt-14 grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:mx-auto 2xl:mt-16 2xl:max-w-[82rem] 2xl:gap-6">
         {plans.map((plan, index) => {
           const highlighted = plan.key === "pro";
           return (
@@ -152,10 +152,10 @@ export async function PricingSection() {
                     Популярный
                   </p>
                 ) : null}
-                <h3 className="text-lg font-semibold tracking-[-0.02em] text-[var(--ar-black)]">
+                <h3 className="text-lg font-semibold tracking-[-0.02em] text-[var(--ar-black)] 2xl:text-xl">
                   {plan.name}
                 </h3>
-                <p className="mt-3 text-[2rem] font-semibold leading-none tracking-[-0.03em] text-[var(--ar-black)]">
+                <p className="mt-3 text-[2rem] font-semibold leading-none tracking-[-0.03em] text-[var(--ar-black)] 2xl:text-[2.4rem]">
                   {plan.price_rub > 0 ? (
                     <>
                       {plan.price_rub.toLocaleString("ru-RU")}
@@ -172,7 +172,7 @@ export async function PricingSection() {
                   {planFeatures(plan).map((feature) => (
                     <li
                       key={feature}
-                      className="flex items-start gap-2.5 text-[0.92rem] leading-relaxed text-[var(--ar-mist)]"
+                      className="flex items-start gap-2.5 text-[0.92rem] leading-relaxed text-[var(--ar-mist)] 2xl:text-[1rem]"
                     >
                       <Check size={15} className="mt-1 shrink-0 text-emerald-500" aria-hidden />
                       {feature}
@@ -199,7 +199,7 @@ export async function PricingSection() {
       </ul>
 
       <Reveal delay={180}>
-        <p className="mx-auto mt-8 max-w-2xl text-center text-sm leading-relaxed text-[var(--ar-stone)]">
+        <p className="mx-auto mt-8 max-w-2xl text-center text-sm leading-relaxed text-[var(--ar-stone)] 2xl:mt-10 2xl:max-w-3xl 2xl:text-[0.95rem]">
           Платный тариф подключается после подтверждения оплаты — заявка отправляется из кабинета.
           Баланс можно пополнить отдельно в любой момент.
         </p>

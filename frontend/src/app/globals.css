@@ -75,6 +75,12 @@
   --font-mono: var(--font-jetbrains);
 }
 
+@theme {
+  /* Tailwind stops at 2xl (96rem). A 27" display is 1920-2560 CSS px, which is a
+     different layout problem from a 1536px laptop, so it gets its own step. */
+  --breakpoint-3xl: 120rem;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -843,6 +849,67 @@ textarea {
     transform: scale(1.9);
     opacity: 0;
   }
+}
+
+@layer components {
+/* ---------------------------------------------------------------------------
+   Landing width scale
+   The page was laid out for <=1280px, so on a 27" display (1920-2560 CSS px) a
+   fixed 72rem column sat in the middle with a third of the screen empty either
+   side. The column steps up twice more and then stops: past ~96rem the running
+   line is too long to read comfortably, and the fix becomes type size, not width.
+
+   .landing-container carries the gutter too; .landing-measure is the same scale
+   for elements that bring their own padding (the header pill).
+   --------------------------------------------------------------------------- */
+
+.landing-measure,
+.landing-container {
+  width: 100%;
+  max-width: 72rem;
+  margin-inline: auto;
+}
+
+.landing-container {
+  padding-inline: 1.25rem;
+}
+
+@media (min-width: 40rem) {
+  .landing-container {
+    padding-inline: 2rem;
+  }
+}
+
+/* Each step keeps ~6rem of margin either side at the screen width that triggers
+   it, so the column never crowds the edge of a 1440 or 1536 laptop. */
+@media (min-width: 90rem) {
+  .landing-measure,
+  .landing-container {
+    max-width: 78rem;
+  }
+}
+
+@media (min-width: 96rem) {
+  .landing-measure,
+  .landing-container {
+    max-width: 84rem;
+  }
+
+  .landing-container {
+    padding-inline: 2.5rem;
+  }
+}
+
+@media (min-width: 120rem) {
+  .landing-measure,
+  .landing-container {
+    max-width: 96rem;
+  }
+
+  .landing-container {
+    padding-inline: 3rem;
+  }
+}
 }
 
 .landing-shell {
