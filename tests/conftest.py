@@ -40,6 +40,19 @@ if TEST_DATABASE_URL.startswith("sqlite"):
             "poolclass": StaticPool,
         }
     )
+if TEST_DATABASE_URL.startswith("sqlite"):
+    # A few models use postgresql.JSONB (plans.allowed_models, system_settings.value_json).
+    # SQLite has no such type, so CREATE TABLE fails before any test body runs. Rendering it
+    # as JSON keeps the local, Docker-free run possible; production is unaffected because
+    # this only registers a compiler for the sqlite dialect.
+    from sqlalchemy.dialects.postgresql import JSONB
+    from sqlalchemy.ext.compiler import compiles
+
+    @compiles(JSONB, "sqlite")
+    def _compile_jsonb_on_sqlite(type_, compiler, **kw):  # noqa: ANN001, ANN202
+        return "JSON"
+
+
 engine = create_engine(TEST_DATABASE_URL, **engine_kwargs)
 TestingSessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False, class_=Session)
 

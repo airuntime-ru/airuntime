@@ -1,0 +1,829 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<title>Витрина — AIRuntime × MAX</title>
+<style>
+  /* 16:9 slides printed straight to PDF. @page must equal the .slide box exactly, or
+     Chrome rescales and hairlines appear along the edges. */
+  @page { size: 1280px 720px; margin: 0; }
+
+  :root {
+    /* MAX / VK */
+    --max-blue: #0077ff;
+    --max-violet: #7b2cff;
+    --max-pink: #ff2d87;
+    /* AIRuntime deep space */
+    --ar-space: #05070f;
+    --ar-space-2: #0a1123;
+    --ar-mint: #5ce6b0;
+    /* Ink & surfaces */
+    --ink: #0d1117;
+    --ink-2: #4a5464;
+    --ink-3: #79839a;
+    --line: #dde4ee;
+    --surface: #ffffff;
+    --surface-2: #f3f6fb;
+    --good: #1f8a55;
+
+    --grad: linear-gradient(120deg, var(--max-blue), var(--max-violet));
+    --ar-starfield: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cg fill='%23fff'%3E%3Ccircle cx='20' cy='31' r='1' opacity='.85'/%3E%3Ccircle cx='141' cy='52' r='.8' opacity='.55'/%3E%3Ccircle cx='74' cy='119' r='1.2' opacity='.7'/%3E%3Ccircle cx='181' cy='161' r='.7' opacity='.45'/%3E%3Ccircle cx='41' cy='176' r='.9' opacity='.6'/%3E%3Ccircle cx='112' cy='14' r='.6' opacity='.4'/%3E%3Ccircle cx='166' cy='96' r='1' opacity='.5'/%3E%3Ccircle cx='96' cy='72' r='.6' opacity='.38'/%3E%3Ccircle cx='8' cy='94' r='.7' opacity='.42'/%3E%3Ccircle cx='128' cy='188' r='.8' opacity='.5'/%3E%3C/g%3E%3C/svg%3E");
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0; padding: 0;
+    background: #8d95a4;
+    font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    /* Without this the dark slides print as blank white paper. */
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .slide {
+    position: relative;
+    width: 1280px; height: 720px;
+    overflow: hidden;
+    background: var(--surface);
+    padding: 44px 58px 58px;
+    display: flex; flex-direction: column;
+    page-break-after: always; break-after: page;
+  }
+  .slide:last-child { page-break-after: auto; break-after: auto; }
+  @media screen {
+    body { padding: 24px 0; }
+    .slide { margin: 0 auto 22px; box-shadow: 0 18px 50px -24px rgba(6,12,24,.6); }
+  }
+
+  /* --- typography --------------------------------------------------------- */
+  h1 { margin: 0; font-size: 66px; line-height: 1.02; letter-spacing: -0.035em; font-weight: 800; }
+  h2 { margin: 0 0 5px; font-size: 36px; line-height: 1.08; letter-spacing: -0.028em; font-weight: 750; }
+  h3 { margin: 0 0 7px; font-size: 18.5px; line-height: 1.25; letter-spacing: -0.012em; font-weight: 680; }
+  p  { margin: 0; font-size: 16px; line-height: 1.46; color: var(--ink-2); }
+  .lead { font-size: 20px; line-height: 1.4; color: var(--ink-2); }
+  .small { font-size: 13.5px; line-height: 1.4; color: var(--ink-3); }
+  strong { font-weight: 680; color: var(--ink); }
+  code { font-family: "JetBrains Mono", ui-monospace, Consolas, monospace; font-size: .92em; }
+
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 10px;
+    margin-bottom: 10px;
+    font-size: 11.5px; font-weight: 750; letter-spacing: .17em; text-transform: uppercase;
+    color: var(--max-blue);
+  }
+  /* The gradient tick is the one mark both brands share: MAX blue running into violet. */
+  .eyebrow::before { content: ""; width: 30px; height: 4px; border-radius: 2px; background: var(--grad); }
+
+  .slide-head { margin-bottom: 20px; }
+  .slide-head p { font-size: 16.5px; max-width: 960px; }
+
+  /* --- footer ------------------------------------------------------------- */
+  .foot {
+    position: absolute; left: 58px; right: 58px; bottom: 22px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .foot-brand { display: flex; align-items: center; gap: 9px; font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
+  .foot-x { opacity: .55; font-weight: 600; }
+  .foot-n { font-size: 13px; font-weight: 700; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+  /* --- layout ------------------------------------------------------------- */
+  .body { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; }
+  .cols { display: grid; gap: 16px; }
+  .c2 { grid-template-columns: 1fr 1fr; }
+  .c3 { grid-template-columns: repeat(3, 1fr); }
+  .c4 { grid-template-columns: repeat(4, 1fr); }
+  .split { display: grid; grid-template-columns: 1.04fr .96fr; gap: 26px; align-items: start; }
+
+  .card { background: var(--surface-2); border: 1px solid var(--line); border-radius: 16px; padding: 17px 19px; }
+  .card.plain { background: var(--surface); }
+  .card.accent { background: linear-gradient(140deg, rgba(0,119,255,.08), rgba(123,44,255,.08)); border-color: rgba(0,119,255,.24); }
+  /* A hairline of the shared gradient along the top edge marks the lead card on a slide. */
+  .card.topline { position: relative; overflow: hidden; }
+  .card.topline::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; background: var(--grad); }
+
+  .tile { position: relative; background: var(--surface-2); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px; overflow: hidden; }
+  .tile::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; background: var(--grad); }
+  .tile .value { font-size: 36px; line-height: 1; font-weight: 800; letter-spacing: -.035em; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .tile .unit { font-size: 17px; font-weight: 700; color: var(--ink-2); margin-left: 4px; }
+  .tile .label { margin-top: 8px; font-size: 13.5px; line-height: 1.35; color: var(--ink-2); }
+  .tile .src { margin-top: 5px; font-size: 11.5px; color: var(--ink-3); }
+
+  ul { margin: 0; padding: 0; list-style: none; }
+  li { position: relative; padding-left: 19px; font-size: 15px; line-height: 1.44; color: var(--ink-2); margin-bottom: 6px; }
+  li::before { content: ""; position: absolute; left: 3px; top: 8px; width: 6px; height: 6px; border-radius: 2px; background: var(--max-blue); }
+  li:last-child { margin-bottom: 0; }
+  li strong { color: var(--ink); }
+
+  .step-n {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 9px;
+    background: var(--grad); color: #fff; font-size: 14px; font-weight: 800;
+    margin-bottom: 10px;
+  }
+
+  .kv { display: grid; grid-template-columns: 192px 1fr; gap: 8px 16px; font-size: 15px; line-height: 1.4; }
+  .kv dt { color: var(--ink-3); }
+  .kv dd { margin: 0; color: var(--ink); word-break: break-word; }
+
+  .pill { display: inline-block; padding: 4px 12px; border-radius: 8px; font-size: 12.5px; font-weight: 700; }
+  .pill-fact { background: rgba(31,138,85,.13); color: var(--good); }
+  .pill-guess { background: rgba(255,45,135,.11); color: #d31169; }
+  .pill-blue { background: rgba(0,119,255,.11); color: var(--max-blue); }
+
+  /* --- phone frames -------------------------------------------------------- */
+  /* Shots are whole 390x620 screens, never cropped - a sliced screenshot reads as a
+     broken slide. The bezel makes the aspect ratio look deliberate. */
+  .phone {
+    width: 268px; margin: 0 auto;
+    border-radius: 22px; padding: 7px;
+    background: linear-gradient(160deg, #e7ecf5, #ccd6e6);
+    box-shadow: 0 16px 34px -18px rgba(9,18,40,.5);
+  }
+  .phone img { display: block; width: 100%; border-radius: 16px; }
+  .shot-caption { margin-top: 11px; text-align: center; }
+  .shot-caption b { display: block; font-size: 15px; font-weight: 700; color: var(--ink); margin-bottom: 3px; }
+  .shot-caption span { font-size: 13px; line-height: 1.38; color: var(--ink-3); }
+
+  /* --- pixel-step motif ---------------------------------------------------- */
+  /* The staircase is MAX's own brand device; on the cover it steps across the seam
+     into AIRuntime's starfield, which is the whole idea of the collaboration. */
+  .steps-tr { position: absolute; top: 0; right: 0; }
+  .steps-bl { position: absolute; bottom: 0; left: 0; }
+
+  /* --- cosmos slides (AIRuntime) ------------------------------------------- */
+  .cosmos {
+    color: #eaf1ff;
+    background:
+      radial-gradient(ellipse 90% 60% at 50% -12%, rgba(35,136,255,.28), transparent 62%),
+      radial-gradient(ellipse 60% 52% at 10% 22%, rgba(124,108,255,.26), transparent 66%),
+      radial-gradient(ellipse 66% 54% at 94% 76%, rgba(25,199,210,.16), transparent 68%),
+      linear-gradient(176deg, var(--ar-space) 0%, var(--ar-space-2) 48%, #070c1a 100%);
+  }
+  .cosmos::before {
+    content: ""; position: absolute; inset: 0;
+    background-image: var(--ar-starfield);
+    background-size: 220px 220px;
+    opacity: .5; pointer-events: none;
+  }
+  .cosmos > * { position: relative; z-index: 1; }
+  /* ...except the footer, which must stay pinned to the bottom padding. */
+  .cosmos > .foot { position: absolute; z-index: 2; }
+  .cosmos h2, .cosmos h1 { color: #fff; }
+  .cosmos p, .cosmos li { color: rgba(234,241,255,.74); }
+  .cosmos strong, .cosmos li strong { color: #fff; }
+  .cosmos .card { background: rgba(255,255,255,.055); border-color: rgba(255,255,255,.13); }
+  .cosmos .card.accent { background: linear-gradient(140deg, rgba(35,136,255,.16), rgba(124,108,255,.14)); border-color: rgba(127,182,255,.3); }
+  .cosmos .small { color: rgba(234,241,255,.5); }
+  .cosmos .eyebrow { color: #8ec4ff; }
+  .cosmos li::before { background: #8ec4ff; }
+  .cosmos .foot-brand, .cosmos .foot-n { color: rgba(234,241,255,.52); }
+
+  /* --- cover --------------------------------------------------------------- */
+  .cover { padding: 0; }
+  .cover-left, .cover-right { position: absolute; top: 0; bottom: 0; }
+  .cover-left { left: 0; width: 58%; background: linear-gradient(135deg, var(--max-blue) 0%, #4a53f5 55%, var(--max-violet) 100%); }
+  .cover-right {
+    right: 0; width: 42%;
+    background:
+      radial-gradient(ellipse 80% 60% at 70% 10%, rgba(35,136,255,.32), transparent 64%),
+      linear-gradient(170deg, var(--ar-space) 0%, var(--ar-space-2) 60%, #070c1a 100%);
+  }
+  .cover-right::after {
+    content: ""; position: absolute; inset: 0;
+    background-image: var(--ar-starfield); background-size: 200px 200px; opacity: .55;
+  }
+  /* The seam: a staircase of squares stepping from the MAX side into the AIRuntime side. */
+  .cover-seam { position: absolute; top: 0; bottom: 0; left: 50%; width: 320px; transform: translateX(-42%); }
+  .cover-content { position: relative; padding: 54px 58px; height: 100%; display: flex; flex-direction: column; justify-content: center; width: 64%; color: #fff; }
+  .cover-content .lead { color: rgba(255,255,255,.9); font-size: 22px; max-width: 560px; margin-top: 18px; }
+  .cover-content .eyebrow { color: rgba(255,255,255,.92); }
+  .cover-content .eyebrow::before { background: rgba(255,255,255,.92); }
+  .cover .foot-brand, .cover .foot-n { color: rgba(255,255,255,.7); }
+  .cover-meta { margin-top: 40px; display: flex; gap: 52px; }
+  .cover-meta .k { font-size: 11.5px; font-weight: 750; letter-spacing: .15em; text-transform: uppercase; color: rgba(255,255,255,.62); margin-bottom: 7px; }
+  .cover-meta .v { font-size: 18px; font-weight: 700; color: #fff; }
+  .cover-meta .s { font-size: 13.5px; color: rgba(255,255,255,.76); margin-top: 3px; }
+
+  /* --- lockup -------------------------------------------------------------- */
+  .lockup { display: inline-flex; align-items: center; gap: 14px; }
+  .lockup .x { font-size: 19px; font-weight: 300; color: rgba(255,255,255,.62); }
+  .wordmark { display: inline-flex; align-items: center; gap: 9px; font-size: 19px; font-weight: 800; letter-spacing: .04em; color: #fff; }
+  .maxmark { display: inline-flex; align-items: center; gap: 8px; font-size: 21px; font-weight: 800; letter-spacing: -.01em; color: #fff; }
+  .maxmark .dot { width: 23px; height: 23px; border-radius: 50%; background: #fff; display: inline-flex; align-items: center; justify-content: center; }
+  .maxmark .dot i { width: 8px; height: 8px; border-radius: 50%; background: var(--max-blue); display: block; }
+</style>
+</head>
+<body>
+
+<!-- Reusable defs: the AIRuntime mark, drawn once and referenced by <use>. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="ar-l" x1="110" y1="430" x2="280" y2="50" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#C7B8FF" stop-opacity=".9"/><stop offset=".44" stop-color="#8BDFFF" stop-opacity=".96"/><stop offset="1" stop-color="#1D8CFF" stop-opacity=".88"/>
+    </linearGradient>
+    <linearGradient id="ar-r" x1="238" y1="76" x2="424" y2="430" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#EEFBFF" stop-opacity=".96"/><stop offset=".43" stop-color="#50DBE5" stop-opacity=".92"/><stop offset="1" stop-color="#2388FF" stop-opacity=".9"/>
+    </linearGradient>
+    <linearGradient id="ar-c" x1="146" y1="330" x2="370" y2="258" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#CFC6FF" stop-opacity=".8"/><stop offset=".55" stop-color="#EAF9FF" stop-opacity=".88"/><stop offset="1" stop-color="#14B8D7" stop-opacity=".78"/>
+    </linearGradient>
+    <g id="ar-mark">
+      <path d="M97 404c52-154 88-250 126-297 29-36 63-43 93-29 42 19 77 81 107 183 18 59 28 109 30 132 4 34-16 57-43 57-18 0-32-10-43-31-47-91-91-141-132-151-48-12-91 29-129 122-5 12-9 18-9 14Z" fill="url(#ar-l)" opacity=".88"/>
+      <path d="M217 109c29-36 63-45 96-31 41 18 78 81 110 183 18 59 28 109 30 132 3 31-13 53-38 56-20 2-36-9-48-31-18-36-36-66-54-90-35-159-69-232-96-219Z" fill="url(#ar-r)" opacity=".8"/>
+      <path d="M83 407c55-78 107-119 158-126 58-7 112 31 166 115-12 34-36 47-65 27-40-29-74-45-103-47-34-3-70 14-109 51-26 24-52 21-47-20Z" fill="url(#ar-c)" opacity=".9"/>
+    </g>
+    <g id="steps-corner">
+      <rect x="0" y="0" width="46" height="46" fill="currentColor" opacity=".85"/>
+      <rect x="46" y="46" width="46" height="46" fill="currentColor" opacity=".55"/>
+      <rect x="92" y="0" width="46" height="46" fill="currentColor" opacity=".3"/>
+      <rect x="92" y="92" width="46" height="46" fill="currentColor" opacity=".34"/>
+      <rect x="138" y="46" width="46" height="46" fill="currentColor" opacity=".18"/>
+    </g>
+  </defs>
+</svg>
+
+<!-- ======================= 1. SERVICE SLIDE ============================== -->
+<section class="slide">
+  <svg class="steps-tr" width="184" height="138" viewBox="0 0 184 138" style="color:#0077ff; opacity:.10"><use href="#steps-corner"/></svg>
+  <div class="slide-head">
+    <span class="eyebrow">Слайд 1 · служебный · не оценивается</span>
+    <h2>Техническая информация для проверки</h2>
+  </div>
+  <div class="body">
+    <div class="cols c2">
+      <div>
+        <dl class="kv">
+          <dt>Чат-бот в MAX</dt>
+          <dd><code>https://max.ru/t403_hakaton_max_bot</code><br /><span class="small">«Хакатон МАХ 403», user_id 395683755</span></dd>
+          <dt>Мини-приложение</dt>
+          <dd><code>https://&lt;домен&gt;/max</code><br /><span class="small">Открывается кнопкой <code>open_app</code> и по <code>?startapp=&lt;slug&gt;</code></span></dd>
+          <dt>Git-репозиторий</dt>
+          <dd><code>github.com/airuntime-ru/airuntime</code></dd>
+          <dt>Commit hash</dt>
+          <dd><code>ЗАПОЛНИТЬ</code> &nbsp;<span class="small">ветка <code>main</code></span></dd>
+          <dt>Собственный API</dt>
+          <dd>Не используется как отдельно проверяемый контракт<br /><span class="small">Внутренние эндпоинты — <code>/api/v1/max/*</code></span></dd>
+          <dt>Тестовые учётные записи</dt>
+          <dd>Не требуются: вход — сам аккаунт MAX</dd>
+        </dl>
+        <div class="card" style="margin-top:14px;">
+          <h3>Переменные окружения</h3>
+          <p class="small" style="margin-bottom:7px;">Полный список — в <code>.env.example</code>. Обязательные:</p>
+          <p class="small"><code>MAX_BOT_TOKEN</code> (передаётся отдельно) · <code>MAX_BOT_USERNAME=t403_hakaton_max_bot</code> · <code>MAX_WEBHOOK_SECRET</code> · <code>MAX_MINIAPP_URL</code> · <code>OPENAI_API_KEY</code></p>
+        </div>
+      </div>
+      <div class="card topline">
+        <h3>Порядок прохождения основного сценария</h3>
+        <ul style="margin-top:10px;">
+          <li>Открыть <code>max.ru/t403_hakaton_max_bot</code> и нажать «Начать»</li>
+          <li>Отправить <strong>одним сообщением</strong>: «Автосервис на Лесной. Диагностика 1500, замена масла 900, шиномонтаж 2400. Работаем с 9 до 20»</li>
+          <li>Бот вернёт карточку витрины, кнопку «Открыть витрину» и ссылку для клиентов</li>
+          <li>Открыть эту ссылку <strong>с другого аккаунта MAX</strong> — это роль клиента</li>
+          <li>Выбрать услугу и время, указать имя, нажать «Записаться»</li>
+          <li>Заявка придёт в чат владельца с кнопками «Подтвердить» / «Отклонить»</li>
+          <li>Нажать «Подтвердить» — клиенту придёт уведомление в MAX</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <div class="foot">
+    <span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span>
+    <span class="foot-n">01</span>
+  </div>
+</section>
+
+<!-- ======================= 2. COVER ====================================== -->
+<section class="slide cover">
+  <div class="cover-left"></div>
+  <div class="cover-right"></div>
+  <svg class="cover-seam" viewBox="0 0 320 720" preserveAspectRatio="none" aria-hidden="true">
+    <g fill="#ffffff">
+      <rect x="0"   y="0"   width="64" height="90" opacity=".10"/>
+      <rect x="64"  y="90"  width="64" height="90" opacity=".14"/>
+      <rect x="128" y="180" width="64" height="90" opacity=".12"/>
+      <rect x="64"  y="270" width="64" height="90" opacity=".08"/>
+      <rect x="128" y="360" width="64" height="90" opacity=".13"/>
+      <rect x="192" y="450" width="64" height="90" opacity=".10"/>
+      <rect x="128" y="540" width="64" height="90" opacity=".07"/>
+      <rect x="192" y="630" width="64" height="90" opacity=".11"/>
+    </g>
+  </svg>
+
+  <div class="cover-content">
+    <div class="lockup" style="margin-bottom:28px;">
+      <span class="wordmark">
+        <svg viewBox="55 45 402 402" width="32" height="32" aria-hidden="true"><use href="#ar-mark"/></svg>
+        AIRUNTIME
+      </span>
+      <span class="x">×</span>
+      <span class="maxmark"><span class="dot"><i></i></span>max</span>
+    </div>
+
+    <span class="eyebrow">Трек «Эффективный бизнес»</span>
+    <h1>Витрина</h1>
+    <p class="lead">Рабочий сервис записи в MAX из одного сообщения — без разработчика, без подрядчика, без ожидания.</p>
+
+    <div class="cover-meta">
+      <div>
+        <div class="k">Команда</div>
+        <div class="v">ЗАПОЛНИТЬ: название</div>
+        <div class="s">ЗАПОЛНИТЬ: участники и роли</div>
+      </div>
+      <div>
+        <div class="k">Платформа</div>
+        <div class="v">Чат-бот + мини-приложение</div>
+        <div class="s">@t403_hakaton_max_bot</div>
+      </div>
+    </div>
+  </div>
+  <div class="foot">
+    <span class="foot-brand">Эффективный бизнес</span>
+    <span class="foot-n">02</span>
+  </div>
+</section>
+
+<!-- ======================= 3. EXECUTIVE SUMMARY ========================== -->
+<section class="slide">
+  <svg class="steps-tr" width="184" height="138" viewBox="0 0 184 138" style="color:#7b2cff; opacity:.10"><use href="#steps-corner"/></svg>
+  <div class="slide-head">
+    <span class="eyebrow">Executive summary</span>
+    <h2>Что мы сделали</h2>
+  </div>
+  <div class="body">
+    <p class="lead" style="max-width:1050px; margin-bottom:22px;">
+      Микробизнес услуг ведёт запись руками — в личных сообщениях и по телефону. <strong>Витрина</strong>
+      превращает одно сообщение в чат-боте MAX в работающую витрину с онлайн-записью, которую клиенты
+      открывают прямо в MAX. Заявки возвращаются владельцу в тот же чат.
+    </p>
+    <div class="cols c4">
+      <div class="tile"><div class="value">1</div><div class="label">сообщение от владельца до готовой витрины</div></div>
+      <div class="tile"><div class="value">~10<span class="unit">сек</span></div><div class="label">до ссылки, которую можно отправить клиенту</div></div>
+      <div class="tile"><div class="value">2</div><div class="label">касания клиента: выбрать услугу и время</div></div>
+      <div class="tile"><div class="value">0</div><div class="label">строк кода и сторонних сервисов у предпринимателя</div></div>
+    </div>
+    <div class="cols c3" style="margin-top:18px;">
+      <div class="card accent">
+        <h3>Для кого</h3>
+        <p>Самозанятые и микро-ИП в услугах: автосервис, барбершоп, мастер маникюра, репетитор, клининг. 1–5 человек, без сайта и без CRM.</p>
+      </div>
+      <div class="card accent">
+        <h3>Что закрывает</h3>
+        <p>Ручную запись: заявки ночью, двойные брони, переписку вместо работы. Клиент и владелец остаются в MAX.</p>
+      </div>
+      <div class="card accent">
+        <h3>Почему именно MAX</h3>
+        <p>Витрина открывается внутри чат-бота, телефон берётся из аккаунта MAX, ответ приходит туда же, где клиент записывался.</p>
+      </div>
+    </div>
+  </div>
+  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">03</span></div>
+</section>
+
+<!-- ======================= 4. AUDIENCE & PROBLEM ========================= -->
+<section class="slide">
+  <div class="slide-head">
+    <span class="eyebrow">Аудитория и проблема</span>
+    <h2>Кто именно и что именно болит</h2>
+  </div>
+  <div class="body">
+    <div class="split">
+      <div>
+        <div class="card accent topline" style="margin-bottom:16px;">
+          <h3 style="color:#0077ff;">Формулировка проблемы</h3>
+          <p style="font-size:17.5px; line-height:1.48;">
+            <strong>Владелец микросервиса в сфере услуг</strong> в ситуации, когда клиенты пишут в личные
+            сообщения в любое время, <strong>хочет</strong> принимать записи без ручного согласования каждой,
+            <strong>но сталкивается с тем</strong>, что онлайн-запись требует либо платной CRM с настройкой,
+            либо разработки сайта или бота, <strong>из-за чего</strong> продолжает вести запись вручную —
+            теряет ночные заявки, допускает двойные брони и тратит рабочее время на переписку.
+          </p>
+        </div>
+        <p class="small">
+          Сегмент выбран узко намеренно: одна отрасль, один сценарий, один участок процесса,
+          который цифровое решение закрывает от начала до результата.
+        </p>
+      </div>
+      <div>
+        <div class="cols c2" style="gap:14px;">
+          <div class="tile"><div class="value">6,6<span class="unit">млн</span></div><div class="label">субъектов МСП в едином реестре</div><div class="src">ФНС России, июль 2026</div></div>
+          <div class="tile"><div class="value">81,8<span class="unit">%</span></div><div class="label">всех действующих юрлиц и ИП — это МСП</div><div class="src">ФНС России, 2026</div></div>
+          <div class="tile"><div class="value">+3,5<span class="unit">%</span></div><div class="label">рост числа субъектов МСП год к году</div><div class="src">ФНС России, 2026</div></div>
+          <div class="tile"><div class="value">1,8<span class="unit">млн</span></div><div class="label">работников — заявленная кадровая потребность</div><div class="src">Росстат / Роструд, май 2026</div></div>
+        </div>
+        <p class="small" style="margin-top:14px;">
+          Данные описывают размер и динамику аудитории. Оценку доли микробизнеса без онлайн-записи
+          мы выносим в допущения — см. слайд 14.
+        </p>
+      </div>
+    </div>
+  </div>
+  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">04</span></div>
+</section>
+
+<!-- ======================= 5. AS IS / TO BE ============================== -->
+<section class="slide">
+  <div class="slide-head">
+    <span class="eyebrow">Участок процесса</span>
+    <h2>Что меняется в пользовательском пути</h2>
+    <p>Мы не автоматизируем весь бизнес-процесс — только тот участок, где эффект заметен сразу.</p>
+  </div>
+  <div class="body">
+    <div class="cols c2">
+      <div class="card">
+        <span class="pill pill-guess">As Is — сегодня</span>
+        <ul style="margin-top:13px;">
+          <li>Клиент пишет в личные сообщения или звонит</li>
+          <li>Владелец отвечает вручную, сверяется с блокнотом</li>
+          <li>Согласование времени занимает несколько сообщений</li>
+          <li>Ночные заявки остаются без ответа</li>
+          <li>Прайс приходится пересказывать каждому заново</li>
+          <li>Подтверждение и напоминание — снова вручную</li>
+        </ul>
+      </div>
+      <div class="card accent">
+        <span class="pill pill-fact">To Be — с Витриной</span>
+        <ul style="margin-top:13px;">
+          <li><strong>Исчезает</strong> пересказ прайса: услуги и цены видны в витрине</li>
+          <li><strong>Упрощается</strong> выбор времени: клиент берёт слот сам</li>
+          <li><strong>Автоматически</strong> собирается заявка и падает в чат владельца</li>
+          <li><strong>Быстрее</strong> приходит ответ: подтверждение — одна кнопка</li>
+          <li><strong>Проще</strong> результат: запись принимается круглосуточно</li>
+          <li>Владелец по-прежнему решает сам — продукт не назначает встречи за него</li>
+        </ul>
+      </div>
+    </div>
+    <div class="card plain topline" style="margin-top:18px; border-color:rgba(0,119,255,.24);">
+      <p style="font-size:17.5px;">
+        <strong>Гипотеза.</strong> Если мы поможем владельцу микросервиса принимать записи витриной в MAX,
+        собранной из одного сообщения, доля заявок, дошедших до подтверждения, вырастет, а время на
+        переписку сократится — потому что клиент проходит путь сам, а владельцу остаётся одно решение.
+      </p>
+    </div>
+  </div>
+  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">05</span></div>
+</section>
+
+<!-- ======================= 6. SCENARIO: OWNER ============================ -->
+<section class="slide">
+  <div class="slide-head">
+    <span class="eyebrow">Основной сценарий · часть 1</span>
+    <h2>Владелец: одно сообщение</h2>
+  </div>
+  <div class="body">
+    <div class="cols c4">
+      <div class="card"><span class="step-n">1</span><h3>Открывает бота</h3><p>Находит <code>@t403_hakaton_max_bot</code> в MAX и нажимает «Начать». Регистрации нет — аккаунт MAX и есть вход.</p></div>
+      <div class="card"><span class="step-n">2</span><h3>Описывает бизнес</h3><p>Обычными словами, одним сообщением: название, услуги, цены, часы работы. Никаких форм и полей.</p></div>
+      <div class="card"><span class="step-n">3</span><h3>Получает витрину</h3><p>Через несколько секунд — карточка с составом витрины, кнопка «Открыть витрину» и ссылка для клиентов.</p></div>
+      <div class="card"><span class="step-n">4</span><h3>Правит текстом</h3><p>«Добавь развал-схождение 3000», «убери слоты на завтра» — правка тем же способом, что и создание.</p></div>
+    </div>
+
+    <div class="card" style="margin-top:18px;">
+      <div class="cols c2" style="gap:28px; align-items:center;">
+        <div>
+          <h3>Что уходит владельцу в чат</h3>
+          <p style="font-family:'JetBrains Mono',ui-monospace,monospace; font-size:13.5px; line-height:1.55; color:#0d1117; background:#fff; border:1px solid #dde4ee; border-radius:12px; padding:14px 16px; margin-top:9px;">
+            Автосервис на Лесной<br />Запишитесь за минуту<br /><br />Позиций: 3&nbsp;&nbsp;Слотов: 4&nbsp;&nbsp;Статус: опубликован<br /><br />Ссылка для клиентов:<br />max.ru/t403_hakaton_max_bot?startapp=avtoservis-na-lesnoi
+          </p>
+        </div>
+        <div>
+          <h3>Ссылку можно раздать как угодно</h3>
+          <ul style="margin-top:11px;">
+            <li>Отправить в переписке существующим клиентам</li>
+            <li>Повесить QR-кодом на стойке, в витрине, на визитке</li>
+            <li>Поставить в описание канала или профиля</li>
+          </ul>
+          <p class="small" style="margin-top:12px;">Ссылка открывает мини-приложение <strong>внутри MAX</strong> — клиент не уходит в браузер и ничего не устанавливает.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">06</span></div>
+</section>
+
+<!-- ======================= 7. SCENARIO: CUSTOMER ========================= -->
+<section class="slide">
+  <div class="slide-head">
+    <span class="eyebrow">Основной сценарий · часть 2</span>
+    <h2>Клиент: два касания до записи</h2>
+  </div>
+  <div class="body">
+    <div class="cols c3" style="gap:30px;">
+      <div>
+        <div class="phone"><img src="shot-storefront.png" alt="Витрина: услуги с ценами и слоты времени" /></div>
+        <div class="shot-caption"><b>Выбор</b><span>Услуги с ценами и длительностью, ближайшие слоты. Имя подставляется из профиля MAX.</span></div>
+      </div>
+      <div>
+        <div class="phone"><img src="shot-booking.png" alt="Контактные поля и закреплённая кнопка записи" /></div>
+        <div class="shot-caption"><b>Отправка</b><span>Телефон берётся из MAX по кнопке — вводить ничего не нужно. Кнопка действия закреплена внизу.</span></div>
+      </div>
+      <div>
+        <div class="phone"><img src="shot-owner.png" alt="Кабинет владельца со списком заявок" /></div>
+        <div class="shot-caption"><b>Ответ</b><span>Заявка приходит владельцу в чат и в кабинет. Подтверждение — одна кнопка, клиент узнаёт в MAX.</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">07</span></div>
+</section>
+
+<!-- ======================= 8. EXPECTED EFFECT ============================ -->
+<section class="slide">
+  <div class="slide-head">
+    <span class="eyebrow">Ожидаемый эффект</span>
+    <h2>Что должно измениться и как это проверить</h2>
+    <p>На этапе хакатона это гипотезы. Важно не то, какие цифры мы заявим, а то, что каждую можно измерить после пилота.</p>
+  </div>
+  <div class="body">
+    <div class="cols c2" style="gap:22px;">
+      <div class="card topline">
+        <h3>Метрики, которые снимает сам продукт</h3>
+        <ul style="margin-top:13px;">
+          <li><strong>Доля доведённых записей</strong> — открыл витрину → отправил заявку</li>
+          <li><strong>Время до подтверждения</strong> — от заявки до нажатия владельцем кнопки</li>
+          <li><strong>Доля заявок вне рабочих часов</strong> — прямой замер того, что раньше терялось</li>
+          <li><strong>Ручных сообщений на одну запись</strong> — целевое значение 0</li>
+          <li><strong>Время от «описал» до первой заявки</strong> — скорость выхода на результат</li>
+        </ul>
+        <p class="small" style="margin-top:13px;">Все события уже проходят через наш бэкенд — отдельная аналитика для замера не нужна.</p>
+      </div>
+      <div class="card accent">
+        <h3>Как измеряем</h3>
+        <ul style="margin-top:13px;">
+          <li>Базовая линия снимается <strong>до</strong> запуска: владелец неделю считает заявки и время на переписку вручную</li>
+          <li>Пилот — та же неделя через витрину, сравнение по тем же величинам</li>
+          <li>Сравниваем на одном и том же бизнесе, а не между разными</li>
+        </ul>
+        <div class="card plain" style="margin-top:15px; border-color:rgba(0,119,255,.3);">
+          <p><strong>Критерий успеха пилота:</strong> владелец после недели отказывается возвращаться к ручной записи, и хотя бы одна заявка пришла вне рабочих часов и была подтверждена.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">08</span></div>
+</section>
+
+<!-- ======================= 9. ARCHITECTURE =============================== -->
+<section class="slide cosmos">
+  <div class="slide-head">
+    <span class="eyebrow">Архитектура</span>
+    <h2>Состав решения</h2>
+  </div>
+  <div class="body">
+    <svg viewBox="0 0 1150 262" style="width:100%; height:auto;" aria-label="Схема: MAX, бэкенд AIRuntime, инфраструктура">
+      <defs>
+        <marker id="ar-arrow" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#7fb6ff"/></marker>
+        <style>
+          .bx { fill: rgba(255,255,255,.055); stroke: rgba(255,255,255,.16); rx: 12; }
+          .bxa { fill: rgba(0,119,255,.18); stroke: rgba(127,182,255,.5); rx: 12; }
+          .t { fill: #fff; font: 680 15px Inter, sans-serif; }
+          .s { fill: rgba(234,241,255,.6); font: 12.5px Inter, sans-serif; }
+          .grp { fill: #8ec4ff; font: 750 11.5px Inter, sans-serif; letter-spacing: .13em; }
+          .ln { stroke: #7fb6ff; stroke-width: 1.6; fill: none; marker-end: url(#ar-arrow); }
+          .lbl { fill: rgba(234,241,255,.52); font: 11.5px Inter, sans-serif; }
+        </style>
+      </defs>
+      <text class="grp" x="0" y="13">МЕССЕНДЖЕР MAX</text>
+      <rect class="bxa" x="0" y="26" width="250" height="66"/><text class="t" x="18" y="52">Чат-бот</text><text class="s" x="18" y="74">мастер, правки, заявки владельцу</text>
+      <rect class="bxa" x="0" y="112" width="250" height="66"/><text class="t" x="18" y="138">Мини-приложение</text><text class="s" x="18" y="160">витрина клиента и кабинет</text>
+
+      <text class="grp" x="360" y="13">БЭКЕНД AIRUNTIME</text>
+      <rect class="bx" x="360" y="26" width="250" height="66"/><text class="t" x="378" y="52">Вебхук</text><text class="s" x="378" y="74">секрет в пути, всегда 200</text>
+      <rect class="bx" x="360" y="112" width="250" height="66"/><text class="t" x="378" y="138">API мини-аппа</text><text class="s" x="378" y="160">вход — подпись initData</text>
+      <rect class="bx" x="360" y="198" width="250" height="66"/><text class="t" x="378" y="224">Генератор витрины</text><text class="s" x="378" y="246">LLM → валидируемый конфиг</text>
+
+      <text class="grp" x="720" y="13">ХРАНЕНИЕ И ИНФРАСТРУКТУРА</text>
+      <rect class="bx" x="720" y="26" width="230" height="66"/><text class="t" x="738" y="52">PostgreSQL</text><text class="s" x="738" y="74">владельцы, витрины, заявки</text>
+      <rect class="bx" x="720" y="112" width="230" height="66"/><text class="t" x="738" y="138">Docker + Traefik</text><text class="s" x="738" y="160">HTTPS, сертификат Минцифры</text>
+      <rect class="bx" x="720" y="198" width="230" height="66"/><text class="t" x="738" y="224">LLM-провайдер</text><text class="s" x="738" y="246">внешний, с фоллбэком</text>
+
+      <path class="ln" d="M250,59 H352"/><path class="ln" d="M250,145 H352"/>
+      <path class="ln" d="M610,59 H712"/><path class="ln" d="M610,145 H712"/><path class="ln" d="M610,231 H712"/>
+      <path class="ln" d="M485,178 V190"/>
+      <text class="lbl" x="262" y="52">обновления</text><text class="lbl" x="262" y="138">initData</text>
+    </svg>
+
+    <div class="cols c3" style="margin-top:16px;">
+      <div class="card"><h3>Витрина — это данные, а не код</h3><p>Один мультитенантный мини-апп рендерит все витрины из валидированного конфига. «Описал → клиент может записаться» занимает секунды и не ломается от неудачного ответа модели: кривое поле обрезает схема.</p></div>
+      <div class="card"><h3>Две разные модели доверия</h3><p>Вебхук аутентифицируется секретом в пути — MAX не подписывает доставки. Мини-апп аутентифицируется подписью <code>initData</code> по токену бота. Ни один эндпоинт не принимает идентификатор пользователя из тела запроса.</p></div>
+      <div class="card"><h3>Отказоустойчивость по умолчанию</h3><p>Вебхук всегда отвечает 200: MAX повторяет доставку, и ошибка обработчика стала бы штормом повторов. Если LLM недоступна, витрина собирается черновиком — мастер не упирается в тупик.</p></div>
+    </div>
+  </div>
+  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">09</span></div>
+</section>
+
+<!-- ======================= 10. MAX CAPABILITIES ========================== -->
+<section class="slide">
+  <svg class="steps-bl" width="184" height="138" viewBox="0 0 184 138" style="color:#0077ff; opacity:.08"><use href="#steps-corner"/></svg>
+  <div class="slide-head">
+    <span class="eyebrow">Использование платформы</span>
+    <h2>Что мы берём у MAX и зачем</h2>
+    <p>Каждая возможность закрывает шаг сценария, а не добавлена ради галочки.</p>
+  </div>
+  <div class="body">
+    <div class="cols c3">
+      <div class="card"><h3><code>open_app</code></h3><p>Витрина открывается <strong>внутри</strong> чат-бота. Клиент не уходит в браузер, не видит адресной строки и ничего не устанавливает.</p></div>
+      <div class="card"><h3><code>startapp</code> deep link</h3><p>Одна ссылка на витрину, пригодная для QR-кода и переписки. Она же приводит клиента в бота, если он открыл её впервые.</p></div>
+      <div class="card"><h3><code>requestContact()</code></h3><p>Телефон берётся из аккаунта MAX по кнопке и приходит подписанным. В типовом случае клиент не вводит ни одного символа.</p></div>
+      <div class="card"><h3>Inline-клавиатуры</h3><p>Подтверждение и отклонение заявки — <code>callback</code>-кнопки прямо под сообщением. Владельцу не нужно открывать приложение.</p></div>
+      <div class="card"><h3><code>getViewportSize()</code> и <code>getLaunchContext()</code></h3><p>Интерфейс подстраивается под реальную область просмотра и под то, откуда мини-апп запущен — из чата или из таббара.</p></div>
+      <div class="card accent"><h3>Обратная связь замыкается в MAX</h3><p>Клиент записался в MAX — и ответ о подтверждении получает там же, а не в письме, которое не прочитает.</p></div>
+    </div>
+    <div class="card plain topline" style="margin-top:18px;">
+      <p><strong>Мобильная и веб-версия.</strong> Мини-приложение — обычные HTML, CSS и JavaScript на HTTPS, вёрстка проверена от 320 px. Функциональность одинакова в обеих версиях платформы; MAX Bridge подключается с CDN и деградирует мягко, если какой-то метод в конкретной сборке клиента недоступен.</p>
+    </div>
+  </div>
+  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">10</span></div>
+</section>
+
+<!-- ======================= 11. DATA & INTEGRATIONS ======================= -->
+<section class="slide">
+  <div class="slide-head">
+    <span class="eyebrow">Данные и интеграции</span>
+    <h2>Откуда берутся данные и что мы с ними делаем</h2>
+  </div>
+  <div class="body">
+    <div class="cols c2" style="gap:22px;">
+      <div>
+        <div class="card" style="margin-bottom:16px;">
+          <h3>Данные в решении</h3>
+          <ul style="margin-top:11px;">
+            <li><strong>Описание бизнеса</strong> — вводит сам владелец в чате</li>
+            <li><strong>Профиль и идентификатор MAX</strong> — из подписанных стартовых параметров</li>
+            <li><strong>Телефон клиента</strong> — только если клиент сам поделился через MAX или ввёл вручную</li>
+            <li><strong>Заявки</strong> — то, что клиент выбрал в витрине</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Что мы НЕ делаем</h3>
+          <ul style="margin-top:11px;">
+            <li>Не собираем данные, которые пользователь не ввёл сам</li>
+            <li>Не имитируем интеграции с государственными системами</li>
+            <li>Не передаём токены и секреты в модель и не храним их в репозитории</li>
+            <li>Не включаем продуктовую аналитику на поверхности мини-аппа</li>
+          </ul>
+        </div>
+      </div>
+      <div>
+        <div class="card accent topline" style="margin-bottom:16px;">
+          <h3>Интеграции</h3>
+          <ul style="margin-top:11px;">
+            <li><strong>MAX Bot API</strong> — <code>platform-api2.max.ru</code>: вебхук, сообщения, кнопки. Реальная, работает</li>
+            <li><strong>MAX Bridge</strong> — стартовые параметры, запрос контакта, область просмотра. Реальная</li>
+            <li><strong>LLM-провайдер</strong> — превращает описание в конфигурацию витрины. Реальная, с детерминированным фоллбэком</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Смоделированные данные</h3>
+          <p>В демонстрации используются витрины, созданные нами при проверке сценария: «Автосервис на Лесной» и подобные. Это <strong>не реальные организации</strong>, а примеры, введённые вручную через того же бота, которым пользуется предприниматель. Данные не подставлялись в обход продуктового сценария.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">11</span></div>
+</section>
+
+<!-- ======================= 12. SCALING =================================== -->
+<section class="slide cosmos">
+  <div class="slide-head">
+    <span class="eyebrow">Потенциал масштабирования</span>
+    <h2>Что остаётся неизменным, а что придётся менять</h2>
+    <p>Сильное решение тиражируется не потому, что перечислено много регионов, а потому, что понятно, как именно.</p>
+  </div>
+  <div class="body">
+    <div class="cols c2" style="gap:22px;">
+      <div class="card">
+        <h3 style="color:#8ec4ff;">Ядро продукта — переносится без изменений</h3>
+        <ul style="margin-top:11px;">
+          <li>Механика «одно сообщение → работающий сервис в MAX»</li>
+          <li>Схема витрины: позиции, цена, длительность, слоты, поля заявки</li>
+          <li>Диалог владельца: создание, правка текстом, публикация</li>
+          <li>Маршрут заявки: клиент → чат владельца → ответ клиенту</li>
+          <li>Модель доверия и проверка подписи стартовых параметров</li>
+          <li>Мультитенантный рендер: новый арендатор не требует деплоя</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3 style="color:#ff9ac4;">Переменная часть — адаптируется под контекст</h3>
+        <ul style="margin-top:11px;">
+          <li><strong>Тип витрины:</strong> запись → меню и заказ → заявка. Уже заложены три типа</li>
+          <li><strong>Словарь отрасли:</strong> «услуга» / «позиция» / «объект» в подсказках модели</li>
+          <li><strong>Правила слотов:</strong> длительность, рабочие часы, праздники региона</li>
+          <li><strong>Роли участников:</strong> один мастер → несколько сотрудников → филиалы</li>
+          <li><strong>Интеграции:</strong> календарь, складские остатки, онлайн-оплата</li>
+        </ul>
+      </div>
+    </div>
+    <div class="cols c3" style="margin-top:18px;">
+      <div class="card"><h3>Куда тиражируем в первую очередь</h3><p>Общепит: то же «выбрать позицию → оставить заявку», меняется только тип витрины и словарь. Тип <code>menu</code> уже поддержан.</p></div>
+      <div class="card"><h3>Следующий контекст</h3><p>Локальная аренда и бронирование: инвентарь, сутки вместо часов, залог. Потребуется календарь занятости — первая реальная доработка ядра.</p></div>
+      <div class="card"><h3>Что понадобится</h3><p>Модерация витрин при росте числа арендаторов, лимиты на владельца (заложены), календарь как отдельный сервис, партнёрский профиль MAX для каждой организации.</p></div>
+    </div>
+  </div>
+  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">12</span></div>
+</section>
+
+<!-- ======================= 13. PILOT ===================================== -->
+<section class="slide">
+  <svg class="steps-tr" width="184" height="138" viewBox="0 0 184 138" style="color:#7b2cff; opacity:.09"><use href="#steps-corner"/></svg>
+  <div class="slide-head">
+    <span class="eyebrow">Сценарий пилота</span>
+    <h2>Первый ограниченный запуск</h2>
+  </div>
+  <div class="body">
+    <div class="cols c3">
+      <div class="card"><h3>Для кого и где</h3><p>5–10 микросервисов услуг в одном районе одного города. Критерий отбора: ведут запись в личных сообщениях и не имеют сайта.</p></div>
+      <div class="card"><h3>Как встроится в процесс</h3><p>Витрина заменяет пересказ прайса и согласование времени. Всё остальное — приём, оплата, сама услуга — остаётся как было.</p></div>
+      <div class="card"><h3>Кто участвует</h3><p>Владелец (создаёт и подтверждает), его клиенты (записываются), мы (смотрим метрики). Внешние владельцы процесса не нужны.</p></div>
+      <div class="card"><h3>Как клиенты получат доступ</h3><p>Владелец рассылает ссылку существующим клиентам и вешает QR-код на точке. Отдельного привлечения не требуется — аудитория у бизнеса уже есть.</p></div>
+      <div class="card"><h3>Что понадобится</h3><p>Верифицированный профиль на «MAX для партнёров» и модерация бота, домен с HTTPS, ключ LLM-провайдера. Данные — только те, что вводит владелец.</p></div>
+      <div class="card accent"><h3>Следующий шаг после пилота</h3><p>Если критерий успеха выполнен — снимаем ограничение на отрасль и открываем тип <code>menu</code> для общепита в том же районе, сохраняя ядро.</p></div>
+    </div>
+    <div class="card plain topline" style="margin-top:18px;">
+      <p><strong>Метрики пилота:</strong> доля доведённых записей, время до подтверждения, доля заявок вне рабочих часов, число ручных сообщений на запись — все снимаются самим продуктом и сравниваются с базовой линией, собранной до запуска.</p>
+    </div>
+  </div>
+  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">13</span></div>
+</section>
+
+<!-- ======================= 14. LIMITS & RISKS ============================ -->
+<section class="slide">
+  <div class="slide-head">
+    <span class="eyebrow">Ограничения, риски, допущения</span>
+    <h2>Что мы знаем и чего пока не знаем</h2>
+    <p>Разделяем подтверждённое источником и то, что остаётся нашей гипотезой.</p>
+  </div>
+  <div class="body">
+    <div class="cols c3">
+      <div class="card">
+        <span class="pill pill-blue">Ограничения MVP</span>
+        <ul style="margin-top:13px;">
+          <li>Слоты — текстовые варианты, а не календарь занятости: пересечения не проверяются</li>
+          <li>Нет онлайн-оплаты: витрина доводит до заявки, не до транзакции</li>
+          <li>Один владелец на витрину, без сотрудников и ролей</li>
+          <li>До 10 витрин на владельца</li>
+          <li>Напоминания клиенту пока не отправляются</li>
+        </ul>
+      </div>
+      <div class="card">
+        <span class="pill pill-guess">Допущения — требуют проверки</span>
+        <ul style="margin-top:13px;">
+          <li>Что заметная доля микросервисов ведёт запись вручную <strong>и считает это проблемой</strong></li>
+          <li>Что владелец опишет бизнес одним сообщением, а не бросит на полпути</li>
+          <li>Что клиенту привычнее записаться в MAX, чем написать в личные сообщения</li>
+          <li>Оценки стоимости и сроков альтернатив мы <strong>не подтверждали</strong> исследованием и в расчёт эффекта не берём</li>
+        </ul>
+      </div>
+      <div class="card">
+        <span class="pill pill-guess">Риски</span>
+        <ul style="margin-top:13px;">
+          <li><strong>Качество генерации:</strong> модель может неверно разобрать описание. Митигация — правка текстом и детерминированный фоллбэк</li>
+          <li><strong>Доступность LLM:</strong> витрина собирается черновиком, сценарий не блокируется</li>
+          <li><strong>Модерация и доверие:</strong> при росте числа арендаторов нужна проверка содержимого витрин</li>
+        </ul>
+      </div>
+    </div>
+    <div class="card accent topline" style="margin-top:18px;">
+      <p><strong>Что уже проверено на практике:</strong> сквозной путь «одно сообщение → заявка в чате владельца» проходит целиком и покрыт 23 автотестами, включая попытки подделать подпись стартовых параметров, подставить чужой токен, переиспользовать просроченные параметры и записаться на услугу, которой в витрине нет.</p>
+    </div>
+  </div>
+  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">14</span></div>
+</section>
+
+<!-- ======================= 15. SOURCES =================================== -->
+<section class="slide cosmos">
+  <div class="slide-head">
+    <span class="eyebrow">Источники</span>
+    <h2>На что мы опирались</h2>
+  </div>
+  <div class="body">
+    <div class="cols c2" style="gap:26px;">
+      <div class="card">
+        <h3>Данные об аудитории</h3>
+        <ul style="margin-top:11px;">
+          <li><strong>ФНС России</strong> — Единый реестр субъектов малого и среднего предпринимательства, июль 2026: 6,6 млн субъектов, 81,8% всех действующих юрлиц и ИП, рост 3,5% год к году</li>
+          <li><strong>Росстат</strong> по данным Федеральной службы по труду и занятости — заявленная работодателями потребность в работниках, конец мая 2026</li>
+        </ul>
+        <p class="small" style="margin-top:12px;">Показатели приведены по материалам задания трека со ссылкой на первоисточники.</p>
+      </div>
+      <div class="card">
+        <h3>Техническая документация</h3>
+        <ul style="margin-top:11px;">
+          <li><strong>MAX для разработчиков</strong> — API ботов: методы, вебхуки, типы кнопок, ограничения запросов</li>
+          <li><strong>MAX Bridge</strong> — стартовые параметры, запрос контакта, контекст запуска, область просмотра</li>
+          <li><strong>Валидация данных MAX</strong> — алгоритм проверки подписи стартовых параметров</li>
+          <li><strong>Правила размещения</strong> чат-ботов и мини-приложений на платформе MAX</li>
+          <li><strong>Минцифры России</strong> — корневой сертификат для доступа к API платформы</li>
+        </ul>
+      </div>
+    </div>
+    <div class="card accent" style="margin-top:20px;">
+      <p class="small" style="color:rgba(234,241,255,.74);">Документация MAX развивается: перед сдачей решения состав API и методов сверялся с актуальной версией разделов «API ботов», «MAX Bridge» и «Валидация данных», а не с примерами из сторонних источников.</p>
+    </div>
+  </div>
+  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">15</span></div>
+</section>
+
+</body>
+</html>

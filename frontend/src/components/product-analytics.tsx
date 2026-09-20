@@ -25,19 +25,22 @@ export function ProductAnalytics() {
     return () => window.removeEventListener("airuntime:consent", onConsent);
   }, []);
 
+  const inMiniApp = Boolean(pathname?.startsWith("/max"));
+
   useEffect(() => {
-    if (!allowed) return;
+    // Consent is never collected on the mini app surface, so it must not be tracked either.
+    if (!allowed || inMiniApp) return;
     initProductAnalytics();
     void getMe()
       .then((me) => setAnalyticsUserId(me.id))
       .catch(() => setAnalyticsUserId(null));
-  }, [allowed]);
+  }, [allowed, inMiniApp]);
 
   useEffect(() => {
-    if (!allowed || !pathname) return;
+    if (!allowed || !pathname || inMiniApp) return;
     if (getAnalyticsConsent() !== "granted") return;
     trackScreenView(pathnameToScreen(pathname), { props: { path: pathname.slice(0, 128) } });
-  }, [allowed, pathname]);
+  }, [allowed, inMiniApp, pathname]);
 
   return null;
 }

@@ -6,6 +6,7 @@ from src.db.models.chat_file import ChatFile
 from src.db.models.credit_ledger import CreditLedgerEntry
 from src.db.models.credit_topup import CreditTopUp
 from src.db.models.deployment import Deployment
+from src.db.models.max_platform import MaxLead, MaxOwner, MaxService
 from src.db.models.mcp_server import McpServer
 from src.db.models.message import Message
 from src.db.models.moderation_event import ModerationEvent
@@ -54,4 +55,7 @@ __all__ = [
     "AnalyticsEvent",
     "SupportConversation",
     "SupportMessage",
+    "MaxOwner",
+    "MaxService",
+    "MaxLead",
 ]

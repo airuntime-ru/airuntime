@@ -71,3 +71,8 @@ backend/.email-preview/
 
 # Playwright CLI
 .playwright-cli/
+
+# Generated from docs/max-presentation/deck.html; Chrome rasterises the gradients and the
+# starfield, so the PDF lands well over the repo's binary-size guard. Rebuild it with the
+# command in that folder's README.
+docs/max-presentation/presentation.pdf

@@ -1,0 +1,383 @@
+/* MAX mini app surface.
+   Deliberately not the AIRuntime landing look: inside a messenger the page should read as
+   part of the client, so this follows MAX's own visual language - flat white sheets, a
+   blue-violet accent, generous tap targets - rather than the cosmic marketing theme.
+   Every storefront sets --max-accent from its own config, so one stylesheet themes them all. */
+
+.max-app {
+  --max-accent: #2e7cf6;
+  --max-ink: #10141c;
+  --max-muted: #6b7482;
+  --max-line: rgba(16, 20, 28, 0.08);
+  --max-sheet: #ffffff;
+  --max-bg: #f2f4f7;
+  --max-radius: 14px;
+
+  min-height: 100dvh;
+  background: var(--max-bg);
+  color: var(--max-ink);
+  font-family: var(--font-inter), system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* MAX renders the mini app in a light webview on every platform today, so the dark rules
+   below only apply when the user's own browser asks for dark (dev, or a pasted link). */
+@media (prefers-color-scheme: dark) {
+  .max-app {
+    --max-ink: #f2f5fa;
+    --max-muted: #9aa4b2;
+    --max-line: rgba(255, 255, 255, 0.1);
+    --max-sheet: #171b22;
+    --max-bg: #0e1116;
+  }
+}
+
+.max-shell {
+  width: 100%;
+  max-width: 560px;
+  margin-inline: auto;
+  padding: 16px 16px 40px;
+}
+
+.max-sheet {
+  background: var(--max-sheet);
+  border-radius: var(--max-radius);
+  border: 1px solid var(--max-line);
+}
+
+.max-hero {
+  padding: 20px 18px;
+  background: linear-gradient(135deg, var(--max-accent), color-mix(in srgb, var(--max-accent) 55%, #7b2cff));
+  color: #fff;
+  border-radius: var(--max-radius);
+}
+
+.max-hero h1 {
+  margin: 0;
+  font-size: 1.45rem;
+  line-height: 1.2;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.max-hero p {
+  margin: 8px 0 0;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.max-section-title {
+  margin: 24px 0 10px;
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--max-muted);
+}
+
+.max-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.max-option {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  /* 14px vertical keeps every row above the 44px minimum tap target on a phone. */
+  padding: 14px 16px;
+  background: var(--max-sheet);
+  border: 1.5px solid var(--max-line);
+  border-radius: var(--max-radius);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+
+.max-option:hover {
+  border-color: color-mix(in srgb, var(--max-accent) 40%, var(--max-line));
+}
+
+.max-option[aria-pressed="true"] {
+  border-color: var(--max-accent);
+  background: color-mix(in srgb, var(--max-accent) 7%, var(--max-sheet));
+}
+
+.max-option:focus-visible {
+  outline: 2px solid var(--max-accent);
+  outline-offset: 2px;
+}
+
+/* The label column is spans inside a span, so each part has to be told to stack -
+   otherwise the title and its note run together on one line. */
+.max-option > span:first-child {
+  display: block;
+  min-width: 0;
+}
+
+.max-option-title {
+  display: block;
+  font-size: 0.98rem;
+  font-weight: 550;
+  line-height: 1.3;
+}
+
+.max-option-note {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.84rem;
+  line-height: 1.35;
+  color: var(--max-muted);
+}
+
+.max-option-price {
+  flex-shrink: 0;
+  font-size: 0.98rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.max-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.max-chip {
+  padding: 9px 14px;
+  border-radius: 999px;
+  border: 1.5px solid var(--max-line);
+  background: var(--max-sheet);
+  font: inherit;
+  font-size: 0.9rem;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+
+.max-chip[aria-pressed="true"] {
+  border-color: var(--max-accent);
+  background: color-mix(in srgb, var(--max-accent) 10%, var(--max-sheet));
+  font-weight: 600;
+}
+
+.max-chip:focus-visible {
+  outline: 2px solid var(--max-accent);
+  outline-offset: 2px;
+}
+
+.max-field {
+  display: block;
+  margin-top: 12px;
+}
+
+.max-field span {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 0.85rem;
+  color: var(--max-muted);
+}
+
+.max-input,
+.max-textarea {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1.5px solid var(--max-line);
+  background: var(--max-sheet);
+  color: inherit;
+  font: inherit;
+  font-size: 1rem; /* 16px: anything smaller makes iOS zoom the webview on focus. */
+}
+
+.max-textarea {
+  min-height: 84px;
+  resize: vertical;
+}
+
+.max-input:focus,
+.max-textarea:focus {
+  outline: none;
+  border-color: var(--max-accent);
+}
+
+.max-button {
+  width: 100%;
+  min-height: 50px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 18px;
+  border: none;
+  border-radius: 12px;
+  background: var(--max-accent);
+  color: #fff;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition: opacity 140ms ease;
+}
+
+/* Muted colours rather than opacity: the submit bar is sticky, and a translucent button
+   lets the list scroll through it. */
+.max-button:disabled {
+  background: color-mix(in srgb, var(--max-accent) 26%, var(--max-bg));
+  color: color-mix(in srgb, #fff 70%, transparent);
+  cursor: default;
+}
+
+.max-button-secondary:disabled {
+  background: transparent;
+  color: color-mix(in srgb, var(--max-accent) 45%, transparent);
+}
+
+.max-button-secondary {
+  background: transparent;
+  color: var(--max-accent);
+  border: 1.5px solid color-mix(in srgb, var(--max-accent) 40%, var(--max-line));
+}
+
+.max-button:focus-visible {
+  outline: 2px solid var(--max-accent);
+  outline-offset: 2px;
+}
+
+/* The submit bar sticks to the bottom so the primary action stays reachable with a thumb
+   however long the service list gets. */
+.max-submit-bar {
+  position: sticky;
+  bottom: 0;
+  padding: 12px 0 max(12px, env(safe-area-inset-bottom));
+  background: linear-gradient(180deg, transparent, var(--max-bg) 28%);
+}
+
+.max-note {
+  margin: 10px 0 0;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: var(--max-muted);
+}
+
+.max-error {
+  padding: 14px 16px;
+  border-radius: var(--max-radius);
+  border: 1.5px solid rgba(214, 69, 69, 0.35);
+  background: rgba(214, 69, 69, 0.08);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.max-success {
+  padding: 28px 20px;
+  text-align: center;
+}
+
+.max-success-mark {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 14px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--max-accent) 14%, transparent);
+  color: var(--max-accent);
+  font-size: 1.6rem;
+}
+
+.max-skeleton {
+  border-radius: var(--max-radius);
+  background: linear-gradient(90deg, var(--max-line), color-mix(in srgb, var(--max-line) 40%, transparent), var(--max-line));
+  background-size: 200% 100%;
+  animation: max-shimmer 1.3s linear infinite;
+}
+
+@keyframes max-shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .max-skeleton {
+    animation: none;
+  }
+}
+
+.max-lead {
+  padding: 14px 16px;
+}
+
+.max-lead-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+/* Flex items default to min-width:auto and refuse to shrink below their text, which
+   pushes the badge off a 390px screen. */
+.max-lead-head > :first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.max-badge {
+  flex-shrink: 0;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.max-badge-new {
+  background: color-mix(in srgb, var(--max-accent) 14%, transparent);
+  color: var(--max-accent);
+}
+
+.max-badge-confirmed {
+  background: rgba(31, 138, 85, 0.14);
+  color: #1f8a55;
+}
+
+.max-badge-declined {
+  background: rgba(16, 20, 28, 0.08);
+  color: var(--max-muted);
+}
+
+.max-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.max-row .max-button {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+  min-height: 42px;
+  font-size: 0.92rem;
+}
+
+.max-link-box {
+  display: block;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--max-accent) 6%, transparent);
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  color: var(--max-muted);
+}

@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -25,7 +26,11 @@ function pendingConsent(): AnalyticsConsent | null | "pending" {
  */
 export function ConsentBanner() {
   const choice = useSyncExternalStore(subscribeAnalyticsConsent, readConsent, pendingConsent);
+  const pathname = usePathname();
 
+  // The MAX mini app is a messenger surface, not a website: it sets no analytics storage of
+  // its own, and a consent sheet over a half-screen webview would cover the booking form.
+  if (pathname?.startsWith("/max")) return null;
   if (choice === "pending" || choice !== null) return null;
 
   return (

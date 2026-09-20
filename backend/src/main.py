@@ -29,6 +29,9 @@ from src.api.routers import (  # noqa: E402
     support_staff,
     telegram,
 )
+
+# Aliased: a bare `max` import would shadow the builtin for the whole module.
+from src.api.routers import max as max_router  # noqa: E402
 from src.core.config import settings  # noqa: E402
 from src.services.orchestration import engine as orchestration_engine  # noqa: E402
 from src.services.orchestration.mcp import registry as mcp_registry  # noqa: E402
@@ -90,6 +93,7 @@ app.include_router(deployments.router, prefix=settings.api_prefix)
 app.include_router(providers.router, prefix=settings.api_prefix)
 app.include_router(secrets.router, prefix=settings.api_prefix)
 app.include_router(telegram.router, prefix=settings.api_prefix)
+app.include_router(max_router.router, prefix=settings.api_prefix)
 app.include_router(billing.router, prefix=settings.api_prefix)
 app.include_router(byok.router, prefix=settings.api_prefix)
 app.include_router(orchestration.router, prefix=settings.api_prefix)

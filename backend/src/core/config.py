@@ -67,6 +67,25 @@ class Settings(BaseSettings):
     smtp_use_tls: bool = True
     support_email: str | None = "support@airuntime.ru"
 
+    # --- MAX messenger surface -------------------------------------------------------
+    # One platform-owned bot serves every tenant, so the token lives here rather than in
+    # per-project secrets (those stay for the bots users generate for themselves).
+    max_bot_token: str | None = None
+    # Used to build deep links: https://max.ru/<username>?startapp=<slug>
+    max_bot_username: str | None = None
+    max_api_base_url: str = "https://platform-api2.max.ru"
+    # Shared secret in the webhook path. MAX does not sign deliveries, so an unguessable
+    # path is what keeps the endpoint from accepting forged updates.
+    max_webhook_secret: str | None = None
+    # Where the mini app is served. Defaults to <frontend>/max.
+    max_miniapp_url: str | None = None
+    # MAX recommends invalidating launch parameters after an hour.
+    max_init_data_max_age_seconds: int = 3600
+    # platform-api2.max.ru is signed by the Ministry of Digital Development's CA, which is
+    # in no default trust store. The backend image installs it system-wide, so this is only
+    # needed when running outside the container (scripts, local uvicorn). Empty = system store.
+    max_ca_bundle: str | None = None
+
     # Codex CLI runner (replaces direct provider HTTP calls for the "openai" path - see
     # backend/src/services/agent/codex_runtime.py). Other providers keep the old HTTP path.
     # A fresh, single-purpose container per turn (see codex_worker.py) built from this image -
@@ -204,6 +223,15 @@ class Settings(BaseSettings):
     @property
     def resolved_frontend_url(self) -> str:
         return self.frontend_url
+
+    @property
+    def resolved_max_miniapp_url(self) -> str:
+        return (self.max_miniapp_url or f"{self.resolved_frontend_url.rstrip('/')}/max").rstrip("/")
+
+    def build_max_service_link(self, slug: str) -> str:
+        """Deep link that opens the storefront for ``slug`` inside the MAX bot."""
+        username = (self.max_bot_username or "").strip().lstrip("@")
+        return f"https://max.ru/{username}?startapp={slug}" if username else ""
 
     @property
     def resolved_api_url(self) -> str:
