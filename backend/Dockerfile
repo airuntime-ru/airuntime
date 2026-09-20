@@ -12,6 +12,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends git ca-certific
 # Provenance and fingerprints: infra/certs/README.md
 COPY infra/certs/russian-trusted-ca.crt /usr/local/share/ca-certificates/russian-trusted-ca.crt
 RUN update-ca-certificates
+# ...and again at a path the application itself resolves: httpx verifies against certifi's
+# bundle, so the system store update above reaches curl and openssl but never httpx.
+COPY infra/certs/russian-trusted-ca.crt /app/certs/russian-trusted-ca.crt
 
 COPY backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt

@@ -27,21 +27,34 @@ logger = logging.getLogger(__name__)
 
 REQUEST_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
 
-# Checked into the repo at infra/certs/; see that directory's README for provenance.
-_REPO_CA_BUNDLE = Path(__file__).resolve().parents[4] / "infra" / "certs" / "russian-trusted-ca.crt"
+# Where the Ministry bundle can be found, most specific first. See infra/certs/README.md
+# for provenance and fingerprints.
+_CA_CANDIDATES = (
+    # Copied in by backend/Dockerfile.
+    Path("/app/certs/russian-trusted-ca.crt"),
+    # Running from a checkout: local uvicorn, scripts/max_setup.py, tests.
+    Path(__file__).resolve().parents[4] / "infra" / "certs" / "russian-trusted-ca.crt",
+    # Last resort: a system store somebody ran update-ca-certificates against.
+    Path("/etc/ssl/certs/ca-certificates.crt"),
+)
 
 
 def resolve_ca_bundle(explicit: str | None = None) -> str | bool:
     """What to hand httpx as ``verify``.
 
-    The container installs the Ministry CA system-wide, so ``True`` is right there. Outside
-    it - local uvicorn, scripts/max_setup.py - nothing trusts that CA and every call would
-    die with CERTIFICATE_VERIFY_FAILED, so fall back to the copy in the repo.
+    Note what does *not* work: installing the Ministry CA into the system trust store.
+    httpx verifies against certifi's bundle, so ``update-ca-certificates`` reaches curl and
+    openssl but never this client - the handshake just times out. The bundle has to be named
+    explicitly, which is why the Dockerfile also drops it at a fixed path.
+
+    Trusting only the Ministry chain is deliberate: this client talks to *.max.ru and
+    nothing else, so a narrower trust anchor is the tighter choice.
     """
     if explicit and os.path.exists(explicit):
         return explicit
-    if _REPO_CA_BUNDLE.exists():
-        return str(_REPO_CA_BUNDLE)
+    for candidate in _CA_CANDIDATES:
+        if candidate.exists():
+            return str(candidate)
     return True
 
 

@@ -206,11 +206,11 @@ echo | openssl s_client -connect platform-api2.max.ru:443   -servername platform
    Мини-приложению и вебхуку нужен HTTPS с сертификатом доверенного УЦ — в проде его
    терминирует Traefik.
 3. Накатите миграции: `alembic upgrade head` (ревизия `0027_max_platform`).
-4. Зарегистрируйте бота в MAX:
+4. Зарегистрируйте бота в MAX — из контейнера, где живут настройки и сертификат:
    ```bash
-   python scripts/max_setup.py            # показать текущее состояние
-   python scripts/max_setup.py --apply    # записать команды и подписку на вебхук
+   docker compose -f docker-compose.prod.yml --env-file .env      exec -T backend python /app/scripts/max_setup.py --apply
    ```
+   Без `--apply` команда только покажет текущее состояние и подписки.
 5. В кабинете MAX укажите адрес мини-приложения — `https://<домен>/max`.
 
 ### Ручная проверка

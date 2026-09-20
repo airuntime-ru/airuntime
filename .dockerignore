@@ -32,6 +32,9 @@ letsencrypt/
 
 # Ops / docs / tests not needed in images
 /scripts/
+# ...except the MAX bot setup, which is an operational tool that has to run where the
+# app's settings and dependencies live (i.e. inside the backend container).
+!/scripts/max_setup.py
 /logs/
 /output/
 *.md
