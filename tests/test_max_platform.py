@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import time
 from typing import Any
 from urllib.parse import quote
@@ -20,6 +21,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from src.core.config import settings
+from src.core.logging_setup import RedactWebhookSecret
 from src.db.models.max_platform import MaxLead, MaxOwner, MaxService
 from src.services.max import bot as max_bot
 from src.services.max.client import MaxApiError, MaxBotClient
@@ -220,6 +222,40 @@ class TestInitDataVerification:
             user_id=67890,
             received_hash=signature,
             bot_token=BOT_TOKEN,
+        )
+
+
+# --------------------------------------------------------------------------------------
+# Logging
+# --------------------------------------------------------------------------------------
+
+
+class TestWebhookSecretRedaction:
+    """MAX cannot send a header with its deliveries, so the shared secret lives in the
+    path - and uvicorn's access logger would otherwise print it on every delivery."""
+
+    def _redacted(self, msg: str, args: object = None) -> str:
+        record = logging.LogRecord("uvicorn.access", logging.INFO, "", 0, msg, args, None)
+        RedactWebhookSecret().filter(record)
+        return record.getMessage()
+
+    def test_strips_the_secret_from_an_access_log_line(self) -> None:
+        line = self._redacted(
+            '%s - "%s %s HTTP/1.1" %d',
+            ("10.0.0.1:1", "POST", "/api/v1/max/webhook/n9fZAVHUg3xgPF5Yl0tET5", 200),
+        )
+        assert "n9fZAVHUg3xgPF5Yl0tET5" not in line
+        assert "/api/v1/max/webhook/<secret>" in line
+
+    def test_strips_the_secret_from_a_plain_message(self) -> None:
+        line = self._redacted("delivered to /api/v1/max/webhook/abc123 ok")
+        assert "abc123" not in line
+        assert "/api/v1/max/webhook/<secret>" in line
+
+    def test_leaves_unrelated_lines_alone(self) -> None:
+        assert self._redacted("GET /api/v1/projects/42") == "GET /api/v1/projects/42"
+        assert self._redacted("max_webhook_failed type=%s", ("message_created",)) == (
+            "max_webhook_failed type=message_created"
         )
 
 
