@@ -23,7 +23,7 @@ export function ResultSection() {
         align="center"
       />
 
-      <div className="mt-14 grid gap-6 lg:grid-cols-2 2xl:mx-auto 2xl:mt-16 2xl:max-w-[78rem] 2xl:gap-8">
+      <div className="mt-14 grid gap-6 lg:grid-cols-2 2xl:mx-auto 2xl:mt-16 2xl:max-w-[78rem] 2xl:gap-8 3xl:max-w-[92rem]">
         {/* Browser window */}
         <Reveal>
           <article className="sky-card sky-card-hover h-full rounded-[1.25rem]">

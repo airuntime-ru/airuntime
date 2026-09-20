@@ -19,7 +19,7 @@ export function FinalCtaSection() {
         aria-hidden
       />
 
-      <div className="relative mx-auto max-w-2xl px-5 text-center sm:px-8 2xl:max-w-3xl">
+      <div className="relative mx-auto max-w-2xl px-5 text-center sm:px-8 2xl:max-w-3xl 3xl:max-w-4xl">
         <Reveal>
           <h2
             id="final-cta-title"

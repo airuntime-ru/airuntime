@@ -856,8 +856,12 @@ textarea {
    Landing width scale
    The page was laid out for <=1280px, so on a 27" display (1920-2560 CSS px) a
    fixed 72rem column sat in the middle with a third of the screen empty either
-   side. The column steps up twice more and then stops: past ~96rem the running
-   line is too long to read comfortably, and the fix becomes type size, not width.
+   side. The column steps up with the screen and then stops at 120rem: past that
+   even a card grid starts to read as a scattered row rather than a block.
+
+   The column always grows slower than the screen, so the gutters widen too - the
+   prose inside keeps its own measure (max-w-2xl and friends), only the grids and
+   the hero's two columns take the extra width.
 
    .landing-container carries the gutter too; .landing-measure is the same scale
    for elements that bring their own padding (the header pill).
@@ -908,6 +912,30 @@ textarea {
 
   .landing-container {
     padding-inline: 3rem;
+  }
+}
+
+/* 2560px panels (27-32") and ultrawides, where a 96rem column left 40-55% of the
+   screen empty either side. */
+@media (min-width: 144rem) {
+  .landing-measure,
+  .landing-container {
+    max-width: 108rem;
+  }
+
+  .landing-container {
+    padding-inline: 3.5rem;
+  }
+}
+
+@media (min-width: 160rem) {
+  .landing-measure,
+  .landing-container {
+    max-width: 120rem;
+  }
+
+  .landing-container {
+    padding-inline: 4rem;
   }
 }
 }

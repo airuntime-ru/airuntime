@@ -24,7 +24,7 @@ export function HowItWorksSection() {
           aria-hidden
         />
 
-        <ol className="relative grid gap-12 sm:grid-cols-3 sm:gap-8 2xl:gap-12">
+        <ol className="relative grid gap-12 sm:grid-cols-3 sm:gap-8 2xl:gap-12 3xl:mx-auto 3xl:max-w-[92rem]">
           {howSteps.map((step, index) => {
             const Icon = stepIcons[index] ?? MessageSquare;
             return (
@@ -43,7 +43,7 @@ export function HowItWorksSection() {
                     {step.title}
                   </h3>
                 </div>
-                <p className="mt-3 text-base leading-relaxed text-[var(--ar-mist)] sm:mx-auto sm:max-w-[19rem] 2xl:mt-4 2xl:max-w-[23rem] 2xl:text-[1.05rem]">
+                <p className="mt-3 text-base leading-relaxed text-[var(--ar-mist)] sm:mx-auto sm:max-w-[19rem] 2xl:mt-4 2xl:max-w-[23rem] 2xl:text-[1.05rem] 3xl:max-w-[25rem]">
                   {step.detail}
                 </p>
               </Reveal>

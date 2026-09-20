@@ -136,7 +136,7 @@ export async function PricingSection() {
         align="center"
       />
 
-      <ul className="mt-14 grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:mx-auto 2xl:mt-16 2xl:max-w-[82rem] 2xl:gap-6">
+      <ul className="mt-14 grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:mx-auto 2xl:mt-16 2xl:max-w-[82rem] 2xl:gap-6 3xl:max-w-[94rem]">
         {plans.map((plan, index) => {
           const highlighted = plan.key === "pro";
           return (

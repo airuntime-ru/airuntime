@@ -6,9 +6,12 @@ import { Reveal } from "@/components/ui/reveal";
 import { LOGIN_HREF, PROCESS_ANCHOR, heroCopy, heroStats } from "@/lib/landing/content";
 
 export function HeroSection() {
+  // The hero owns the first screen. Without the min-height, a 1440px-tall display cut
+  // the hero off two thirds up and filled the rest of the fold with a band of the white
+  // section below it. min-height only ever adds space, so shorter screens are untouched.
   return (
     <section
-      className="cosmos cosmos-stars relative overflow-hidden pt-24 sm:pt-28 lg:pt-32 2xl:pt-40"
+      className="cosmos cosmos-stars relative flex flex-col justify-center overflow-hidden pt-24 sm:pt-28 lg:min-h-[calc(100svh-4rem)] lg:pt-32 2xl:pt-40"
       aria-labelledby="hero-title"
     >
       {/* Nebula bloom + orbits. All decorative, all transform-only animation. */}
@@ -31,7 +34,7 @@ export function HeroSection() {
       <div className="cosmos-horizon" aria-hidden />
 
       <div className="landing-container relative grid gap-10 pb-16 sm:pb-20 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:items-center lg:gap-14 lg:pb-24 2xl:gap-20 2xl:pb-32">
-        <div className="max-w-[38rem] 2xl:max-w-[44rem]">
+        <div className="max-w-[38rem] 2xl:max-w-[44rem] 3xl:max-w-[48rem]">
           <Reveal>
             <p className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.06] px-3.5 py-1.5 text-[0.78rem] font-medium tracking-[0.02em] text-white/70 backdrop-blur-sm 2xl:px-4 2xl:py-2 2xl:text-[0.86rem]">
               <span
