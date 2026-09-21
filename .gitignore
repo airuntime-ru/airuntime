@@ -76,3 +76,4 @@ backend/.email-preview/
 # starfield, so the PDF lands well over the repo's binary-size guard. Rebuild it with the
 # command in that folder's README.
 docs/max-presentation/presentation.pdf
+docs/max-presentation/node_modules/
