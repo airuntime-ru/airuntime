@@ -107,7 +107,9 @@ export function getStartParam(): string {
   const fromBridge = (getInitDataUnsafe().start_param ?? "").trim();
   if (fromBridge) return fromBridge;
   if (typeof window === "undefined") return "";
-  return new URLSearchParams(window.location.search).get("startapp")?.trim() ?? "";
+  // MAX also hands the payload to the mini app's own URL as `WebAppStartParam`.
+  const query = new URLSearchParams(window.location.search);
+  return (query.get("WebAppStartParam") ?? query.get("startapp") ?? "").trim();
 }
 
 /** MAX reports its own usable height; on desktop the webview can be shorter than the page. */

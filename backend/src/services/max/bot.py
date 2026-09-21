@@ -148,8 +148,10 @@ def service_link(service: MaxService) -> str:
     return settings.build_max_service_link(service.slug)
 
 
-def _miniapp_url(path: str = "") -> str:
-    return f"{settings.resolved_max_miniapp_url}{path}"
+def _open_app(text: str, slug: str = "") -> dict[str, Any]:
+    """A button opening this bot's mini app. The slug becomes its start_param; no slug
+    means the owner's view, because the mini app routes on start_param alone."""
+    return button_open_app(text, (settings.max_bot_username or "").lstrip("@"), slug)
 
 
 def _service_card(service: MaxService, config: ServiceConfig) -> str:
@@ -170,7 +172,7 @@ def _service_card(service: MaxService, config: ServiceConfig) -> str:
 
 def _service_buttons(service: MaxService) -> list[list[dict[str, Any]]]:
     rows: list[list[dict[str, Any]]] = [
-        [button_open_app("Открыть витрину", _miniapp_url(f"?startapp={service.slug}"))],
+        [_open_app("Открыть витрину", service.slug)],
         [
             button_callback("Изменить", f"edit:{service.id}"),
             button_callback(
@@ -178,7 +180,7 @@ def _service_buttons(service: MaxService) -> list[list[dict[str, Any]]]:
                 f"toggle:{service.id}",
             ),
         ],
-        [button_open_app("Заявки", _miniapp_url("?owner=1"))],
+        [_open_app("Заявки")],
     ]
     return rows
 
@@ -254,9 +256,7 @@ async def _handle_started(db: Session, update: dict[str, Any]) -> None:
             get_client().try_send_message(
                 chat_id=chat_id,
                 text=f"{config.title}\n{config.tagline}".strip(),
-                buttons=[
-                    [button_open_app(config.cta_label, _miniapp_url(f"?startapp={service.slug}"))]
-                ],
+                buttons=[[_open_app(config.cta_label, service.slug)]],
             )
             return
 
@@ -310,7 +310,7 @@ async def _handle_command(db: Session, owner: MaxOwner, chat_id: int, text: str)
         client.try_send_message(
             chat_id=chat_id,
             text="Заявки открываются в мини-приложении.",
-            buttons=[[button_open_app("Открыть заявки", _miniapp_url("?owner=1"))]],
+            buttons=[[_open_app("Открыть заявки")]],
         )
         return
 

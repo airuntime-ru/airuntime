@@ -89,16 +89,24 @@ def button_link(text: str, url: str) -> dict[str, Any]:
     return {"type": "link", "text": text, "url": url}
 
 
-def button_open_app(text: str, url: str) -> dict[str, Any]:
-    """Opens the mini app inside the bot - the one button that makes this a MAX product.
+def button_open_app(text: str, bot_username: str, payload: str = "") -> dict[str, Any]:
+    """Opens the bot's mini app - the one button that makes this a MAX product.
 
-    The address goes in ``web_app``, as a bare string. Two things cost an evening here:
-    ``url`` is what every other button type uses and is silently ignored by this one
-    (``proto.payload: Field 'webApp' cannot be null``), and ``web_app`` is *not* an object -
-    any ``{...}`` under that key comes back as ``proto.payload: Can't deserialize body``.
-    Neither shape is written down; both were established against the live API.
+    ``web_app`` names the *bot* the mini app is wired to; it is not an address. The address
+    is set once per bot in "MAX для партнёров" (Чат-боты -> ⋮ -> Настройки), and what the
+    app should show travels in ``payload``, which arrives as ``start_param`` - the same
+    value a ``max.ru/<bot>?startapp=<payload>`` link carries.
+
+    Source: OpenAppButton in the published OpenAPI schema
+    (github.com/max-messenger/api-schema): ``web_app`` is required, ``payload`` matches
+    ``^[\\w-]*$`` and is at most 512 characters. The API does not validate ``web_app`` when
+    the message is sent - a URL there is accepted without complaint and then opens nothing
+    when tapped, which is exactly how an earlier version of this button shipped.
     """
-    return {"type": "open_app", "text": text, "web_app": url}
+    button: dict[str, Any] = {"type": "open_app", "text": text, "web_app": bot_username}
+    if payload:
+        button["payload"] = payload
+    return button
 
 
 def button_request_contact(text: str) -> dict[str, Any]:

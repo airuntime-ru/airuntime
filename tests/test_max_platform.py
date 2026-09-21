@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import time
 from typing import Any
 from urllib.parse import quote
@@ -331,26 +332,35 @@ class TestConnectRetry:
 
 
 class TestOpenAppButtonShape:
-    """The button that opens the mini app is the product's main CTA, and MAX accepts it
-    only in one undocumented shape. Both wrong shapes were shipped and both were rejected
-    by the live API, so they are pinned here rather than rediscovered."""
+    """The button that opens the mini app is the product's main CTA. Its shape comes from
+    OpenAppButton in MAX's OpenAPI schema (github.com/max-messenger/api-schema), and the
+    platform does not check it when the message is sent - a wrong shape is accepted and
+    then simply opens nothing when tapped. Two wrong shapes shipped before this one."""
 
-    def test_address_goes_in_web_app_as_a_bare_string(self) -> None:
-        button = button_open_app("Открыть витрину", "https://airuntime.ru/max?startapp=x")
+    def test_web_app_names_the_bot_and_payload_carries_the_slug(self) -> None:
+        button = button_open_app("Открыть витрину", "t403_hakaton_max_bot", "avtoservis")
         assert button == {
             "type": "open_app",
             "text": "Открыть витрину",
-            "web_app": "https://airuntime.ru/max?startapp=x",
+            "web_app": "t403_hakaton_max_bot",
+            "payload": "avtoservis",
         }
 
-    def test_does_not_use_the_url_field(self) -> None:
-        # MAX ignores `url` on this button type and answers
-        # `proto.payload: Field 'webApp' cannot be null`.
-        assert "url" not in button_open_app("Открыть", "https://airuntime.ru/max")
+    def test_owner_view_carries_no_payload(self) -> None:
+        # The mini app routes on start_param alone: none means the owner's cabinet.
+        assert "payload" not in button_open_app("Заявки", "t403_hakaton_max_bot")
 
-    def test_web_app_is_not_an_object(self) -> None:
-        # Any `{...}` under web_app comes back as `proto.payload: Can't deserialize body`.
-        assert not isinstance(button_open_app("Открыть", "https://x.ru")["web_app"], dict)
+    def test_never_an_address(self) -> None:
+        # `url` is ignored on this type (`Field 'webApp' cannot be null`), and a URL in
+        # web_app is accepted by the API but opens nothing.
+        button = button_open_app("Открыть", "t403_hakaton_max_bot", "x")
+        assert "url" not in button
+        assert "://" not in button["web_app"]
+
+    def test_slugs_fit_the_payload_pattern(self) -> None:
+        # payload must match ^[\w-]*$ and stay within 512 characters.
+        slug = slugify("Кофейня «Утро» на Мира, 12")
+        assert re.fullmatch(r"[\w-]*", slug) and len(slug) <= 512
 
 
 class TestGeneratorFailsLoudly:
@@ -486,6 +496,16 @@ class TestOwnerToCustomerFlow:
         assert service.status == "live"
         # The deep link is the whole distribution story - it must be in the owner's chat.
         assert f"https://max.ru/airuntime_bot?startapp={service.slug}" in "\n".join(fake_api.texts)
+        # ...and the button next to it opens this bot's mini app on this storefront.
+        open_app = [
+            button
+            for message in fake_api.messages
+            for row in message["buttons"]
+            for button in row
+            if button.get("type") == "open_app"
+        ]
+        assert {"web_app": "airuntime_bot", "payload": service.slug}.items() <= open_app[0].items()
+        assert any("payload" not in button for button in open_app), "owner's cabinet button"
 
         # A customer opens the storefront through that link.
         storefront = client.get(

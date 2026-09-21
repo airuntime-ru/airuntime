@@ -106,6 +106,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(f"webhook:  {_redact(url)}")
     print(f"mini app: {settings.resolved_max_miniapp_url}")
+    # The API cannot set this: every open_app button names the bot, and MAX opens whatever
+    # URL is saved against that bot on the partner platform.
+    print("          set it by hand: MAX для партнёров -> Чат-боты -> ⋮ -> Настройки")
 
     try:
         print("current subscriptions:")
