@@ -404,10 +404,13 @@ services:
 # and 4.1s with 1500, and anything on a deadline (a TLS handshake, a streaming LLM
 # response) intermittently times out instead. Keep these in step with `ip link show ens3`.
 networks:
+  # Deliberately NOT carrying the mtu option: generated user deployments are attached to
+  # this network too, and Docker will not change a network's options in place. Compose
+  # answers the mismatch by trying to recreate the network, fails on those endpoints, and
+  # leaves the stack half down - which is exactly what it did once. Setting it here needs a
+  # window in which the user containers can be stopped as well.
   public:
     name: airuntime_public
-    driver_opts:
-      com.docker.network.driver.mtu: 1400
   internal:
     name: airuntime_internal
     driver_opts:
