@@ -275,11 +275,11 @@ function darkSlide() {
     ["Чат-бот в MAX", "https://max.ru/t403_hakaton_max_bot\n«Хакатон МАХ 403», user_id 395683755"],
     ["Мини-приложение", "https://airuntime.ru/max\nОткрывается кнопкой open_app и по ?startapp=<slug>"],
     ["Git-репозиторий", "github.com/airuntime-ru/airuntime"],
-    ["Commit hash", "ЗАПОЛНИТЬ ПЕРЕД СДАЧЕЙ · ветка main"],
+    ["Commit hash", "b9f419f · ветка main\nb9f419fbe69b0e707b6dfc1a7dbd0cfd6370f6e6"],
     ["Собственный API", "Не используется как отдельно проверяемый контракт\nВнутренние эндпоинты — /api/v1/max/*"],
     ["Тестовые записи", "Не требуются: вход — сам аккаунт MAX"],
   ];
-  let y = 1.5;
+  let y = 1.44;
   for (const [k, v] of rows) {
     const lines = v.split("\n");
     s.addText(k, {
@@ -293,7 +293,7 @@ function darkSlide() {
       ],
       { x: M + 1.9, y, w: 4.5, h: 0.6, fontFace: FONT, isTextBox: true, margin: 0, lineSpacingMultiple: 1.05 }
     );
-    y += lines[1] ? 0.72 : 0.5;
+    y += lines[1] ? 0.68 : 0.5;
   }
 
   const cx = 7.35;
