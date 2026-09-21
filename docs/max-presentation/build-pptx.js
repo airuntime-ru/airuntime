@@ -347,7 +347,7 @@ function darkSlide() {
     ["Чат-бот в MAX", "https://max.ru/t403_hakaton_max_bot\n«Хакатон МАХ 403», user_id 395683755"],
     ["Мини-приложение", "https://airuntime.ru/max\nОткрывается кнопкой open_app и по ?startapp=<slug>"],
     ["Git-репозиторий", "github.com/airuntime-ru/airuntime"],
-    ["Commit hash", "967024c · ветка main\n967024c0cb024ab93c623fc4e6189b29a17cfede"],
+    ["Commit hash", "376b483 · ветка main\n376b483180331187bd900c2dce8a18bda4ca5672"],
     ["Собственный API", "Не используется как отдельно проверяемый контракт\nВнутренние эндпоинты — /api/v1/max/*"],
     ["Тестовые записи", "Не требуются: вход — сам аккаунт MAX"],
   ];
