@@ -19,7 +19,7 @@ import logging
 import re
 
 from src.core.config import settings
-from src.services.agent.events import TextDelta
+from src.services.agent.events import TextDelta, TurnFinished
 from src.services.agent.providers import get_agent_provider
 from src.services.max.schema import ServiceConfig, normalise
 from src.services.provider.factory import resolve_provider_and_model
@@ -86,12 +86,17 @@ def _resolve_llm() -> tuple[str, str, str]:
     trade-off for writing a repository and the wrong one for a chat wizard that has to
     answer in seconds. Here we always take the plain HTTP path, mapping "openai" onto the
     OpenAI-compatible proxy when one is configured so the key matches the endpoint.
+
+    Swapping the endpoint means swapping the model name with it: the two speak different
+    catalogues, and a Codex model id sent to the proxy comes back as HTTP 400 `Model not
+    found`. That failure used to be invisible - see ``_complete``.
     """
     provider, model = resolve_provider_and_model()
     api_key = resolve_platform_api_key(provider) or ""
     wire_provider = provider
     if provider == "openai" and (settings.openai_base_url or "").strip():
         wire_provider = "routerai"
+        model = (settings.max_wizard_model or "").strip() or model
     return wire_provider, model, api_key
 
 
@@ -103,6 +108,7 @@ async def _complete(system_prompt: str, user_text: str) -> str:
     provider = get_agent_provider(wire_provider)
     messages = provider.build_messages([], user_text[:6000])
     collected = ""
+    failure = ""
     async for event in provider.stream_turn(
         system_prompt=system_prompt,
         messages=messages,
@@ -112,6 +118,14 @@ async def _complete(system_prompt: str, user_text: str) -> str:
     ):
         if isinstance(event, TextDelta):
             collected += event.text
+        elif isinstance(event, TurnFinished) and event.stop_reason == "error":
+            failure = event.error or "provider reported an error"
+    # A provider adapter reports a failed turn as an event, not an exception, so collecting
+    # only TextDelta turns "the model is misconfigured" into "the model said nothing" - and
+    # the caller's fallback then quietly serves "Услуга 1, Услуга 2" as if that were the
+    # answer. This is the one place that can tell the difference, so it raises.
+    if failure:
+        raise RuntimeError(f"{wire_provider}/{model}: {failure}")
     return collected
 
 

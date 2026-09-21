@@ -7,6 +7,7 @@ storefront exists, customer books, owner gets it in chat - not any single functi
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -23,8 +24,10 @@ from sqlalchemy.orm import Session
 from src.core.config import settings
 from src.core.logging_setup import RedactWebhookSecret
 from src.db.models.max_platform import MaxLead, MaxOwner, MaxService
+from src.services.agent.events import TurnFinished
 from src.services.max import bot as max_bot
-from src.services.max.client import MaxApiError, MaxBotClient
+from src.services.max import generator
+from src.services.max.client import MaxApiError, MaxBotClient, button_open_app
 from src.services.max.init_data import InitDataError, verify_contact_hash, verify_init_data
 from src.services.max.schema import ServiceConfig, normalise, slugify
 
@@ -325,6 +328,61 @@ class TestConnectRetry:
         with pytest.raises(MaxApiError, match="401"):
             self._client().get_me()
         assert len(calls) == 1
+
+
+class TestOpenAppButtonShape:
+    """The button that opens the mini app is the product's main CTA, and MAX accepts it
+    only in one undocumented shape. Both wrong shapes were shipped and both were rejected
+    by the live API, so they are pinned here rather than rediscovered."""
+
+    def test_address_goes_in_web_app_as_a_bare_string(self) -> None:
+        button = button_open_app("Открыть витрину", "https://airuntime.ru/max?startapp=x")
+        assert button == {
+            "type": "open_app",
+            "text": "Открыть витрину",
+            "web_app": "https://airuntime.ru/max?startapp=x",
+        }
+
+    def test_does_not_use_the_url_field(self) -> None:
+        # MAX ignores `url` on this button type and answers
+        # `proto.payload: Field 'webApp' cannot be null`.
+        assert "url" not in button_open_app("Открыть", "https://airuntime.ru/max")
+
+    def test_web_app_is_not_an_object(self) -> None:
+        # Any `{...}` under web_app comes back as `proto.payload: Can't deserialize body`.
+        assert not isinstance(button_open_app("Открыть", "https://x.ru")["web_app"], dict)
+
+
+class TestGeneratorFailsLoudly:
+    """A provider adapter signals a failed turn with an event, not an exception. Collecting
+    only TextDelta turned `the model is misconfigured` into `the model said nothing`, and
+    the storefront wizard then served its keyword fallback as if it were an answer."""
+
+    def test_raises_when_the_turn_ends_in_an_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        class ErroringProvider:
+            def build_messages(self, history: list, text: str) -> list:
+                return [{"role": "user", "content": text}]
+
+            async def stream_turn(self, **kwargs: Any):
+                yield TurnFinished(
+                    stop_reason="error", error='HTTP 400: {"error":"Model not found"}'
+                )
+
+        monkeypatch.setattr(generator, "_resolve_llm", lambda: ("routerai", "nope", "key"))
+        monkeypatch.setattr(generator, "get_agent_provider", lambda _name: ErroringProvider())
+
+        with pytest.raises(RuntimeError, match="Model not found"):
+            asyncio.run(generator._complete("system", "Автосервис"))
+
+    def test_the_fallback_still_catches_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Loud in the log, but the owner must still get a draft they can edit.
+        async def boom(*args: Any, **kwargs: Any) -> str:
+            raise RuntimeError("routerai/nope: HTTP 400")
+
+        monkeypatch.setattr(generator, "_complete", boom)
+        config, used_llm = asyncio.run(generator.generate_config("Кофейня на Мира"))
+        assert used_llm is False
+        assert config.kind == "menu"
 
 
 # --------------------------------------------------------------------------------------

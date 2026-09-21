@@ -90,8 +90,15 @@ def button_link(text: str, url: str) -> dict[str, Any]:
 
 
 def button_open_app(text: str, url: str) -> dict[str, Any]:
-    """Opens the mini app inside the bot - the one button that makes this a MAX product."""
-    return {"type": "open_app", "text": text, "url": url}
+    """Opens the mini app inside the bot - the one button that makes this a MAX product.
+
+    The address goes in ``web_app``, as a bare string. Two things cost an evening here:
+    ``url`` is what every other button type uses and is silently ignored by this one
+    (``proto.payload: Field 'webApp' cannot be null``), and ``web_app`` is *not* an object -
+    any ``{...}`` under that key comes back as ``proto.payload: Can't deserialize body``.
+    Neither shape is written down; both were established against the live API.
+    """
+    return {"type": "open_app", "text": text, "web_app": url}
 
 
 def button_request_contact(text: str) -> dict[str, Any]:

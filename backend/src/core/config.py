@@ -85,6 +85,12 @@ class Settings(BaseSettings):
     # in no default trust store. The backend image installs it system-wide, so this is only
     # needed when running outside the container (scripts, local uvicorn). Empty = system store.
     max_ca_bundle: str | None = None
+    # The wizard answers in a chat, so it takes the plain HTTP path rather than the Codex
+    # runner - and then the platform's default model name is the wrong vocabulary: it names
+    # a model for the Codex CLI, which the OpenAI-compatible proxy answers with
+    # `Model '...' not found`. Named separately so the wizard cannot silently degrade to its
+    # keyword fallback when the platform default moves. Must exist on OPENAI_BASE_URL.
+    max_wizard_model: str = "~anthropic/claude-haiku-latest"
 
     # Codex CLI runner (replaces direct provider HTTP calls for the "openai" path - see
     # backend/src/services/agent/codex_runtime.py). Other providers keep the old HTTP path.
