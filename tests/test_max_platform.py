@@ -374,6 +374,34 @@ class TestGeneratorFailsLoudly:
         with pytest.raises(RuntimeError, match="Model not found"):
             asyncio.run(generator._complete("system", "Автосервис"))
 
+    def test_a_turn_that_wrote_nothing_is_retried(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # The proxy hands the model a tool set we never asked for, and one turn in three
+        # comes back as a `bash` call with no text. Asking again is what stands between the
+        # owner's real prices and a stub.
+        replies = ["", '{"kind": "booking", "title": "Автосервис на Лесной", "items": []}']
+
+        async def complete(system_prompt: str, user_text: str) -> str:
+            return replies.pop(0)
+
+        monkeypatch.setattr(generator, "_complete", complete)
+        config, used_llm = asyncio.run(generator.generate_config("Автосервис"))
+        assert used_llm is True
+        assert config.title == "Автосервис на Лесной"
+        assert replies == []
+
+    def test_an_unconfigured_provider_is_not_retried(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        calls = 0
+
+        async def complete(system_prompt: str, user_text: str) -> str:
+            nonlocal calls
+            calls += 1
+            raise generator.LlmUnavailable("No LLM provider is configured")
+
+        monkeypatch.setattr(generator, "_complete", complete)
+        config, used_llm = asyncio.run(generator.generate_config("Кофейня на Мира"))
+        assert used_llm is False
+        assert calls == 1, "a missing key does not get better on the third try"
+
     def test_the_fallback_still_catches_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Loud in the log, but the owner must still get a draft they can edit.
         async def boom(*args: Any, **kwargs: Any) -> str:

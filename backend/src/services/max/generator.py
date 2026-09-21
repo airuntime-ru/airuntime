@@ -29,6 +29,16 @@ logger = logging.getLogger(__name__)
 
 GENERATION_TIMEOUT_HINT = "Собираю сервис…"
 
+# Three because the owner is watching a chat: at roughly five seconds a turn, two retries
+# stay inside the patience the "Собираю сервис…" line buys, and a fourth would not.
+_ATTEMPTS = 3
+
+
+class LlmUnavailable(RuntimeError):
+    """No model can be called at all. Distinct from a turn that went wrong: the caller must
+    not burn the retry budget on a deployment that simply has no key."""
+
+
 _SYSTEM_PROMPT = """Ты — генератор витрин для мессенджера MAX.
 
 Пользователь одним сообщением описывает свой бизнес или идею сервиса. Твоя задача — \
@@ -103,7 +113,7 @@ def _resolve_llm() -> tuple[str, str, str]:
 async def _complete(system_prompt: str, user_text: str) -> str:
     wire_provider, model, api_key = _resolve_llm()
     if not api_key:
-        raise RuntimeError("No LLM provider is configured")
+        raise LlmUnavailable("No LLM provider is configured")
 
     provider = get_agent_provider(wire_provider)
     messages = provider.build_messages([], user_text[:6000])
@@ -179,25 +189,43 @@ def _fallback_config(prompt: str) -> ServiceConfig:
     )
 
 
+async def _config_from_model(
+    system_prompt: str, user_text: str, *, what: str
+) -> ServiceConfig | None:
+    """One storefront out of the model, or None once the attempts are used up.
+
+    The retry is not politeness about a flaky network. The proxy in front of the model
+    offers it a tool set we never asked for (we send no ``tools`` at all), and the model
+    answers a measured one turn in three by calling ``bash`` instead of writing anything -
+    a 200 with no text in it. ``tool_choice: "none"`` reduces that and does not remove it,
+    so the only thing between an owner's real prices and a stub reading "Услуга 1" is
+    asking again.
+    """
+    for attempt in range(1, _ATTEMPTS + 1):
+        try:
+            raw = await _complete(system_prompt, user_text)
+            return normalise(ServiceConfig.model_validate(_extract_json(raw)))
+        except LlmUnavailable:
+            logger.warning("%s: no model configured, not retrying", what, exc_info=True)
+            return None
+        except Exception:
+            logger.warning("%s attempt %s/%s failed", what, attempt, _ATTEMPTS, exc_info=True)
+    return None
+
+
 async def generate_config(prompt: str) -> tuple[ServiceConfig, bool]:
     """Return ``(config, used_llm)`` for a fresh storefront."""
-    try:
-        raw = await _complete(_SYSTEM_PROMPT, prompt)
-        config = ServiceConfig.model_validate(_extract_json(raw))
-        return normalise(config), True
-    except Exception:
-        logger.warning("max_generate_config_failed", exc_info=True)
+    config = await _config_from_model(_SYSTEM_PROMPT, prompt, what="max_generate_config")
+    if config is None:
         return _fallback_config(prompt), False
+    return config, True
 
 
 async def apply_edit(config: ServiceConfig, instruction: str) -> tuple[ServiceConfig, bool]:
     """Return ``(config, changed)`` after applying a free-form edit request."""
     current = json.dumps(config.model_dump(), ensure_ascii=False)
     user_text = f"Текущая конфигурация:\n{current}\n\nПросьба пользователя:\n{instruction}"
-    try:
-        raw = await _complete(_EDIT_SYSTEM_PROMPT, user_text)
-        updated = ServiceConfig.model_validate(_extract_json(raw))
-        return normalise(updated), True
-    except Exception:
-        logger.warning("max_apply_edit_failed", exc_info=True)
+    updated = await _config_from_model(_EDIT_SYSTEM_PROMPT, user_text, what="max_apply_edit")
+    if updated is None:
         return config, False
+    return updated, True

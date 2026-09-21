@@ -397,11 +397,21 @@ services:
     networks:
       - internal
 
+# The host's uplink (ens3) has an MTU of 1400, but Docker defaults every bridge it creates
+# to 1500 and hands that to the containers. Nothing fails outright - the kernel just never
+# learns the real path MTU, so every full-size segment is dropped and recovered by
+# retransmission. Measured on this host: the same 544 KB download takes 0.3s with MTU 1400
+# and 4.1s with 1500, and anything on a deadline (a TLS handshake, a streaming LLM
+# response) intermittently times out instead. Keep these in step with `ip link show ens3`.
 networks:
   public:
     name: airuntime_public
+    driver_opts:
+      com.docker.network.driver.mtu: 1400
   internal:
     name: airuntime_internal
+    driver_opts:
+      com.docker.network.driver.mtu: 1400
 
 volumes:
   postgres_data:
