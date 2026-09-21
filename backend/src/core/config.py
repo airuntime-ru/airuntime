@@ -91,6 +91,9 @@ class Settings(BaseSettings):
     # `Model '...' not found`. Named separately so the wizard cannot silently degrade to its
     # keyword fallback when the platform default moves. Must exist on OPENAI_BASE_URL.
     max_wizard_model: str = "~anthropic/claude-haiku-latest"
+    # Banner on the bot's welcome message. MAX downloads it from this URL itself, so it
+    # must be public HTTPS. Empty = <frontend>/brand/max-welcome.jpg; "-" = no banner.
+    max_welcome_image_url: str | None = None
 
     # Codex CLI runner (replaces direct provider HTTP calls for the "openai" path - see
     # backend/src/services/agent/codex_runtime.py). Other providers keep the old HTTP path.
@@ -233,6 +236,13 @@ class Settings(BaseSettings):
     @property
     def resolved_max_miniapp_url(self) -> str:
         return (self.max_miniapp_url or f"{self.resolved_frontend_url.rstrip('/')}/max").rstrip("/")
+
+    @property
+    def resolved_max_welcome_image_url(self) -> str:
+        configured = (self.max_welcome_image_url or "").strip()
+        if configured == "-":
+            return ""
+        return configured or f"{self.resolved_frontend_url.rstrip('/')}/brand/max-welcome.jpg"
 
     def build_max_service_link(self, slug: str) -> str:
         """Deep link that opens the storefront for ``slug`` inside the MAX bot."""

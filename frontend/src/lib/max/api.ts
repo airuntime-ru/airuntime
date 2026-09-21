@@ -104,6 +104,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new MaxApiError(detail || `Ошибка ${response.status}`, response.status);
   }
 
+  // 204 has no body to parse - a delete answers with nothing but its status.
+  if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
 
@@ -124,6 +126,43 @@ export function setLeadStatus(leadId: string, status: Lead["status"]): Promise<L
   return request<Lead>(`/max/miniapp/owner/leads/${leadId}/status`, {
     method: "POST",
     body: JSON.stringify({ status }),
+  });
+}
+
+export type CreatedService = OwnerService & { used_llm: boolean };
+
+/** One description in, a published storefront out. Takes as long as the model does -
+ *  usually 5-10 s - so the caller shows progress rather than a frozen button. */
+export function createService(brief: string): Promise<CreatedService> {
+  return request<CreatedService>("/max/miniapp/owner/services", {
+    method: "POST",
+    body: JSON.stringify({ brief }),
+  });
+}
+
+export function editService(
+  slug: string,
+  instruction: string
+): Promise<OwnerService & { changed: boolean }> {
+  return request(`/max/miniapp/owner/services/${encodeURIComponent(slug)}/edit`, {
+    method: "POST",
+    body: JSON.stringify({ instruction }),
+  });
+}
+
+export function setServiceStatus(
+  slug: string,
+  status: "live" | "disabled"
+): Promise<{ slug: string; status: string }> {
+  return request(`/max/miniapp/owner/services/${encodeURIComponent(slug)}/status`, {
+    method: "POST",
+    body: JSON.stringify({ status }),
+  });
+}
+
+export function deleteService(slug: string): Promise<void> {
+  return request<void>(`/max/miniapp/owner/services/${encodeURIComponent(slug)}`, {
+    method: "DELETE",
   });
 }
 

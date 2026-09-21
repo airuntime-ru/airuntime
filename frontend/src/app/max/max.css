@@ -497,3 +497,264 @@
   overflow-wrap: anywhere;
   color: var(--max-muted);
 }
+
+/* --- owner: making a storefront --------------------------------------------------------
+   The owner side is now where storefronts are made, so the first screen is a composer,
+   not a list. Motion stays on transform only - see the progress bar. */
+
+.max-welcome {
+  padding: 22px 20px 20px;
+}
+
+.max-welcome h1 {
+  font-size: 1.5rem;
+  line-height: 1.15;
+}
+
+.max-welcome p {
+  margin-top: 8px;
+  font-size: 0.95rem;
+}
+
+.max-composer {
+  padding: 16px;
+}
+
+.max-composer-input {
+  min-height: 132px;
+  line-height: 1.45;
+}
+
+.max-examples {
+  margin-top: 10px;
+}
+
+.max-examples .max-chip {
+  padding: 7px 12px;
+  font-size: 0.84rem;
+}
+
+.max-progress {
+  padding: 18px 16px;
+  text-align: center;
+}
+
+.max-progress-track {
+  position: relative;
+  height: 4px;
+  margin: 2px auto 16px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--max-accent) 14%, transparent);
+}
+
+/* An indeterminate bar: one element sliding across, moved with transform only so the
+   compositor does the work while the model thinks. */
+.max-progress-track i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 40%;
+  border-radius: inherit;
+  background: var(--max-accent);
+  animation: max-indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes max-indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .max-progress-track i {
+    animation: none;
+    width: 100%;
+    opacity: 0.6;
+  }
+}
+
+.max-progress-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 650;
+}
+
+.max-progress-brief {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--max-bg);
+  font-size: 0.84rem;
+  line-height: 1.45;
+  color: var(--max-muted);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.max-steps {
+  list-style: none;
+  counter-reset: max-step;
+  margin: 18px 0 24px;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.max-steps li {
+  counter-increment: max-step;
+  position: relative;
+  padding-left: 40px;
+  min-height: 28px;
+}
+
+.max-steps li::before {
+  content: counter(max-step);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--max-accent) 12%, var(--max-sheet));
+  color: var(--max-accent);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.max-steps b {
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.max-steps span {
+  display: block;
+  margin-top: 1px;
+  font-size: 0.84rem;
+  color: var(--max-muted);
+}
+
+/* --- owner: the list of storefronts ------------------------------------------------- */
+
+.max-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 4px 0 10px;
+}
+
+.max-toolbar-add {
+  padding: 7px 14px;
+  border: none;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--max-accent) 12%, var(--max-sheet));
+  color: var(--max-accent);
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.max-toolbar-add:focus-visible {
+  outline: 2px solid var(--max-accent);
+  outline-offset: 2px;
+}
+
+.max-card {
+  padding: 14px 16px 10px;
+}
+
+/* The storefront that was just made gets a ring and a line saying it is live - the one
+   moment the owner should not have to look for. */
+.max-card-fresh {
+  border-color: color-mix(in srgb, var(--max-accent) 55%, var(--max-line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--max-accent) 14%, transparent);
+}
+
+.max-card-flag {
+  margin: 0 0 10px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: #1f8a55;
+}
+
+.max-row .max-button-compact,
+.max-button-compact {
+  min-height: 42px;
+  font-size: 0.92rem;
+}
+
+/* Two by two: four actions in a row do not fit a phone once one of them reads
+   "Опубликовать", and a lone button wrapped onto its own line looks like an accident. */
+.max-card-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 4px;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--max-line);
+}
+
+.max-card-actions button {
+  min-height: 40px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  font: inherit;
+  font-size: 0.86rem;
+  color: var(--max-accent);
+  cursor: pointer;
+}
+
+.max-card-actions button:disabled {
+  color: var(--max-muted);
+  cursor: default;
+}
+
+.max-card-actions button:focus-visible {
+  outline: 2px solid var(--max-accent);
+  outline-offset: 1px;
+}
+
+.max-card-actions .max-danger {
+  color: #c43d3d;
+}
+
+.max-edit {
+  margin: 4px 0 6px;
+}
+
+/* --- owner: previewing a storefront as a customer ---------------------------------- */
+
+.max-preview-bar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 16px;
+  background: color-mix(in srgb, var(--max-bg) 92%, transparent);
+  border-bottom: 1px solid var(--max-line);
+  font-size: 0.8rem;
+  color: var(--max-muted);
+}
+
+.max-preview-back {
+  padding: 4px 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--max-accent);
+  cursor: pointer;
+}

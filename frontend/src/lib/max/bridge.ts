@@ -39,6 +39,20 @@ type MaxWebApp = {
   getViewportSize?: () => Promise<{ height: string; width: string }>;
   getLaunchContext?: () => Promise<{ entryPoint: "tabbar" | "default" }>;
   requestContact?: () => Promise<MaxContactResponse>;
+  shareMaxContent?: (params: { text?: string; link?: string }) => unknown;
+  shareContent?: (params: { text?: string; link?: string }) => unknown;
+  enableClosingConfirmation?: () => void;
+  disableClosingConfirmation?: () => void;
+  BackButton?: {
+    show?: () => void;
+    hide?: () => void;
+    onClick?: (callback: () => void) => void;
+    offClick?: (callback: () => void) => void;
+  };
+  HapticFeedback?: {
+    impactOccurred?: (style: "soft" | "light" | "medium" | "heavy" | "rigid") => void;
+    notificationOccurred?: (type: "success" | "warning" | "error") => void;
+  };
 };
 
 declare global {
@@ -153,5 +167,69 @@ export async function requestContact(): Promise<MaxContactResponse | null> {
   } catch {
     // The user declining is the common case, and it is not an error worth surfacing.
     return null;
+  }
+}
+
+/**
+ * Share a storefront link into a MAX chat.
+ *
+ * `shareMaxContent` opens MAX's own "send to a chat" screen - the natural way to hand a
+ * link to clients who are already in MAX. MAX only honours it from a real tap, so call it
+ * straight from a click handler. Returns false when there is no way to share, and the
+ * caller falls back to copying.
+ */
+export async function shareInMax(text: string, link: string): Promise<boolean> {
+  const app = webApp();
+  try {
+    if (app?.shareMaxContent) {
+      await app.shareMaxContent({ text, link });
+      return true;
+    }
+    if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
+      await navigator.share({ text, url: link });
+      return true;
+    }
+  } catch {
+    // Dismissing the share sheet rejects; that is the user's choice, not a failure.
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Show MAX's own back button in the header while `onBack` is set; hide it again on
+ * cleanup. The returned function undoes both, so it drops straight into an effect.
+ */
+export function attachHeaderBack(onBack: (() => void) | null): () => void {
+  const button = webApp()?.BackButton;
+  if (!onBack || !button?.onClick) return () => {};
+  button.onClick(onBack);
+  button.show?.();
+  return () => {
+    button.offClick?.(onBack);
+    button.hide?.();
+  };
+}
+
+/** A light tap on phones; desktop and web clients have no motor and ignore it. */
+export function haptic(kind: "tap" | "success" | "error"): void {
+  const feedback = webApp()?.HapticFeedback;
+  try {
+    if (kind === "tap") feedback?.impactOccurred?.("light");
+    else feedback?.notificationOccurred?.(kind);
+  } catch {
+    // Older clients throw instead of ignoring; a missing buzz is not worth an error.
+  }
+}
+
+/** Ask before closing while something is in flight - a storefront half-built by the model
+ *  should not vanish because the owner swiped the app away by accident. */
+export function guardClosing(on: boolean): void {
+  const app = webApp();
+  try {
+    if (on) app?.enableClosingConfirmation?.();
+    else app?.disableClosingConfirmation?.();
+  } catch {
+    // Not every client has it; the build still finishes server-side either way.
   }
 }

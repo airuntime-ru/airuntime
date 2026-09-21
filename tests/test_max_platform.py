@@ -27,7 +27,7 @@ from src.core.logging_setup import RedactWebhookSecret
 from src.db.models.max_platform import MaxLead, MaxOwner, MaxService
 from src.services.agent.events import TurnFinished
 from src.services.max import bot as max_bot
-from src.services.max import generator
+from src.services.max import generator, storefronts
 from src.services.max.client import MaxApiError, MaxBotClient, button_open_app
 from src.services.max.init_data import InitDataError, verify_contact_hash, verify_init_data
 from src.services.max.schema import ServiceConfig, normalise, slugify
@@ -78,18 +78,16 @@ class FakeMaxApi:
     def __init__(self) -> None:
         self.messages: list[dict[str, Any]] = []
         self.callbacks: list[str] = []
+        # Set to a MaxApiError to make the next send with a picture fail with it.
+        self.refuse_images_with: Exception | None = None
 
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
         outer = self
 
-        def send_message(
-            self: MaxBotClient,
-            *,
-            chat_id: int,
-            text: str,
-            buttons: list[list[dict[str, Any]]] | None = None,
-        ) -> None:
-            outer.messages.append({"chat_id": chat_id, "text": text, "buttons": buttons or []})
+        def send_message(self: MaxBotClient, **kwargs: Any) -> None:
+            if kwargs.get("image_url") and outer.refuse_images_with is not None:
+                raise outer.refuse_images_with
+            outer.messages.append({"buttons": [], **kwargs})
 
         def answer_callback(
             self: MaxBotClient, callback_id: str, *, notification: str = ""
@@ -103,14 +101,8 @@ class FakeMaxApi:
     def texts(self) -> list[str]:
         return [message["text"] for message in self.messages]
 
-    def button_payloads(self) -> list[str]:
-        payloads: list[str] = []
-        for message in self.messages:
-            for row in message["buttons"]:
-                for button in row:
-                    if button.get("type") == "callback":
-                        payloads.append(str(button.get("payload")))
-        return payloads
+    def buttons(self, message: dict[str, Any]) -> list[dict[str, Any]]:
+        return [button for row in message["buttons"] or [] for button in row]
 
 
 @pytest.fixture()
@@ -156,8 +148,8 @@ def stub_generator(monkeypatch: pytest.MonkeyPatch) -> None:
         data["items"].append({"title": "Шиномонтаж", "price_rub": 2400})
         return normalise(ServiceConfig.model_validate(data)), True
 
-    monkeypatch.setattr(max_bot, "generate_config", generate_config)
-    monkeypatch.setattr(max_bot, "apply_edit", apply_edit)
+    monkeypatch.setattr(storefronts, "generate_config", generate_config)
+    monkeypatch.setattr(storefronts, "apply_edit", apply_edit)
 
 
 def webhook(client: TestClient, update: dict[str, Any]) -> None:
@@ -171,6 +163,28 @@ def owner_headers(user_id: int = OWNER_ID) -> dict[str, str]:
 
 def customer_headers(slug: str, user_id: int = CUSTOMER_ID) -> dict[str, str]:
     return {"X-Max-Init-Data": build_init_data(user_id=user_id, start_param=slug)}
+
+
+BRIEF = "Автосервис на Лесной: диагностика 1500, замена масла 900, с 9 до 20"
+
+
+def create_storefront(client: TestClient, user_id: int = OWNER_ID, brief: str = BRIEF) -> dict:
+    """What the owner's "Собрать витрину" button does."""
+    response = client.post(
+        "/api/v1/max/miniapp/owner/services", json={"brief": brief}, headers=owner_headers(user_id)
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def book(client: TestClient, slug: str, **fields: str) -> dict:
+    response = client.post(
+        "/api/v1/max/miniapp/lead",
+        json={"slug": slug, "item_title": "Диагностика", "customer_name": "Пётр", **fields},
+        headers=customer_headers(slug),
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
 
 
 # --------------------------------------------------------------------------------------
@@ -464,166 +478,261 @@ class TestServiceConfig:
 
 
 @pytest.mark.usefixtures("max_settings", "stub_generator")
-class TestOwnerToCustomerFlow:
-    def test_one_message_produces_a_bookable_storefront(
+class TestTheBotIsAFrontDoor:
+    """The bot no longer builds anything. Whatever it is sent, it answers with the same
+    message and one button into the mini app - which is where storefronts are made."""
+
+    def test_start_gets_the_welcome_with_a_banner_and_the_app_button(
         self, client: TestClient, db: Session, fake_api: FakeMaxApi
     ) -> None:
         webhook(
             client,
             {
                 "update_type": "bot_started",
-                "chat_id": OWNER_ID,
+                "chat_id": 777001,
                 "user": {"user_id": OWNER_ID, "first_name": "Иван"},
             },
         )
-        assert "Опишите свой бизнес" in fake_api.texts[0]
+        (welcome,) = fake_api.messages
+        assert welcome["chat_id"] == 777001
+        assert welcome["html"] is True
+        assert welcome["image_url"].endswith("/brand/max-welcome.jpg")
+        assert "Витрина" in welcome["text"]
+        # One button, and it opens the owner's side of the app: no payload.
+        assert fake_api.buttons(welcome) == [
+            {"type": "open_app", "text": "Открыть Витрину", "web_app": "airuntime_bot"}
+        ]
+        # The dialog is remembered: it is where this person's leads will arrive.
+        assert db.query(MaxOwner).one().max_chat_id == 777001
 
+    def test_any_message_gets_the_same_welcome_and_builds_nothing(
+        self, client: TestClient, db: Session, fake_api: FakeMaxApi
+    ) -> None:
+        # The chat wizard turned "привет" into a storefront called "Ваш бизнес".
+        webhook(client, _message("привет"))
+        webhook(client, _message("Автосервис на Лесной, диагностика 1500"))
+        assert len(fake_api.messages) == 2
+        assert all("Витрина" in text for text in fake_api.texts)
+        assert db.query(MaxService).count() == 0
+
+    def test_group_chats_are_left_alone(self, client: TestClient, fake_api: FakeMaxApi) -> None:
+        webhook(client, _message("всем привет", chat_type="chat"))
+        assert fake_api.messages == []
+
+    def test_messages_from_bots_are_ignored(self, client: TestClient, fake_api: FakeMaxApi) -> None:
+        update = _message("эхо")
+        update["message"]["sender"]["is_bot"] = True
+        webhook(client, update)
+        assert fake_api.messages == []
+
+    def test_a_start_from_a_storefront_link_opens_that_storefront(
+        self, client: TestClient, fake_api: FakeMaxApi
+    ) -> None:
+        service = create_storefront(client)
         webhook(
             client,
             {
-                "update_type": "message_created",
-                "chat_id": OWNER_ID,
-                "message": {
-                    "sender": {"user_id": OWNER_ID, "first_name": "Иван"},
-                    "recipient": {"chat_id": OWNER_ID},
-                    "body": {"text": "Автосервис на Лесной, диагностика 1500, масло 900"},
-                },
+                "update_type": "bot_started",
+                "chat_id": 777002,
+                "payload": service["slug"],
+                "user": {"user_id": CUSTOMER_ID},
             },
         )
+        (invite,) = fake_api.messages
+        assert "Автосервис на Лесной" in invite["text"]
+        (button,) = fake_api.buttons(invite)
+        assert button["payload"] == service["slug"]
 
-        service = db.query(MaxService).filter(MaxService.slug.isnot(None)).one()
-        assert service.title == "Автосервис на Лесной"
-        assert service.status == "live"
-        # The deep link is the whole distribution story - it must be in the owner's chat.
-        assert f"https://max.ru/airuntime_bot?startapp={service.slug}" in "\n".join(fake_api.texts)
-        # ...and the button next to it opens this bot's mini app on this storefront.
-        open_app = [
-            button
-            for message in fake_api.messages
-            for row in message["buttons"]
-            for button in row
-            if button.get("type") == "open_app"
-        ]
-        assert {"web_app": "airuntime_bot", "payload": service.slug}.items() <= open_app[0].items()
-        assert any("payload" not in button for button in open_app), "owner's cabinet button"
+    def test_old_buttons_are_pointed_at_the_app(
+        self, client: TestClient, fake_api: FakeMaxApi
+    ) -> None:
+        webhook(
+            client,
+            {
+                "update_type": "message_callback",
+                "chat_id": 777003,
+                "callback": {"callback_id": "cb-1", "payload": "edit:whatever"},
+            },
+        )
+        assert fake_api.callbacks == ["Всё управление теперь в приложении"]
+        assert "Витрина" in fake_api.texts[-1]
 
-        # A customer opens the storefront through that link.
+    def test_the_banner_is_dropped_only_when_max_refuses_it(
+        self, client: TestClient, fake_api: FakeMaxApi
+    ) -> None:
+        fake_api.refuse_images_with = MaxApiError("MAX API 400: attachment", status=400)
+        webhook(client, _message("привет"))
+        (welcome,) = fake_api.messages
+        assert "image_url" not in welcome
+
+    def test_no_second_copy_after_a_timeout(self, client: TestClient, fake_api: FakeMaxApi) -> None:
+        # MAX may have delivered the first one; a duplicate welcome is worse than none.
+        fake_api.refuse_images_with = MaxApiError("MAX API request failed: ReadTimeout")
+        webhook(client, _message("привет"))
+        assert fake_api.messages == []
+
+
+def _message(text: str, *, chat_type: str = "dialog") -> dict[str, Any]:
+    return {
+        "update_type": "message_created",
+        "message": {
+            "sender": {"user_id": OWNER_ID, "first_name": "Иван"},
+            "recipient": {"chat_id": 777001, "chat_type": chat_type},
+            "body": {"text": text},
+        },
+    }
+
+
+# fake_api for every test: a lead notifies the owner, and without the fake that is a real
+# request to platform-api2.max.ru from the test run.
+@pytest.mark.usefixtures("max_settings", "stub_generator", "fake_api")
+class TestOwnerToCustomerFlow:
+    def test_one_description_in_the_mini_app_produces_a_bookable_storefront(
+        self, client: TestClient, db: Session, fake_api: FakeMaxApi
+    ) -> None:
+        # The owner never wrote to the bot: the mini app is where people start now.
+        service = create_storefront(client)
+        assert service["status"] == "live"
+        assert service["config"]["title"] == "Автосервис на Лесной"
+        # The deep link is the whole distribution story.
+        assert service["link"] == f"https://max.ru/airuntime_bot?startapp={service['slug']}"
+
+        # A customer opens the storefront through that link and books.
         storefront = client.get(
-            f"/api/v1/max/miniapp/service/{service.slug}",
-            headers=customer_headers(service.slug),
+            f"/api/v1/max/miniapp/service/{service['slug']}",
+            headers=customer_headers(service["slug"]),
         )
         assert storefront.status_code == 200
-        config = storefront.json()["config"]
-        assert [item["title"] for item in config["items"]] == ["Диагностика", "Замена масла"]
-
-        created = client.post(
-            "/api/v1/max/miniapp/lead",
-            json={
-                "slug": service.slug,
-                "item_title": "Диагностика",
-                "slot_label": "Сегодня 14:00",
-                "customer_name": "Пётр",
-                "phone": "+79990001122",
-                "comment": "Mazda 6",
-            },
-            headers=customer_headers(service.slug),
-        )
-        assert created.status_code == 201
+        items = [item["title"] for item in storefront.json()["config"]["items"]]
+        assert items == ["Диагностика", "Замена масла"]
+        book(client, service["slug"], slot_label="Сегодня 14:00", phone="+79990001122")
 
         lead = db.query(MaxLead).one()
         assert lead.max_user_id == CUSTOMER_ID
         assert lead.status == "new"
 
-        # ...and it lands in the owner's MAX chat with one-tap resolution.
-        notification = fake_api.messages[-1]
-        assert notification["chat_id"] == OWNER_ID
+        # The owner is told - by user id, since they have no dialog with the bot yet - with
+        # one button that opens their leads in the app.
+        (notification,) = fake_api.messages
+        assert notification["user_id"] == OWNER_ID
+        assert "chat_id" not in notification
         assert "Новая заявка" in notification["text"]
-        assert "Диагностика" in notification["text"]
-        assert f"lead_ok:{lead.id}" in fake_api.button_payloads()
+        assert "Диагностика · Сегодня 14:00" in notification["text"]
+        assert fake_api.buttons(notification) == [
+            {"type": "open_app", "text": "Открыть заявки", "web_app": "airuntime_bot"}
+        ]
 
-    def test_owner_confirms_lead_and_customer_is_told(
+    def test_a_lead_goes_into_the_owners_dialog_once_the_bot_knows_it(
         self, client: TestClient, db: Session, fake_api: FakeMaxApi
     ) -> None:
-        service, lead = self._service_with_lead(client, db)
+        webhook(client, _message("привет"))
+        service = create_storefront(client)
+        book(client, service["slug"])
+        assert fake_api.messages[-1]["chat_id"] == 777001
 
-        webhook(
-            client,
-            {
-                "update_type": "message_callback",
-                "chat_id": OWNER_ID,
-                "callback": {
-                    "callback_id": "cb-1",
-                    "payload": f"lead_ok:{lead.id}",
-                    "user": {"user_id": OWNER_ID},
-                },
-            },
-        )
+    def test_what_customers_type_cannot_format_the_owners_message(
+        self, client: TestClient, fake_api: FakeMaxApi
+    ) -> None:
+        service = create_storefront(client)
+        book(client, service["slug"], customer_name="<b>Пётр</b>", comment="<a href=x>жми</a>")
+        text = fake_api.messages[-1]["text"]
+        assert "<b>Пётр</b>" not in text and "&lt;b&gt;Пётр&lt;/b&gt;" in text
+        assert "<a href" not in text
 
-        db.expire_all()
-        assert db.query(MaxLead).one().status == "confirmed"
-        assert fake_api.callbacks[-1] == "Заявка подтверждена"
-        # The customer booked inside MAX, so the answer belongs there too.
-        customer_message = fake_api.messages[-1]
-        assert customer_message["chat_id"] == CUSTOMER_ID
-        assert "подтверждена" in customer_message["text"]
-
-    def test_edit_applies_to_the_owners_own_service(
+    def test_owner_confirms_in_the_mini_app_and_customer_is_told_once(
         self, client: TestClient, db: Session, fake_api: FakeMaxApi
     ) -> None:
-        service = self._service(client, db)
+        service = create_storefront(client)
+        book(client, service["slug"], slot_label="Сегодня 14:00")
+        lead = db.query(MaxLead).one()
 
-        webhook(
-            client,
-            {
-                "update_type": "message_callback",
-                "chat_id": OWNER_ID,
-                "callback": {
-                    "callback_id": "cb-2",
-                    "payload": f"edit:{service.id}",
-                    "user": {"user_id": OWNER_ID},
-                },
-            },
-        )
-        webhook(
-            client,
-            {
-                "update_type": "message_created",
-                "chat_id": OWNER_ID,
-                "message": {
-                    "sender": {"user_id": OWNER_ID},
-                    "recipient": {"chat_id": OWNER_ID},
-                    "body": {"text": "добавь шиномонтаж 2400"},
-                },
-            },
-        )
+        for _ in range(2):
+            response = client.post(
+                f"/api/v1/max/miniapp/owner/leads/{lead.id}/status",
+                json={"status": "confirmed"},
+                headers=owner_headers(),
+            )
+            assert response.status_code == 200
 
-        db.expire_all()
-        updated = json.loads(db.query(MaxService).one().config_json)
-        assert "Шиномонтаж" in [item["title"] for item in updated["items"]]
+        customer_messages = [m for m in fake_api.messages if m.get("user_id") == CUSTOMER_ID]
+        # Sent by user id: a user id is not a chat id, and a customer who only opened the
+        # mini app has no dialog with the bot. And sent once, not per tap.
+        assert len(customer_messages) == 1
+        assert "Запись подтверждена" in customer_messages[0]["text"]
+        (button,) = fake_api.buttons(customer_messages[0])
+        assert button["payload"] == service["slug"]
 
-    def _service(self, client: TestClient, db: Session) -> MaxService:
-        webhook(
-            client,
-            {
-                "update_type": "message_created",
-                "chat_id": OWNER_ID,
-                "message": {
-                    "sender": {"user_id": OWNER_ID, "first_name": "Иван"},
-                    "recipient": {"chat_id": OWNER_ID},
-                    "body": {"text": "Автосервис на Лесной"},
-                },
-            },
-        )
-        return db.query(MaxService).one()
-
-    def _service_with_lead(self, client: TestClient, db: Session) -> tuple[MaxService, MaxLead]:
-        service = self._service(client, db)
+    def test_a_declined_customer_is_offered_another_time(
+        self, client: TestClient, db: Session, fake_api: FakeMaxApi
+    ) -> None:
+        service = create_storefront(client)
+        book(client, service["slug"], slot_label="Сегодня 14:00")
+        lead = db.query(MaxLead).one()
         client.post(
-            "/api/v1/max/miniapp/lead",
-            json={"slug": service.slug, "item_title": "Диагностика", "customer_name": "Пётр"},
-            headers=customer_headers(service.slug),
+            f"/api/v1/max/miniapp/owner/leads/{lead.id}/status",
+            json={"status": "declined"},
+            headers=owner_headers(),
         )
-        return service, db.query(MaxLead).one()
+        text = fake_api.messages[-1]["text"]
+        assert "Время не подошло" in text and "Сегодня 14:00" in text
+
+    def test_edit_keeps_the_link_that_is_already_out_there(
+        self, client: TestClient, db: Session
+    ) -> None:
+        service = create_storefront(client)
+        response = client.post(
+            f"/api/v1/max/miniapp/owner/services/{service['slug']}/edit",
+            json={"instruction": "добавь шиномонтаж 2400"},
+            headers=owner_headers(),
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["changed"] is True
+        assert body["slug"] == service["slug"]
+        assert "Шиномонтаж" in [item["title"] for item in body["config"]["items"]]
+
+    def test_unpublished_storefront_is_hidden_from_customers_but_not_its_owner(
+        self, client: TestClient
+    ) -> None:
+        service = create_storefront(client)
+        slug = service["slug"]
+        response = client.post(
+            f"/api/v1/max/miniapp/owner/services/{slug}/status",
+            json={"status": "disabled"},
+            headers=owner_headers(),
+        )
+        assert response.json()["status"] == "disabled"
+        path = f"/api/v1/max/miniapp/service/{slug}"
+        assert client.get(path, headers=customer_headers(slug)).status_code == 404
+        assert client.get(path, headers=owner_headers()).status_code == 200
+
+    def test_delete_takes_the_leads_with_it(self, client: TestClient, db: Session) -> None:
+        service = create_storefront(client)
+        book(client, service["slug"])
+        response = client.delete(
+            f"/api/v1/max/miniapp/owner/services/{service['slug']}", headers=owner_headers()
+        )
+        assert response.status_code == 204
+        assert db.query(MaxService).count() == 0
+        assert db.query(MaxLead).count() == 0
+
+    def test_a_vague_brief_is_refused_rather_than_turned_into_a_storefront(
+        self, client: TestClient, db: Session
+    ) -> None:
+        response = client.post(
+            "/api/v1/max/miniapp/owner/services", json={"brief": "привет"}, headers=owner_headers()
+        )
+        assert response.status_code == 422
+        assert "подробнее" in response.json()["detail"]
+        assert db.query(MaxService).count() == 0
+
+    def test_the_eleventh_storefront_is_refused(self, client: TestClient) -> None:
+        for _ in range(storefronts.MAX_SERVICES_PER_OWNER):
+            create_storefront(client)
+        response = client.post(
+            "/api/v1/max/miniapp/owner/services", json={"brief": BRIEF}, headers=owner_headers()
+        )
+        assert response.status_code == 409
 
 
 # --------------------------------------------------------------------------------------
@@ -647,11 +756,11 @@ class TestMiniAppAuthorisation:
     def test_lead_rejects_items_the_storefront_does_not_offer(
         self, client: TestClient, db: Session, fake_api: FakeMaxApi
     ) -> None:
-        service = TestOwnerToCustomerFlow()._service(client, db)
+        slug = create_storefront(client)["slug"]
         response = client.post(
             "/api/v1/max/miniapp/lead",
-            json={"slug": service.slug, "item_title": "Перевод 100000 рублей"},
-            headers=customer_headers(service.slug),
+            json={"slug": slug, "item_title": "Перевод 100000 рублей"},
+            headers=customer_headers(slug),
         )
         # Otherwise the owner's chat becomes a place strangers can write arbitrary text into.
         assert response.status_code == 422
@@ -659,22 +768,19 @@ class TestMiniAppAuthorisation:
     def test_lead_rejects_unknown_slot(
         self, client: TestClient, db: Session, fake_api: FakeMaxApi
     ) -> None:
-        service = TestOwnerToCustomerFlow()._service(client, db)
+        slug = create_storefront(client)["slug"]
         response = client.post(
             "/api/v1/max/miniapp/lead",
-            json={
-                "slug": service.slug,
-                "item_title": "Диагностика",
-                "slot_label": "Когда захочу",
-            },
-            headers=customer_headers(service.slug),
+            json={"slug": slug, "item_title": "Диагностика", "slot_label": "Когда захочу"},
+            headers=customer_headers(slug),
         )
         assert response.status_code == 422
 
     def test_owner_cannot_resolve_another_owners_lead(
         self, client: TestClient, db: Session, fake_api: FakeMaxApi
     ) -> None:
-        _, lead = TestOwnerToCustomerFlow()._service_with_lead(client, db)
+        book(client, create_storefront(client)["slug"])
+        lead = db.query(MaxLead).one()
         stranger = MaxOwner(max_user_id=999333, max_chat_id=999333)
         db.add(stranger)
         db.commit()
@@ -687,6 +793,23 @@ class TestMiniAppAuthorisation:
         assert response.status_code == 404
         db.expire_all()
         assert db.query(MaxLead).one().status == "new"
+
+    def test_owner_cannot_touch_another_owners_storefront(
+        self, client: TestClient, db: Session, fake_api: FakeMaxApi
+    ) -> None:
+        slug = create_storefront(client)["slug"]
+        create_storefront(client, user_id=999444)  # the stranger has storefronts of their own
+        stranger = owner_headers(999444)
+        base = f"/api/v1/max/miniapp/owner/services/{slug}"
+        assert client.delete(base, headers=stranger).status_code == 404
+        assert (
+            client.post(f"{base}/edit", json={"instruction": "всё бесплатно"}, headers=stranger)
+        ).status_code == 404
+        assert (
+            client.post(f"{base}/status", json={"status": "disabled"}, headers=stranger)
+        ).status_code == 404
+        db.expire_all()
+        assert db.query(MaxService).filter(MaxService.slug == slug).one().status == "live"
 
     def test_overview_is_empty_rather_than_failing_for_a_first_time_visitor(
         self, client: TestClient

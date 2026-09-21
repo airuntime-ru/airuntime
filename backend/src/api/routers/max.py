@@ -16,7 +16,7 @@ import json
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -26,6 +26,7 @@ from src.db.models.max_platform import (
     LEAD_DECLINED,
     LEAD_DONE,
     LEAD_NEW,
+    SERVICE_DISABLED,
     SERVICE_LIVE,
     MaxLead,
     MaxOwner,
@@ -33,6 +34,7 @@ from src.db.models.max_platform import (
 )
 from src.db.session import get_db
 from src.services.max import bot as max_bot
+from src.services.max import storefronts
 from src.services.max.init_data import InitDataError, MaxLaunchContext, verify_init_data
 from src.services.max.schema import ServiceConfig
 
@@ -123,13 +125,20 @@ def _service_payload(service: MaxService) -> dict:
 def get_service(
     slug: str,
     db: Session = Depends(get_db),
-    _: MaxLaunchContext = Depends(require_launch_context),
+    launch: MaxLaunchContext = Depends(require_launch_context),
 ) -> dict:
     """The storefront a customer sees. Verified launch data is required even though the
-    content is public — it is what proves the request came from inside MAX."""
+    content is public — it is what proves the request came from inside MAX.
+
+    An unpublished storefront is still shown to its own owner, so they can check a change
+    before letting customers see it."""
     service = db.query(MaxService).filter(MaxService.slug == slug).first()
-    if service is None or service.status != SERVICE_LIVE:
+    if service is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
+    if service.status != SERVICE_LIVE:
+        owner = db.query(MaxOwner).filter(MaxOwner.id == service.owner_id).first()
+        if owner is None or owner.max_user_id != launch.user_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
     return _service_payload(service)
 
 
@@ -192,6 +201,133 @@ def _owner_or_404(db: Session, launch: MaxLaunchContext) -> MaxOwner:
     return owner
 
 
+def _owned_service_or_404(db: Session, owner: MaxOwner, slug: str) -> MaxService:
+    """Another owner's storefront answers exactly like a missing one."""
+    service = (
+        db.query(MaxService)
+        .filter(MaxService.slug == slug, MaxService.owner_id == owner.id)
+        .first()
+    )
+    if service is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
+    return service
+
+
+def _owner_service_payload(service: MaxService, new_leads: int) -> dict:
+    return {
+        **_service_payload(service),
+        "link": settings.build_max_service_link(service.slug),
+        "new_leads": new_leads,
+    }
+
+
+def _new_leads(db: Session, service: MaxService) -> int:
+    return (
+        db.query(MaxLead)
+        .filter(MaxLead.service_id == service.id, MaxLead.status == LEAD_NEW)
+        .count()
+    )
+
+
+# A storefront needs something to be built from. The old chat wizard turned "привет" into
+# a landing page called "Ваш бизнес" with nothing on it; this is the floor that stops it.
+MIN_BRIEF_LENGTH = 12
+
+
+class CreateServiceRequest(BaseModel):
+    brief: str = Field(min_length=1, max_length=2000)
+
+
+@router.post("/miniapp/owner/services", status_code=status.HTTP_201_CREATED)
+async def create_service(
+    payload: CreateServiceRequest,
+    db: Session = Depends(get_db),
+    launch: MaxLaunchContext = Depends(require_launch_context),
+) -> dict:
+    """One description in, a published storefront out - the product in one request.
+
+    Takes as long as the model does (usually 5-10 s, up to three attempts); the mini app
+    shows progress for it. The owner row is created here if this is someone's first
+    storefront: the mini app, not the chat, is now where people start."""
+    brief = payload.brief.strip()
+    if len(brief) < MIN_BRIEF_LENGTH:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Опишите чуть подробнее: чем вы занимаетесь и что предлагаете клиентам",
+        )
+    owner = storefronts.ensure_owner(
+        db,
+        user_id=launch.user_id,
+        first_name=launch.first_name,
+        last_name=launch.last_name,
+        username=launch.username,
+    )
+    db.commit()
+    existing = db.query(MaxService).filter(MaxService.owner_id == owner.id).count()
+    if existing >= storefronts.MAX_SERVICES_PER_OWNER:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Можно держать до {storefronts.MAX_SERVICES_PER_OWNER} витрин — "
+                "удалите ненужную, чтобы создать новую"
+            ),
+        )
+    service, used_llm = await storefronts.create_storefront(db, owner, brief)
+    return {**_owner_service_payload(service, 0), "used_llm": used_llm}
+
+
+class EditServiceRequest(BaseModel):
+    instruction: str = Field(min_length=3, max_length=1000)
+
+
+@router.post("/miniapp/owner/services/{slug}/edit")
+async def edit_service(
+    slug: str,
+    payload: EditServiceRequest,
+    db: Session = Depends(get_db),
+    launch: MaxLaunchContext = Depends(require_launch_context),
+) -> dict:
+    owner = _owner_or_404(db, launch)
+    service = _owned_service_or_404(db, owner, slug)
+    changed = await storefronts.edit_storefront(db, service, payload.instruction.strip())
+    db.refresh(service)
+    return {**_owner_service_payload(service, _new_leads(db, service)), "changed": changed}
+
+
+class ServiceStatusRequest(BaseModel):
+    status: str = Field(pattern=f"^({SERVICE_LIVE}|{SERVICE_DISABLED})$")
+
+
+@router.post("/miniapp/owner/services/{slug}/status")
+def set_service_status(
+    slug: str,
+    payload: ServiceStatusRequest,
+    db: Session = Depends(get_db),
+    launch: MaxLaunchContext = Depends(require_launch_context),
+) -> dict:
+    owner = _owner_or_404(db, launch)
+    service = _owned_service_or_404(db, owner, slug)
+    service.status = payload.status
+    db.commit()
+    return {"slug": service.slug, "status": service.status}
+
+
+@router.delete("/miniapp/owner/services/{slug}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_service(
+    slug: str,
+    db: Session = Depends(get_db),
+    launch: MaxLaunchContext = Depends(require_launch_context),
+) -> Response:
+    owner = _owner_or_404(db, launch)
+    service = _owned_service_or_404(db, owner, slug)
+    # Explicit rather than trusting ON DELETE CASCADE: SQLite, which the test suite can run
+    # on, does not enforce foreign keys unless asked to.
+    db.query(MaxLead).filter(MaxLead.service_id == service.id).delete(synchronize_session=False)
+    db.delete(service)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get("/miniapp/owner/overview")
 def owner_overview(
     db: Session = Depends(get_db),
@@ -223,12 +359,7 @@ def owner_overview(
     return {
         "owner": {"name": owner.name, "username": owner.username},
         "services": [
-            {
-                **_service_payload(service),
-                "link": settings.build_max_service_link(service.slug),
-                "new_leads": new_counts.get(service.id, 0),
-            }
-            for service in services
+            _owner_service_payload(service, new_counts.get(service.id, 0)) for service in services
         ],
     }
 
@@ -288,6 +419,17 @@ def set_lead_status(
     )
     if lead is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
+    previous = lead.status
     lead.status = payload.status
     db.commit()
+
+    # The customer booked inside MAX, so the answer goes there too - once, on the change,
+    # not again every time the owner taps the same button.
+    if payload.status != previous and payload.status in (LEAD_CONFIRMED, LEAD_DECLINED):
+        try:
+            max_bot.notify_customer_of_decision(
+                db, lead, confirmed=payload.status == LEAD_CONFIRMED
+            )
+        except Exception:
+            logger.warning("max_customer_notify_failed lead_id=%s", lead.id, exc_info=True)
     return {"id": str(lead.id), "status": lead.status}

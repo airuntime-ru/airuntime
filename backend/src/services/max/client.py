@@ -67,7 +67,13 @@ def resolve_ca_bundle(explicit: str | None = None) -> str | bool:
 
 
 class MaxApiError(RuntimeError):
-    pass
+    """A failed call. ``status`` is MAX's HTTP status when it answered at all, and None
+    when the request never got an answer - the difference between "MAX refused this" and
+    "MAX may or may not have done it", which decides whether a retry is safe."""
+
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 @dataclass(frozen=True)
@@ -167,7 +173,10 @@ class MaxBotClient:
         if response.status_code >= 400:
             # The body carries the platform's own reason; keep it, it is the only way to
             # tell "bad token" from "chat not found" without guessing.
-            raise MaxApiError(f"MAX API {response.status_code}: {response.text[:300]}")
+            raise MaxApiError(
+                f"MAX API {response.status_code}: {response.text[:300]}",
+                status=response.status_code,
+            )
         try:
             payload = response.json()
         except ValueError:
@@ -200,29 +209,51 @@ class MaxBotClient:
     def send_message(
         self,
         *,
-        chat_id: int,
         text: str,
+        chat_id: int | None = None,
+        user_id: int | None = None,
         buttons: list[list[dict[str, Any]]] | None = None,
+        image_url: str = "",
+        html: bool = False,
     ) -> None:
-        body: dict[str, Any] = {"text": text}
-        if buttons:
-            body["attachments"] = [inline_keyboard(buttons)]
-        # chat_id is a query parameter for POST /messages; the token stays in the header.
-        self._request("POST", "/messages", params={"chat_id": chat_id}, json=body)
+        """Send to a chat, or straight to a user - exactly one of the two.
 
-    def try_send_message(
-        self,
-        *,
-        chat_id: int,
-        text: str,
-        buttons: list[list[dict[str, Any]]] | None = None,
-    ) -> bool:
+        ``user_id`` is how a bot reaches someone whose dialog it has never seen, such as a
+        customer who only opened the mini app. It is not interchangeable with ``chat_id``:
+        a user id passed as a chat id is answered with ``chat.not.found``.
+
+        ``html`` formats the text as MAX's HTML subset; callers escape anything a user
+        typed. HTML rather than markdown because a customer called ``Иван_1`` would
+        otherwise turn half the message italic.
+        """
+        if (chat_id is None) == (user_id is None):
+            raise ValueError("send_message needs exactly one of chat_id and user_id")
+        attachments: list[dict[str, Any]] = []
+        if image_url:
+            attachments.append({"type": "image", "payload": {"url": image_url}})
+        if buttons:
+            attachments.append(inline_keyboard(buttons))
+        body: dict[str, Any] = {"text": text}
+        if attachments:
+            body["attachments"] = attachments
+        if html:
+            body["format"] = "html"
+        # The recipient is a query parameter for POST /messages; the token stays in the header.
+        params = {"chat_id": chat_id} if chat_id is not None else {"user_id": user_id}
+        self._request("POST", "/messages", params=params, json=body)
+
+    def try_send_message(self, **kwargs: Any) -> bool:
         """Send and swallow failures - used on paths where delivery is best-effort."""
         try:
-            self.send_message(chat_id=chat_id, text=text, buttons=buttons)
+            self.send_message(**kwargs)
             return True
         except MaxApiError:
-            logger.warning("max_send_failed chat_id=%s", chat_id, exc_info=True)
+            logger.warning(
+                "max_send_failed chat_id=%s user_id=%s",
+                kwargs.get("chat_id"),
+                kwargs.get("user_id"),
+                exc_info=True,
+            )
             return False
 
     def answer_callback(self, callback_id: str, *, notification: str = "") -> None:
