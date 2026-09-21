@@ -35,8 +35,13 @@
 .max-shell {
   width: 100%;
   max-width: 560px;
+  min-height: 100dvh;
   margin-inline: auto;
-  padding: 16px 16px 40px;
+  padding: 16px 16px 0;
+  /* Column layout so the action bar can be pushed to the bottom edge when the storefront
+     is short; without it the sticky bar floats mid-screen with blank space under it. */
+  display: flex;
+  flex-direction: column;
 }
 
 .max-sheet {
@@ -46,7 +51,7 @@
 }
 
 .max-hero {
-  padding: 20px 18px;
+  padding: 16px 18px 15px;
   background: linear-gradient(135deg, var(--max-accent), color-mix(in srgb, var(--max-accent) 55%, #7b2cff));
   color: #fff;
   border-radius: var(--max-radius);
@@ -54,17 +59,24 @@
 
 .max-hero h1 {
   margin: 0;
-  font-size: 1.45rem;
+  font-size: 1.32rem;
   line-height: 1.2;
   font-weight: 650;
   letter-spacing: -0.02em;
 }
 
 .max-hero p {
-  margin: 8px 0 0;
-  font-size: 0.95rem;
-  line-height: 1.45;
-  color: rgba(255, 255, 255, 0.86);
+  margin: 6px 0 0;
+  font-size: 0.92rem;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+/* Address and hours belong next to the name, not orphaned at the bottom of the page. */
+.max-hero-meta {
+  margin-top: 10px !important;
+  font-size: 0.8rem !important;
+  color: rgba(255, 255, 255, 0.72) !important;
 }
 
 .max-section-title {
@@ -87,8 +99,7 @@
 .max-option {
   width: 100%;
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  align-items: center;
   gap: 12px;
   /* 14px vertical keeps every row above the 44px minimum tap target on a phone. */
   padding: 14px 16px;
@@ -108,7 +119,33 @@
 
 .max-option[aria-pressed="true"] {
   border-color: var(--max-accent);
-  background: color-mix(in srgb, var(--max-accent) 7%, var(--max-sheet));
+  background: color-mix(in srgb, var(--max-accent) 8%, var(--max-sheet));
+}
+
+/* The check circle carries the selected state; a border change alone is easy to miss
+   on a phone held at arm's length. */
+.max-radio {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--max-line);
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+
+.max-option[aria-pressed="true"] .max-radio {
+  background: var(--max-accent);
+  border-color: var(--max-accent);
+}
+
+.max-option-label {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .max-option:focus-visible {
@@ -118,9 +155,8 @@
 
 /* The label column is spans inside a span, so each part has to be told to stack -
    otherwise the title and its note run together on one line. */
-.max-option > span:first-child {
+.max-option-label {
   display: block;
-  min-width: 0;
 }
 
 .max-option-title {
@@ -174,16 +210,54 @@
   outline-offset: 2px;
 }
 
-.max-field {
-  display: block;
-  margin-top: 12px;
+.max-form {
+  padding: 14px 16px;
 }
 
-.max-field span {
+.max-field {
+  display: block;
+  margin-top: 14px;
+}
+
+.max-field-label,
+.max-field > span {
   display: block;
   margin-bottom: 6px;
   font-size: 0.85rem;
   color: var(--max-muted);
+}
+
+.max-hint {
+  margin: 7px 0 0;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  color: var(--max-muted);
+}
+
+.max-hint-ok {
+  color: #1f8a55;
+}
+
+/* A text button, so "type it myself" stays available without competing with the
+   one-tap path above it. */
+.max-linklike {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 6px 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 0.88rem;
+  color: var(--max-muted);
+  text-align: center;
+  cursor: pointer;
+}
+
+.max-linklike:focus-visible {
+  outline: 2px solid var(--max-accent);
+  outline-offset: 2px;
+  border-radius: 8px;
 }
 
 .max-input,
@@ -256,9 +330,51 @@
    however long the service list gets. */
 .max-submit-bar {
   position: sticky;
+  margin-top: auto;
   bottom: 0;
   padding: 12px 0 max(12px, env(safe-area-inset-bottom));
   background: linear-gradient(180deg, transparent, var(--max-bg) 28%);
+}
+
+.max-summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 9px;
+  padding: 9px 14px;
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--max-accent) 9%, var(--max-sheet));
+  border: 1px solid color-mix(in srgb, var(--max-accent) 22%, transparent);
+}
+
+.max-summary-text {
+  min-width: 0;
+  font-size: 0.9rem;
+  line-height: 1.35;
+  color: var(--max-ink);
+}
+
+.max-summary-price {
+  flex-shrink: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--max-ink);
+}
+
+.max-submit-hint {
+  margin: 8px 0 0;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--max-muted);
+}
+
+.max-button-quiet {
+  background: color-mix(in srgb, var(--max-accent) 12%, var(--max-sheet));
+  color: var(--max-accent);
+  min-height: 46px;
+  font-size: 0.95rem;
 }
 
 .max-note {

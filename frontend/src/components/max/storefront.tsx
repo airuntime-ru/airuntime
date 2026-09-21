@@ -47,6 +47,9 @@ export function Storefront({ slug }: { slug: string }) {
   const [phone, setPhone] = useState("");
   const [comment, setComment] = useState("");
   const [phoneVerified, setPhoneVerified] = useState(false);
+  // Sticks once the customer asks to type a number themselves, so declining the MAX
+  // dialog does not bounce them back to a button they already rejected.
+  const [phoneManual, setPhoneManual] = useState(false);
   const [successText, setSuccessText] = useState("");
 
   useEffect(() => {
@@ -166,36 +169,57 @@ export function Storefront({ slug }: { slug: string }) {
   }
 
   const busy = phase === "submitting";
+  const chosen = config.items.find((item) => item.title === selectedItem) ?? null;
+  const meta = [config.contacts.address, config.contacts.hours, config.contacts.phone]
+    .filter(Boolean)
+    .join(" · ");
+  // Contacts only appear once there is something to book. On a phone, opening straight
+  // into three empty fields reads as paperwork rather than as a two-tap booking.
+  const showContacts = config.items.length === 0 || Boolean(selectedItem);
+  const missing = !selectedItem
+    ? config.kind === "menu"
+      ? "Выберите позицию"
+      : "Выберите услугу"
+    : needsSlot && !selectedSlot
+      ? "Выберите время"
+      : !name.trim()
+        ? "Укажите имя"
+        : "";
 
   return (
     <div className="max-shell" style={accentStyle}>
       <header className="max-hero">
         <h1>{config.title}</h1>
         {config.tagline ? <p>{config.tagline}</p> : null}
+        {meta ? <p className="max-hero-meta">{meta}</p> : null}
       </header>
 
       {config.about ? <p className="max-note">{config.about}</p> : null}
 
       {config.items.length > 0 ? (
         <>
-          <h2 className="max-section-title">
-            {config.kind === "menu" ? "Меню" : "Услуги"}
-          </h2>
+          <h2 className="max-section-title">{config.kind === "menu" ? "Меню" : "Услуги"}</h2>
           <ul className="max-list">
             {config.items.map((item) => {
               const price = priceLabel(item);
               const duration = durationLabel(item);
               const note = [item.description, duration].filter(Boolean).join(" · ");
+              const active = selectedItem === item.title;
               return (
                 <li key={item.title}>
                   <button
                     type="button"
                     className="max-option"
-                    aria-pressed={selectedItem === item.title}
+                    aria-pressed={active}
                     onClick={() => setSelectedItem(item.title)}
                     disabled={busy}
                   >
-                    <span>
+                    {/* A check mark, not just a border: on a small screen the selected row
+                        has to be obvious at a glance. */}
+                    <span className="max-radio" aria-hidden>
+                      {active ? "✓" : ""}
+                    </span>
+                    <span className="max-option-label">
                       <span className="max-option-title">{item.title}</span>
                       {note ? <span className="max-option-note">{note}</span> : null}
                     </span>
@@ -208,7 +232,7 @@ export function Storefront({ slug }: { slug: string }) {
         </>
       ) : null}
 
-      {needsSlot ? (
+      {needsSlot && selectedItem ? (
         <>
           <h2 className="max-section-title">Когда удобно</h2>
           <div className="max-chips">
@@ -228,67 +252,81 @@ export function Storefront({ slug }: { slug: string }) {
         </>
       ) : null}
 
-      <h2 className="max-section-title">Контакты</h2>
-      <div className="max-sheet" style={{ padding: "14px 16px" }}>
-        <label className="max-field" style={{ marginTop: 0 }}>
-          <span>Имя</span>
-          <input
-            className="max-input"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="Как к вам обращаться"
-            autoComplete="name"
-            disabled={busy}
-          />
-        </label>
+      {showContacts ? (
+        <>
+          <h2 className="max-section-title">Контакты</h2>
+          <div className="max-sheet max-form">
+            <label className="max-field" style={{ marginTop: 0 }}>
+              <span>Имя</span>
+              <input
+                className="max-input"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="Как к вам обращаться"
+                autoComplete="name"
+                disabled={busy}
+              />
+            </label>
 
-        {config.ask_phone ? (
-          <label className="max-field">
-            <span>Телефон{phoneVerified ? " · подтверждён в MAX" : ""}</span>
-            <input
-              className="max-input"
-              value={phone}
-              onChange={(event) => {
-                setPhone(event.target.value);
-                setPhoneVerified(false);
-              }}
-              placeholder="+7 900 000-00-00"
-              inputMode="tel"
-              autoComplete="tel"
-              disabled={busy}
-            />
-            <button
-              type="button"
-              className="max-button max-button-secondary"
-              style={{ marginTop: 8, minHeight: 42, fontSize: "0.92rem" }}
-              onClick={onShareContact}
-              disabled={busy}
-            >
-              Взять номер из MAX
-            </button>
-          </label>
-        ) : null}
+            {config.ask_phone ? (
+              <div className="max-field">
+                <span className="max-field-label">Телефон</span>
+                {phone || phoneManual ? (
+                  <>
+                    <input
+                      className="max-input"
+                      value={phone}
+                      onChange={(event) => {
+                        setPhone(event.target.value);
+                        setPhoneVerified(false);
+                      }}
+                      placeholder="+7 900 000-00-00"
+                      inputMode="tel"
+                      autoComplete="tel"
+                      disabled={busy}
+                    />
+                    {phoneVerified ? (
+                      <p className="max-hint max-hint-ok">Номер подтверждён аккаунтом MAX</p>
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    {/* The whole point of being inside MAX: the common case is zero typing. */}
+                    <button
+                      type="button"
+                      className="max-button max-button-quiet"
+                      onClick={onShareContact}
+                      disabled={busy}
+                    >
+                      Взять номер из MAX
+                    </button>
+                    <button
+                      type="button"
+                      className="max-linklike"
+                      onClick={() => setPhoneManual(true)}
+                      disabled={busy}
+                    >
+                      Ввести вручную
+                    </button>
+                  </>
+                )}
+              </div>
+            ) : null}
 
-        {config.ask_comment ? (
-          <label className="max-field">
-            <span>Комментарий</span>
-            <textarea
-              className="max-textarea"
-              value={comment}
-              onChange={(event) => setComment(event.target.value)}
-              placeholder="Марка авто, пожелания, вопрос"
-              disabled={busy}
-            />
-          </label>
-        ) : null}
-      </div>
-
-      {config.contacts.address || config.contacts.hours || config.contacts.phone ? (
-        <p className="max-note">
-          {[config.contacts.address, config.contacts.hours, config.contacts.phone]
-            .filter(Boolean)
-            .join(" · ")}
-        </p>
+            {config.ask_comment ? (
+              <label className="max-field">
+                <span>Комментарий</span>
+                <textarea
+                  className="max-textarea"
+                  value={comment}
+                  onChange={(event) => setComment(event.target.value)}
+                  placeholder="Марка авто, пожелания, вопрос"
+                  disabled={busy}
+                />
+              </label>
+            ) : null}
+          </div>
+        </>
       ) : null}
 
       {error ? (
@@ -298,20 +336,28 @@ export function Storefront({ slug }: { slug: string }) {
       ) : null}
 
       <div className="max-submit-bar">
-        <button type="button" className="max-button" onClick={onSubmit} disabled={!canSubmit || busy}>
+        {/* What exactly is being confirmed, right above the button - so the last tap is a
+            confirmation rather than a leap of faith. */}
+        {chosen ? (
+          <div className="max-summary">
+            <span className="max-summary-text">
+              {chosen.title}
+              {selectedSlot ? ` · ${selectedSlot}` : ""}
+            </span>
+            {priceLabel(chosen) ? (
+              <span className="max-summary-price">{priceLabel(chosen)}</span>
+            ) : null}
+          </div>
+        ) : null}
+        <button
+          type="button"
+          className="max-button"
+          onClick={onSubmit}
+          disabled={!canSubmit || busy}
+        >
           {busy ? "Отправляем…" : config.cta_label}
         </button>
-        {!canSubmit && !busy ? (
-          <p className="max-note" style={{ textAlign: "center" }}>
-            {config.items.length > 0 && !selectedItem
-              ? config.kind === "menu"
-                ? "Выберите позицию"
-                : "Выберите услугу"
-              : needsSlot && !selectedSlot
-                ? "Выберите время"
-                : "Укажите имя"}
-          </p>
-        ) : null}
+        {missing && !busy ? <p className="max-submit-hint">{missing}</p> : null}
       </div>
     </div>
   );
