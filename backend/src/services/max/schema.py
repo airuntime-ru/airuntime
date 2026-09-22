@@ -20,6 +20,9 @@ from pydantic import BaseModel, Field, field_validator
 # in wording and in whether a time slot is part of the request, not in structure.
 SERVICE_KINDS = ("booking", "menu", "landing")
 SERVICE_MOODS = ("calm", "warm", "bold", "minimal")
+SERVICE_LAYOUTS = ("classic", "editorial", "cards", "poster")
+SERVICE_COLOR_SCHEMES = ("light", "dark")
+SERVICE_HEADING_STYLES = ("sans", "serif", "display")
 
 MAX_ITEMS = 24
 MAX_SLOTS = 12
@@ -118,6 +121,14 @@ class ServiceConfig(BaseModel):
     # Visual register of the storefront. The mini app is one renderer, so mood is how a
     # tutor page stops looking like an auto shop: palette and hero, not a new template.
     mood: str = "bold"
+    # These are deliberately bounded design choices, rather than arbitrary generated CSS.
+    # They give the model several genuinely different compositions without allowing a
+    # prompt (or a compromised model response) to inject markup into every customer's app.
+    layout: str = "classic"
+    color_scheme: str = "light"
+    heading_style: str = "sans"
+    # Owner-supplied image only. The generator never gets to invent or hot-link this URL.
+    hero_image: str = Field(default="", max_length=1_400_000)
     contacts: ServiceContacts = Field(default_factory=ServiceContacts)
     items: list[ServiceItem] = Field(default_factory=list)
     # Human-readable slots ("Вт 23 сен, 16:00"). The owner's calendar parses them.
@@ -143,6 +154,32 @@ class ServiceConfig(BaseModel):
     def _mood(cls, value: object) -> str:
         mood = str(value or "").strip().lower()
         return mood if mood in SERVICE_MOODS else "bold"
+
+    @field_validator("layout", mode="before")
+    @classmethod
+    def _layout(cls, value: object) -> str:
+        layout = str(value or "").strip().lower()
+        return layout if layout in SERVICE_LAYOUTS else "classic"
+
+    @field_validator("color_scheme", mode="before")
+    @classmethod
+    def _color_scheme(cls, value: object) -> str:
+        scheme = str(value or "").strip().lower()
+        return scheme if scheme in SERVICE_COLOR_SCHEMES else "light"
+
+    @field_validator("heading_style", mode="before")
+    @classmethod
+    def _heading_style(cls, value: object) -> str:
+        style = str(value or "").strip().lower()
+        return style if style in SERVICE_HEADING_STYLES else "sans"
+
+    @field_validator("hero_image", mode="before")
+    @classmethod
+    def _hero_image(cls, value: object) -> str:
+        image = str(value or "").strip()
+        # Only decoded owner uploads are persisted. No javascript:, SVG or remote tracking.
+        allowed = re.match(r"^data:image/(?:jpeg|png|webp);base64,[A-Za-z0-9+/=]+$", image)
+        return image if allowed else ""
 
     @field_validator(
         "title", "tagline", "about", "cta_label", "success_message", "comment_hint", mode="before"

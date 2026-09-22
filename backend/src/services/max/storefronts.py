@@ -9,6 +9,7 @@ what had to go once they moved into the mini app.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import secrets
 
@@ -16,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from src.core.config import settings
 from src.db.models.max_platform import SERVICE_LIVE, MaxOwner, MaxService
-from src.services.max.briefing import BriefingError, decode_attachments, fetch_site_brief
+from src.services.max.briefing import BriefingError, decode_attachments, fetch_site_context
 from src.services.max.generator import apply_edit, generate_config
 from src.services.max.schema import ServiceConfig, normalise, slugify
 
@@ -100,6 +101,22 @@ def _compose_prompt(brief: str, site_text: str, file_notes: str) -> str:
     return "\n\n".join(parts)
 
 
+def _owner_hero_image(images: list[object]) -> str:
+    """Persist the first owner image for the renderer, never a model-provided URL."""
+    if not images:
+        return ""
+    image = images[0]
+    mime = str(getattr(image, "content_type", "") or "").lower()
+    payload = str(getattr(image, "data_base64", "") or "")
+    if mime not in {"image/jpeg", "image/png", "image/webp"} or not payload:
+        return ""
+    try:
+        base64.b64decode(payload, validate=True)
+    except ValueError:
+        return ""
+    return f"data:{mime};base64,{payload}"
+
+
 async def create_storefront(
     db: Session,
     owner: MaxOwner,
@@ -115,13 +132,19 @@ async def create_storefront(
     the whole product exists to hand them.
     """
     site_text = ""
+    site_images: list[object] = []
     if site_url.strip():
-        site_text = await asyncio.to_thread(fetch_site_brief, site_url)
-    images, file_notes = decode_attachments(files or [])
+        site_text, site_images = await asyncio.to_thread(fetch_site_context, site_url)
+    file_images, file_notes = decode_attachments(files or [])
+    # Explicit uploads are stronger art direction than a site's generic social preview.
+    images = [*file_images, *site_images]
     prompt = _compose_prompt(brief, site_text, file_notes)
     if not prompt.strip():
         raise BriefingError("Опишите бизнес, укажите сайт или приложите файл")
     config, used_llm = await generate_config(prompt, images=images)
+    hero_image = _owner_hero_image(images)
+    if hero_image:
+        config = config.model_copy(update={"hero_image": hero_image})
     service = MaxService(
         owner_id=owner.id,
         slug=unique_slug(db, config.title),

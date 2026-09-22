@@ -47,3 +47,18 @@ export function kindKicker(kind: ServiceConfig["kind"]): string {
   if (kind === "landing") return "Заявка";
   return "Запись";
 }
+
+export function readableAccentText(hex: string): "#ffffff" | "#10141c" {
+  const raw = hex.replace("#", "");
+  const normalized = raw.length === 3 ? raw.split("").map((part) => part + part).join("") : raw;
+  if (!/^[0-9a-f]{6}$/i.test(normalized)) return "#ffffff";
+  const channels = [0, 2, 4].map(
+    (offset) => parseInt(normalized.slice(offset, offset + 2), 16) / 255
+  );
+  const linear = channels.map((channel) =>
+    channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+  );
+  const luminance = 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+  // 0.179 is the WCAG crossover where black starts having the higher contrast ratio.
+  return luminance > 0.179 ? "#10141c" : "#ffffff";
+}

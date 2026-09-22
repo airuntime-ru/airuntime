@@ -15,7 +15,7 @@ import logging
 import re
 import socket
 from io import BytesIO
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
@@ -48,6 +48,14 @@ _META_DESC = re.compile(
 )
 _META_DESC_REV = re.compile(
     r'<meta[^>]+content=["\'](.*?)["\'][^>]+(?:name|property)=["\'](?:description|og:description)["\']',
+    re.I | re.S,
+)
+_META_IMAGE = re.compile(
+    r'<meta[^>]+(?:property|name)=["\'](?:og:image|twitter:image)["\'][^>]+content=["\'](.*?)["\']',
+    re.I | re.S,
+)
+_META_IMAGE_REV = re.compile(
+    r'<meta[^>]+content=["\'](.*?)["\'][^>]+(?:property|name)=["\'](?:og:image|twitter:image)["\']',
     re.I | re.S,
 )
 _NEXT_DATA = re.compile(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', re.I | re.S)
@@ -232,6 +240,77 @@ def fetch_site_brief(url: str) -> str:
         raise BriefingError("Эту ссылку открыть нельзя")
     html = response.content[:SITE_BYTES].decode(response.encoding or "utf-8", errors="replace")
     return _extract_site(html, str(response.url))
+
+
+def _site_image(html: str, page_url: str) -> ImageAttachment | None:
+    """Fetch a public social/hero image with the same SSRF boundary as the page itself."""
+    match = _META_IMAGE.search(html) or _META_IMAGE_REV.search(html)
+    if not match:
+        return None
+    raw_url = match.group(1).strip()
+    image_url = urljoin(page_url, raw_url)
+    parsed = urlparse(image_url)
+    if (
+        parsed.scheme not in ("http", "https")
+        or not parsed.hostname
+        or _host_blocked(parsed.hostname)
+    ):
+        return None
+    try:
+        with httpx.stream(
+            "GET",
+            image_url,
+            timeout=SITE_TIMEOUT,
+            follow_redirects=True,
+            headers={"User-Agent": "AIRuntime-MAX/1.0 (+https://airuntime.ru)"},
+        ) as response:
+            final_host = urlparse(str(response.url)).hostname or ""
+            content_type = response.headers.get("content-type", "").split(";")[0].lower()
+            if (
+                response.status_code >= 400
+                or _host_blocked(final_host)
+                or content_type not in _ALLOWED_IMAGE_TYPES
+            ):
+                return None
+            chunks: list[bytes] = []
+            size = 0
+            for chunk in response.iter_bytes():
+                size += len(chunk)
+                if size > MAX_FILE_BYTES:
+                    return None
+                chunks.append(chunk)
+    except httpx.HTTPError:
+        return None
+    payload, mime = _shrink_image(b"".join(chunks), content_type)
+    return ImageAttachment(
+        filename="site-hero.jpg",
+        content_type=mime,
+        data_base64=base64.b64encode(payload).decode("ascii"),
+    )
+
+
+def fetch_site_context(url: str) -> tuple[str, list[ImageAttachment]]:
+    """Return the existing textual brief plus a safe local copy of the site's hero image."""
+    target = normalise_site_url(url)
+    try:
+        response = httpx.get(
+            target,
+            timeout=SITE_TIMEOUT,
+            follow_redirects=True,
+            headers={"User-Agent": "AIRuntime-MAX/1.0 (+https://airuntime.ru)"},
+        )
+    except httpx.HTTPError:
+        raise BriefingError(
+            "Не удалось открыть сайт. Проверьте ссылку или опишите бизнес текстом."
+        ) from None
+    if response.status_code >= 400:
+        raise BriefingError("Сайт не открылся. Проверьте ссылку или опишите бизнес текстом.")
+    final_url = str(response.url)
+    if _host_blocked(urlparse(final_url).hostname or ""):
+        raise BriefingError("Эту ссылку открыть нельзя")
+    html = response.content[:SITE_BYTES].decode(response.encoding or "utf-8", errors="replace")
+    image = _site_image(html, final_url)
+    return _extract_site(html, final_url), [image] if image else []
 
 
 def _pdf_text(data: bytes) -> str:

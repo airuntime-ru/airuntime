@@ -35,6 +35,10 @@ export type ServiceConfig = {
   about: string;
   accent: string;
   mood: "calm" | "warm" | "bold" | "minimal";
+  layout: "classic" | "editorial" | "cards" | "poster";
+  color_scheme: "light" | "dark";
+  heading_style: "sans" | "serif" | "display";
+  hero_image: string;
   contacts: { phone: string; address: string; hours: string };
   items: ServiceItem[];
   slots: string[];

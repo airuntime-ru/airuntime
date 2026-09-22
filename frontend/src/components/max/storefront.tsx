@@ -22,7 +22,7 @@ import {
   type ServiceItem,
 } from "@/lib/max/api";
 import { getInitDataUnsafe, requestContact } from "@/lib/max/bridge";
-import { commentHint, kindKicker, storefrontMood } from "@/lib/max/theme";
+import { commentHint, kindKicker, readableAccentText, storefrontMood } from "@/lib/max/theme";
 
 type Phase = "loading" | "ready" | "submitting" | "done" | "error";
 
@@ -118,7 +118,13 @@ export function Storefront({ slug }: { slug: string }) {
   }, [slug]);
 
   const accentStyle = useMemo(
-    () => (config ? ({ "--max-accent": config.accent } as React.CSSProperties) : undefined),
+    () =>
+      config
+        ? ({
+            "--max-accent": config.accent,
+            "--max-on-accent": readableAccentText(config.accent),
+          } as React.CSSProperties)
+        : undefined,
     [config]
   );
 
@@ -198,7 +204,14 @@ export function Storefront({ slug }: { slug: string }) {
 
   if (phase === "done") {
     return (
-      <div className="max-shell" data-mood={storefrontMood(config)} style={accentStyle}>
+      <div
+        className="max-shell"
+        data-mood={storefrontMood(config)}
+        data-scheme={config.color_scheme || "light"}
+        data-layout={config.layout || "classic"}
+        data-heading={config.heading_style || "sans"}
+        style={accentStyle}
+      >
         <div className="max-sheet max-success" role="status">
           <div className="max-success-mark" aria-hidden>
             ✓
@@ -234,12 +247,26 @@ export function Storefront({ slug }: { slug: string }) {
         : "";
 
   return (
-    <div className="max-shell" data-mood={storefrontMood(config)} style={accentStyle}>
+    <div
+      className="max-shell"
+      data-mood={storefrontMood(config)}
+      data-scheme={config.color_scheme || "light"}
+      data-layout={config.layout || "classic"}
+      data-heading={config.heading_style || "sans"}
+      style={accentStyle}
+    >
       <header className="max-hero">
-        <p className="max-hero-kicker">{kindKicker(config.kind)}</p>
-        <h1>{config.title}</h1>
-        {config.tagline ? <p>{config.tagline}</p> : null}
-        {meta ? <p className="max-hero-meta">{meta}</p> : null}
+        {config.hero_image ? (
+          // Owner uploads are validated data URLs; next/image cannot optimize inline data.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img className="max-hero-image" src={config.hero_image} alt="" aria-hidden="true" />
+        ) : null}
+        <div className="max-hero-copy">
+          <p className="max-hero-kicker">{kindKicker(config.kind)}</p>
+          <h1>{config.title}</h1>
+          {config.tagline ? <p>{config.tagline}</p> : null}
+          {meta ? <p className="max-hero-meta">{meta}</p> : null}
+        </div>
       </header>
 
       {config.about ? <p className="max-about">{config.about}</p> : null}

@@ -57,6 +57,9 @@ _SYSTEM_PROMPT = """Ты — генератор сервисов AIRuntime дл�
   "about": "1-3 предложения о бизнесе, до 600 символов",
   "accent": "#RRGGBB — акцентный цвет, уместный отрасли",
   "mood": "calm" | "warm" | "bold" | "minimal",
+  "layout": "classic" | "editorial" | "cards" | "poster",
+  "color_scheme": "light" | "dark",
+  "heading_style": "sans" | "serif" | "display",
   "contacts": {"phone": "", "address": "", "hours": ""},
   "items": [
     {"title": "название позиции", "description": "короткое пояснение или пустая строка",
@@ -88,6 +91,12 @@ _SYSTEM_PROMPT = """Ты — генератор сервисов AIRuntime дл�
 Кафе — «Аллергии, пожелания к заказу». Никогда не ставь «марка авто», если это не про машины.
 - mood: calm — обучение, психология, медицина, репетитор; warm — еда, дети, уют; \
 bold — авто, барбер, спорт, ремонт; minimal — консультации, B2B, заявки.
+- Дизайн не должен быть шаблонным. layout выбирай по задаче: classic — компактная запись; \
+editorial — премиальный, спокойный или авторский бизнес; cards — меню, товары и визуальный \
+каталог; poster — яркий бренд, событие, спорт, барбер, шоу. Не ставь classic по привычке.
+- color_scheme и heading_style должны следовать прямому пожеланию владельца, дизайну сайта \
+и референсам. Тёмную тему ставь только когда её явно просили или референс однозначно тёмный. \
+Для премиального/editorial допустим serif, для poster — display, для утилитарного — sans.
 - title — название вывески (бренд или как владелец назвал точку). Никогда не копируй \
 служебные подписи вроде «Описание владельца», «Сайт владельца», «Название страницы».
 - title и tagline — как вывеска, не канцелярия. Никаких «Качественные услуги», \
@@ -100,7 +109,8 @@ bold — авто, барбер, спорт, ремонт; minimal — конс�
 - Никаких обещаний, гарантий, лицензий и цен, которых не было в описании, на сайте \
 или в файлах владельца.
 - Если есть сайт или прайс — услуги и цены бери оттуда, ничего не выдумывай.
-- Фото смотри как дизайнер: характер, палитра, настроение. В JSON картинки не вставляй."""
+- Фото смотри как дизайнер: характер, палитра, настроение и композиция. Поле hero_image \
+не добавляй: приложение само безопасно подставит загруженное владельцем фото."""
 
 _EDIT_SYSTEM_PROMPT = """Ты редактируешь JSON-конфигурацию сервиса AIRuntime в мессенджере MAX.
 
@@ -108,7 +118,8 @@ _EDIT_SYSTEM_PROMPT = """Ты редактируешь JSON-конфигурац
 JSON-объект той же схемы — полную обновлённую конфигурацию, без markdown и пояснений.
 
 Меняй только то, о чём попросил пользователь. Всё остальное оставь ровно как было, \
-включая формулировки, цены, mood, comment_hint и порядок позиций. Слоты, если их \
+включая формулировки, цены, mood, layout, color_scheme, heading_style, comment_hint и \
+порядок позиций. Слоты, если их \
 трогают, пиши в формате «Вт 23 сен, 16:00»."""
 
 
@@ -239,6 +250,22 @@ def _fallback_mood(prompt: str, kind: str) -> str:
     return "bold"
 
 
+def _fallback_design(prompt: str, kind: str, mood: str) -> tuple[str, str, str]:
+    lowered = (prompt or "").lower()
+    scheme = (
+        "dark" if re.search(r"т[её]мн(?:ая|ый|ое|ую)|dark\s*(?:mode|theme)", lowered) else "light"
+    )
+    if kind == "menu":
+        return "cards", scheme, "serif" if mood == "warm" else "sans"
+    if any(word in lowered for word in ("премиум", "люкс", "бутик", "авторск", "галере")):
+        return "editorial", scheme, "serif"
+    if any(word in lowered for word in ("ярк", "дерзк", "фестиваль", "концерт", "спорт", "барбер")):
+        return "poster", scheme, "display"
+    if mood in {"calm", "minimal"}:
+        return "editorial", scheme, "serif" if mood == "calm" else "sans"
+    return "classic", scheme, "sans"
+
+
 def _fallback_title(prompt: str) -> str:
     brand = ""
     owner_line = ""
@@ -324,12 +351,17 @@ def _fallback_config(prompt: str) -> ServiceConfig:
         if stripped.lower().startswith("описание:") and "заполните" not in stripped.lower():
             tagline = stripped.split(":", 1)[-1].strip()[:160]
             break
+    mood = _fallback_mood(prompt, kind)
+    layout, color_scheme, heading_style = _fallback_design(prompt, kind, mood)
     payload: dict[str, object] = {
         "kind": kind,
         "title": title,
         "tagline": tagline,
         "about": "",
-        "mood": _fallback_mood(prompt, kind),
+        "mood": mood,
+        "layout": layout,
+        "color_scheme": color_scheme,
+        "heading_style": heading_style,
         "items": items,
         "slots": fallback_slots() if kind == "booking" else [],
     }
@@ -389,9 +421,12 @@ async def generate_config(
 
 async def apply_edit(config: ServiceConfig, instruction: str) -> tuple[ServiceConfig, bool]:
     """Return ``(config, changed)`` after applying a free-form edit request."""
-    current = json.dumps(config.model_dump(), ensure_ascii=False)
+    # Inline images can be close to a megabyte. Sending one back to the text model would
+    # consume the whole prompt window and truncate the owner's actual edit instruction.
+    # It is immutable application data, so keep it out of the turn and restore it after.
+    current = json.dumps(config.model_dump(exclude={"hero_image"}), ensure_ascii=False)
     user_text = f"Текущая конфигурация:\n{current}\n\nПросьба пользователя:\n{instruction}"
     updated = await _config_from_model(_EDIT_SYSTEM_PROMPT, user_text, what="max_apply_edit")
     if updated is None:
         return config, False
-    return updated, True
+    return updated.model_copy(update={"hero_image": config.hero_image}), True

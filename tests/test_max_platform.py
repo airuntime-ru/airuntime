@@ -536,6 +536,25 @@ class TestGeneratorFailsLoudly:
         assert not any(title.startswith("позиция") for title in titles)
         assert all(item.price_rub for item in config.items)
 
+    def test_edit_keeps_image_out_of_model_prompt_and_preserves_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        image = "data:image/jpeg;base64,YWJj"
+        original = ServiceConfig.model_validate({"title": "Кафе", "hero_image": image})
+        seen = ""
+
+        async def fake_config(system_prompt: str, user_text: str, **_: Any) -> ServiceConfig:
+            nonlocal seen
+            seen = user_text
+            return ServiceConfig.model_validate({"title": "Новое кафе"})
+
+        monkeypatch.setattr(generator, "_config_from_model", fake_config)
+        updated, changed = asyncio.run(generator.apply_edit(original, "измени название"))
+        assert changed is True
+        assert updated.title == "Новое кафе"
+        assert updated.hero_image == image
+        assert image not in seen
+
 
 # --------------------------------------------------------------------------------------
 # Storefront schema
@@ -597,6 +616,45 @@ class TestServiceConfig:
     def test_unknown_mood_falls_back_to_bold(self) -> None:
         config = ServiceConfig.model_validate({"title": "Студия", "mood": "neon"})
         assert config.mood == "bold"
+
+    def test_design_contract_rejects_untrusted_values(self) -> None:
+        config = ServiceConfig.model_validate(
+            {
+                "title": "Студия",
+                "layout": "<script>",
+                "color_scheme": "system",
+                "heading_style": "url(javascript:alert(1))",
+                "hero_image": "javascript:alert(1)",
+            }
+        )
+        assert config.layout == "classic"
+        assert config.color_scheme == "light"
+        assert config.heading_style == "sans"
+        assert config.hero_image == ""
+
+    def test_owner_image_can_be_rendered_but_remote_or_svg_cannot(self) -> None:
+        config = ServiceConfig.model_validate(
+            {"title": "Кафе", "hero_image": "data:image/jpeg;base64,YWJj"}
+        )
+        assert config.hero_image.startswith("data:image/jpeg;base64,")
+        assert (
+            ServiceConfig.model_validate(
+                {"title": "Кафе", "hero_image": "https://tracker.example/pixel.png"}
+            ).hero_image
+            == ""
+        )
+        assert (
+            ServiceConfig.model_validate(
+                {"title": "Кафе", "hero_image": "data:image/svg+xml;base64,YWJj"}
+            ).hero_image
+            == ""
+        )
+
+    def test_fallback_design_follows_requested_style(self) -> None:
+        config = generator._fallback_config("Тёмная премиальная кофейня-бутик, меню")
+        assert config.color_scheme == "dark"
+        assert config.layout == "cards"
+        assert config.heading_style == "serif"
 
 
 class TestSlotLabels:
@@ -950,8 +1008,8 @@ class TestOwnerToCustomerFlow:
     ) -> None:
         monkeypatch.setattr(
             storefronts,
-            "fetch_site_brief",
-            lambda url: f"Сайт владельца: {url}\nДиагностика подвески 1500",
+            "fetch_site_context",
+            lambda url: (f"Сайт владельца: {url}\nДиагностика подвески 1500", []),
         )
         response = client.post(
             "/api/v1/max/miniapp/owner/services",
@@ -960,6 +1018,26 @@ class TestOwnerToCustomerFlow:
         )
         assert response.status_code == 201, response.text
         assert db.query(MaxService).count() == 1
+
+    def test_an_attached_image_becomes_storefront_art_direction(
+        self, client: TestClient, db: Session
+    ) -> None:
+        png = (
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhK"
+            "mMIQAAAABJRU5ErkJggg=="
+        )
+        response = client.post(
+            "/api/v1/max/miniapp/owner/services",
+            json={
+                "brief": BRIEF,
+                "files": [
+                    {"filename": "reference.png", "content_type": "image/png", "data_base64": png}
+                ],
+            },
+            headers=owner_headers(),
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["config"]["hero_image"].startswith("data:image/")
 
     def test_an_attached_image_is_accepted(self, client: TestClient, db: Session) -> None:
         png = (
