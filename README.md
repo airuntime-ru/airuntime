@@ -169,7 +169,10 @@ docker compose -f docker-compose.prod.yml build preview
    одного бэкенда (FastAPI) и PostgreSQL; генератор сервиса превращает описание в
    валидируемый `ServiceConfig`. Файлы — в подразделе «Состав», модели доверия — ниже.
 4. **Одна команда запуска всех локальных компонентов.** `docker compose up --build` из корня
-   репозитория (postgres, redis, minio, backend, worker, django-admin, frontend).
+   репозитория (postgres, redis, minio, backend, worker, django-admin, frontend). Собираются
+   только эти образы: `codex` и `preview` закрыты профилем `build-only` и в `up` не участвуют.
+   Сборка с нуля — около 4 минут без учёта загрузки базовых образов (замер: backend 125 с,
+   frontend 78 с, django-admin 26 с; worker переиспользует образ backend).
 5. **Необходимые параметры окружения.** Для проверки в MAX ничего настраивать не нужно — бот
    развёрнут. Для своего экземпляра: `MAX_BOT_TOKEN`, `MAX_BOT_USERNAME`, `MAX_WEBHOOK_SECRET`,
    публичные `API_URL`/`FRONTEND_URL` по HTTPS (иначе MAX не доставит вебхук и не откроет
