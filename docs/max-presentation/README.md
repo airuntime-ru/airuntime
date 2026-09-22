@@ -58,14 +58,15 @@ node build-pptx.js
 | `mark-max.png` | знак MAX — официальная иконка с речевым пузырём, не кружок-заглушка |
 
 Здесь же лежит `welcome.html` — исходник баннера на приветствии бота. MAX скачивает его сам
-по адресу `https://airuntime.ru/brand/max-welcome-v3.jpg`, поэтому готовая картинка живёт во
-фронтенде (новый путь — чтобы MAX не подставлял закэшированную старую версию). Холст 1200×800
-(3:2): в пузыре чата MAX cover-кропает более широкие картинки и съедает поля.
+по адресу `https://airuntime.ru/brand/max-welcome-v4.jpg`, поэтому готовая картинка живёт во
+фронтенде (новый путь — чтобы MAX не подставлял закэшированную старую версию). Холст 1280×720
+(16:9): API MAX надёжнее принимает широкий кадр, чем 3:2. В пузыре чата картинка всё равно
+cover-кропается к ~3:2, поэтому текст и телефон сидят с полями ~120px слева и справа.
 
 ```bash
-chrome --headless=new --force-device-scale-factor=1 --window-size=1200,800 \
+chrome --headless=new --force-device-scale-factor=1 --window-size=1280,720 \
   --screenshot=welcome.png "file:///$(pwd)/welcome.html"
-# затем в JPEG 1200×800, качество 88: frontend/public/brand/max-welcome-v3.jpg
+# затем в JPEG 1280×720, качество 88: frontend/public/brand/max-welcome-v4.jpg
 ```
 
 Размер тут часть задачи: pptxgenjs вставляет картинку заново на каждый слайд, где она

@@ -39,8 +39,8 @@ OPEN_APP = "Открыть AIRuntime"
 WELCOME = (
     "<h1>AIRuntime</h1>\n"
     "Запись к вам — прямо в MAX.\n\n"
-    "Откройте приложение и опишите бизнес. Через десять секунд у клиентов будет AIRuntime: "
-    "услуги, цены, свободное время и кнопка записи.\n\n"
+    "Откройте приложение и опишите бизнес — у клиентов появятся услуги, цены "
+    "и кнопка записи.\n\n"
     "<b>Что вы получите</b>\n"
     "— ссылку и QR-код для клиентов\n"
     "— заявки прямо сюда, в этот чат\n"
@@ -98,7 +98,11 @@ def send_welcome(*, chat_id: int | None = None, user_id: int | None = None) -> N
             client.send_message(**message, image_url=image)
             return
         except MaxApiError as exc:
-            logger.warning("max_welcome_with_image_failed status=%s", exc.status, exc_info=True)
+            logger.warning(
+                "max_welcome_with_image_failed status=%s body=%s",
+                exc.status,
+                exc,
+            )
             if exc.status != 400:
                 return
     client.try_send_message(**message)
