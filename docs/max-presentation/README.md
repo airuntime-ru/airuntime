@@ -58,13 +58,13 @@ node build-pptx.js
 | `mark-max.png` | знак MAX — официальная иконка с речевым пузырём, не кружок-заглушка |
 
 Здесь же лежит `welcome.html` — исходник баннера на приветствии бота. MAX скачивает его сам
-по адресу `https://airuntime.ru/brand/max-welcome.jpg`, поэтому готовая картинка живёт во
-фронтенде:
+по адресу `https://airuntime.ru/brand/max-welcome-v2.jpg`, поэтому готовая картинка живёт во
+фронтенде (новый путь — чтобы MAX не подставлял закэшированную старую версию):
 
 ```bash
 chrome --headless --no-pdf-header-footer --print-to-pdf=welcome.pdf "file:///$(pwd)/welcome.html"
 pdftoppm -png -r 128 -singlefile welcome.pdf welcome   # 1600x840
-# затем в JPEG, качество 88: frontend/public/brand/max-welcome.jpg
+# затем в JPEG, качество 88: frontend/public/brand/max-welcome-v2.jpg
 ```
 
 Размер тут часть задачи: pptxgenjs вставляет картинку заново на каждый слайд, где она

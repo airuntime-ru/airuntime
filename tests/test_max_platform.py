@@ -524,7 +524,7 @@ class TestTheBotIsAFrontDoor:
         (welcome,) = fake_api.messages
         assert welcome["chat_id"] == 777001
         assert welcome["html"] is True
-        assert welcome["image_url"].endswith("/brand/max-welcome.jpg")
+        assert welcome["image_url"].endswith("/brand/max-welcome-v2.jpg")
         assert "AIRuntime" in welcome["text"]
         # One button, and it opens the owner's side of the app: no payload.
         assert fake_api.buttons(welcome) == [
