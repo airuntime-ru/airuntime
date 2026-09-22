@@ -59,7 +59,12 @@ def get_client() -> MaxBotClient:
 def _open_app(text: str, slug: str = "") -> dict[str, Any]:
     """A button opening this bot's mini app. The slug becomes its start_param; no slug
     means the owner's view, because the mini app routes on start_param alone."""
-    return button_open_app(text, (settings.max_bot_username or "").lstrip("@"), slug)
+    return button_open_app(
+        text,
+        (settings.max_bot_username or "").lstrip("@"),
+        slug,
+        contact_id=settings.max_bot_id,
+    )
 
 
 def _e(value: object) -> str:

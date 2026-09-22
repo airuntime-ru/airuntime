@@ -73,6 +73,9 @@ class Settings(BaseSettings):
     max_bot_token: str | None = None
     # Used to build deep links: https://max.ru/<username>?startapp=<slug>
     max_bot_username: str | None = None
+    # Stable numeric bot id from GET /me. Current MAX clients use it to resolve open_app
+    # buttons reliably even when username lookup is unavailable or stale.
+    max_bot_id: int | None = None
     max_api_base_url: str = "https://platform-api2.max.ru"
     # Shared secret in the webhook path. MAX does not sign deliveries, so an unguessable
     # path is what keeps the endpoint from accepting forged updates.

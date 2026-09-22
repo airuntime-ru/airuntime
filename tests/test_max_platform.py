@@ -352,11 +352,14 @@ class TestOpenAppButtonShape:
     then simply opens nothing when tapped. Two wrong shapes shipped before this one."""
 
     def test_web_app_names_the_bot_and_payload_carries_the_slug(self) -> None:
-        button = button_open_app("Открыть витрину", "t403_hakaton_max_bot", "avtoservis")
+        button = button_open_app(
+            "Открыть витрину", "t403_hakaton_max_bot", "avtoservis", contact_id=395683755
+        )
         assert button == {
             "type": "open_app",
             "text": "Открыть витрину",
             "web_app": "t403_hakaton_max_bot",
+            "contact_id": 395683755,
             "payload": "avtoservis",
         }
 

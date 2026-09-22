@@ -95,7 +95,9 @@ def button_link(text: str, url: str) -> dict[str, Any]:
     return {"type": "link", "text": text, "url": url}
 
 
-def button_open_app(text: str, bot_username: str, payload: str = "") -> dict[str, Any]:
+def button_open_app(
+    text: str, bot_username: str, payload: str = "", *, contact_id: int | None = None
+) -> dict[str, Any]:
     """Opens the bot's mini app - the one button that makes this a MAX product.
 
     ``web_app`` names the *bot* the mini app is wired to; it is not an address. The address
@@ -110,6 +112,8 @@ def button_open_app(text: str, bot_username: str, payload: str = "") -> dict[str
     when tapped, which is exactly how an earlier version of this button shipped.
     """
     button: dict[str, Any] = {"type": "open_app", "text": text, "web_app": bot_username}
+    if contact_id:
+        button["contact_id"] = contact_id
     if payload:
         button["payload"] = payload
     return button
