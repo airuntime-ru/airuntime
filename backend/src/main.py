@@ -67,7 +67,10 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins_list,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
+    # X-Max-Init-Data is not a simple header, so a missing allow turns the mini app's
+    # preflight into a 400. The webview then reports a network error ("Нет связи с сервером")
+    # instead of the real CORS refusal.
+    allow_headers=["Authorization", "Content-Type", "X-Max-Init-Data"],
     allow_credentials=True,
 )
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts_list)

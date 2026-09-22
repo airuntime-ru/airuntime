@@ -784,6 +784,22 @@ class TestMiniAppAuthorisation:
         assert client.get("/api/v1/max/miniapp/service/anything").status_code == 401
         assert client.get("/api/v1/max/miniapp/owner/overview").status_code == 401
 
+    def test_preflight_allows_the_init_data_header(self, client: TestClient) -> None:
+        response = client.options(
+            "/api/v1/max/miniapp/owner/overview",
+            headers={
+                "Origin": "http://localhost:3000",
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "content-type,x-max-init-data",
+            },
+        )
+        assert response.status_code == 200
+        allowed = {
+            part.strip().lower()
+            for part in response.headers.get("access-control-allow-headers", "").split(",")
+        }
+        assert "x-max-init-data" in allowed
+
     def test_api_rejects_launch_data_signed_by_another_token(self, client: TestClient) -> None:
         response = client.get(
             "/api/v1/max/miniapp/owner/overview",
