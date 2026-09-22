@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import ipaddress
+import json
 import logging
 import re
 import socket
@@ -24,9 +25,13 @@ logger = logging.getLogger(__name__)
 
 MAX_FILES = 4
 MAX_FILE_BYTES = 900_000
-SITE_TIMEOUT = httpx.Timeout(8.0, connect=4.0)
-SITE_BYTES = 400_000
+SITE_TIMEOUT = httpx.Timeout(12.0, connect=5.0)
+# Next.js storefronts (Coffeemania and the like) put the real menu in a 1.5 MB
+# ``__NEXT_DATA__`` script at the *end* of the HTML. A 400 KB cap used to cut it off,
+# so the generator only saw the <title> and then invented «Позиция 1».
+SITE_BYTES = 2_500_000
 SITE_TEXT_CHARS = 3500
+SITE_MENU_ITEMS = 16
 
 _ALLOWED_IMAGE_TYPES = IMAGE_CONTENT_TYPES | {"image/jpg"}
 _TEXT_TYPES = {"text/plain", "text/markdown", "text/csv", "application/json"}
@@ -44,6 +49,10 @@ _META_DESC = re.compile(
 _META_DESC_REV = re.compile(
     r'<meta[^>]+content=["\'](.*?)["\'][^>]+(?:name|property)=["\'](?:description|og:description)["\']',
     re.I | re.S,
+)
+_NEXT_DATA = re.compile(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', re.I | re.S)
+_LD_JSON = re.compile(
+    r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', re.I | re.S
 )
 
 
@@ -96,6 +105,76 @@ def _visible_text(html: str) -> str:
     return _WS.sub(" ", cleaned).strip()
 
 
+def _to_rub(price: int) -> int:
+    """Delivery platforms often store roubles as kopecks (86000 → 860 ₽)."""
+    if price >= 10_000 and price % 100 == 0:
+        return price // 100
+    return price
+
+
+def _json_ld_bits(html: str) -> list[str]:
+    parts: list[str] = []
+    seen: set[str] = set()
+    for match in _LD_JSON.finditer(html):
+        try:
+            payload = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            continue
+        nodes = payload if isinstance(payload, list) else [payload]
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            name = str(node.get("name") or "").strip()
+            if name and name not in seen:
+                seen.add(name)
+                parts.append(f"Бренд: {name}")
+            phone = str(node.get("telephone") or "").strip()
+            if phone:
+                parts.append(f"Телефон: {phone}")
+            description = str(node.get("description") or "").strip()
+            if description:
+                parts.append(f"Описание: {description}")
+    return parts
+
+
+def _collect_priced_products(obj: object, acc: list[tuple[str, int]], *, limit: int) -> None:
+    if len(acc) >= limit:
+        return
+    if isinstance(obj, dict):
+        title = str(obj.get("title") or obj.get("name") or "").strip()
+        price = obj.get("price")
+        if title and isinstance(price, int | float) and float(price) > 0:
+            acc.append((title, _to_rub(int(price))))
+            return
+        for key in ("props", "pageProps", "categories", "products", "items", "dishes"):
+            if key in obj:
+                _collect_priced_products(obj[key], acc, limit=limit)
+                if len(acc) >= limit:
+                    return
+        return
+    if isinstance(obj, list):
+        for child in obj:
+            _collect_priced_products(child, acc, limit=limit)
+            if len(acc) >= limit:
+                return
+
+
+def _menu_from_next_data(html: str) -> str:
+    match = _NEXT_DATA.search(html)
+    if not match:
+        return ""
+    try:
+        data = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return ""
+    items: list[tuple[str, int]] = []
+    _collect_priced_products(data, items, limit=SITE_MENU_ITEMS)
+    if not items:
+        return ""
+    lines = [f"- {title} — {price} ₽" for title, price in items]
+    return "Позиции с сайта:\n" + "\n".join(lines)
+
+
 def _extract_site(html: str, url: str) -> str:
     title_match = _TITLE.search(html)
     title = _WS.sub(" ", _TAG.sub("", title_match.group(1))).strip() if title_match else ""
@@ -113,8 +192,12 @@ def _extract_site(html: str, url: str) -> str:
     parts = [f"Сайт владельца: {url}"]
     if title:
         parts.append(f"Название страницы: {title}")
-    if description:
+    parts.extend(_json_ld_bits(html))
+    if description and f"Описание: {description}" not in parts:
         parts.append(f"Описание: {description}")
+    menu = _menu_from_next_data(html)
+    if menu:
+        parts.append(menu)
     if colors:
         parts.append("Цвета с сайта: " + ", ".join(colors))
     if body:

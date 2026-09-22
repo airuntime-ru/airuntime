@@ -181,6 +181,21 @@ export function editService(
   });
 }
 
+export function patchService(
+  slug: string,
+  payload: {
+    title?: string;
+    tagline?: string;
+    about?: string;
+    items?: Array<{ title: string; description?: string; price_rub: number | null }>;
+  }
+): Promise<OwnerService> {
+  return request(`/max/miniapp/owner/services/${encodeURIComponent(slug)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function setServiceStatus(
   slug: string,
   status: "live" | "disabled"

@@ -14,6 +14,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Storefront } from "@/components/max/storefront";
 import { filterLeadsForDay, OwnerCalendar } from "@/components/max/owner-calendar";
+import { OwnerServicePicker } from "@/components/max/owner-service-picker";
 import {
   MaxApiError,
   createService,
@@ -21,6 +22,7 @@ import {
   editService,
   fetchOwnerLeads,
   fetchOwnerOverview,
+  patchService,
   setLeadStatus,
   setServiceStatus,
   type AttachedFile,
@@ -156,6 +158,24 @@ function pluralLeads(count: number): string {
   return `${count} заявок`;
 }
 
+function pluralServices(count: number): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return `${count} сервис`;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${count} сервиса`;
+  return `${count} сервисов`;
+}
+
+const SELECTED_SLUG_KEY = "airuntime-owner-service";
+
+function readStoredSlug(): string {
+  try {
+    return sessionStorage.getItem(SELECTED_SLUG_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
 function formatCreated(value: string | null): string {
   if (!value) return "";
   const parsed = new Date(value);
@@ -167,6 +187,15 @@ function formatCreated(value: string | null): string {
     minute: "2-digit",
   });
 }
+
+function looksLikeStub(service: OwnerService): boolean {
+  const title = service.config.title.trim().toLowerCase();
+  if (title.startsWith("описание владельца") || title === "мой сервис") return true;
+  if (service.config.tagline === "Заполните описание в приложении") return true;
+  return service.config.items.length > 0 && service.config.items.every((item) => /^Позиция \d+$/i.test(item.title));
+}
+
+type CatalogRow = { title: string; price: string };
 
 function messageOf(cause: unknown, fallback: string): string {
   return cause instanceof Error && cause.message ? cause.message : fallback;
@@ -207,6 +236,10 @@ export function OwnerPanel() {
   const [confirmDeleteSlug, setConfirmDeleteSlug] = useState("");
   const [previewSlug, setPreviewSlug] = useState("");
   const [calendarDay, setCalendarDay] = useState<string | null>(null);
+  const [selectedSlug, setSelectedSlug] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [catalog, setCatalog] = useState<CatalogRow[]>([]);
+  const [catalogNote, setCatalogNote] = useState("");
 
   const apply = useCallback((result: { services: OwnerService[]; leads: Lead[] } | Error) => {
     if (!(result instanceof Error)) {
@@ -257,6 +290,45 @@ export function OwnerPanel() {
     return () => window.clearTimeout(timer);
   }, [confirmDeleteSlug]);
 
+  useEffect(() => {
+    if (services.length === 0) {
+      setSelectedSlug("");
+      return;
+    }
+    if (services.some((service) => service.slug === selectedSlug)) return;
+    const stored = readStoredSlug();
+    if (stored && services.some((service) => service.slug === stored)) {
+      setSelectedSlug(stored);
+      return;
+    }
+    const withNew = services.find((service) => service.new_leads > 0);
+    setSelectedSlug((withNew ?? services[0]).slug);
+  }, [services, selectedSlug]);
+
+  useEffect(() => {
+    if (!selectedSlug) return;
+    try {
+      sessionStorage.setItem(SELECTED_SLUG_KEY, selectedSlug);
+    } catch {
+      // Private mode or a webview without storage — selection still lives in React state.
+    }
+  }, [selectedSlug]);
+
+  useEffect(() => {
+    const current = services.find((service) => service.slug === selectedSlug);
+    if (!current) {
+      setCatalog([]);
+      return;
+    }
+    setCatalog(
+      current.config.items.map((item) => ({
+        title: item.title,
+        price: item.price_rub != null ? String(item.price_rub) : "",
+      }))
+    );
+    setCatalogNote("");
+  }, [services, selectedSlug]);
+
   const onCreate = useCallback(async () => {
     const text = brief.trim();
     const url = siteUrl.trim();
@@ -274,6 +346,8 @@ export function OwnerPanel() {
       });
       setServices((current) => [created, ...current]);
       setFreshSlug(created.slug);
+      setSelectedSlug(created.slug);
+      setCalendarDay(null);
       setBrief("");
       setSiteUrl("");
       setAttachments([]);
@@ -329,6 +403,38 @@ export function OwnerPanel() {
       }
     },
     [editText]
+  );
+
+  const onSaveCatalog = useCallback(
+    async (service: OwnerService) => {
+      const items = catalog
+        .map((row) => {
+          const title = row.title.trim();
+          if (!title) return null;
+          const raw = row.price.trim().replace(/\s/g, "");
+          const price = raw ? Number.parseInt(raw, 10) : null;
+          return {
+            title,
+            price_rub: Number.isFinite(price) ? price : null,
+          };
+        })
+        .filter((row): row is { title: string; price_rub: number | null } => row !== null);
+      setBusySlug(service.slug);
+      setCatalogNote("");
+      try {
+        const updated = await patchService(service.slug, { items });
+        setServices((current) =>
+          current.map((row) => (row.slug === service.slug ? { ...row, ...updated } : row))
+        );
+        haptic("success");
+        setCatalogNote("Меню сохранено");
+      } catch (cause: unknown) {
+        setCatalogNote(messageOf(cause, "Не удалось сохранить меню"));
+      } finally {
+        setBusySlug("");
+      }
+    },
+    [catalog]
   );
 
   const onToggle = useCallback(async (service: OwnerService) => {
@@ -594,139 +700,218 @@ export function OwnerPanel() {
     );
   }
 
-  const newLeads = leads.filter((lead) => lead.status === "new");
-  const rest = leads.filter((lead) => lead.status !== "new");
+  const selected = services.find((service) => service.slug === selectedSlug) ?? services[0];
+  const scopedLeads = leads.filter((lead) => lead.service_slug === selected.slug);
+  const newLeads = scopedLeads.filter((lead) => lead.status === "new");
+  const rest = scopedLeads.filter((lead) => lead.status !== "new");
   const visibleLeads = filterLeadsForDay([...newLeads, ...rest], calendarDay);
+  const busy = busySlug === selected.slug;
+  const live = selected.status === "live";
+  const editing = editingSlug === selected.slug;
+  const summary = [
+    KIND_LABEL[selected.config.kind],
+    pluralLeads(selected.lead_count ?? 0),
+    selected.new_leads > 0
+      ? `${selected.new_leads} ${pluralNew(selected.new_leads)}`
+      : live
+        ? ""
+        : "скрыт",
+    services.length > 1 ? pluralServices(services.length) : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <div className="max-shell">
-      <div className="max-toolbar">
-        <h2 className="max-section-title" style={{ margin: 0 }}>
-          Мои сервисы
-        </h2>
-        {!composerOpen && !creating ? (
-          <button type="button" className="max-toolbar-add" onClick={() => setComposerOpen(true)}>
-            + Новая
-          </button>
-        ) : null}
-      </div>
+      <button
+        type="button"
+        className="max-switcher"
+        aria-haspopup="dialog"
+        aria-expanded={pickerOpen}
+        onClick={() => {
+          haptic("tap");
+          setPickerOpen(true);
+        }}
+      >
+        <span className="max-switcher-icon" aria-hidden>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <path
+              d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5.5v-6h-3v6H5a1 1 0 0 1-1-1v-9.5Z"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </span>
+        <span className="max-switcher-body">
+          <span className="max-switcher-kicker">Сервис</span>
+          <span className="max-switcher-title">{selected.config.title}</span>
+          <span className="max-switcher-note">{summary}</span>
+        </span>
+        <span className="max-switcher-chevron" aria-hidden>
+          ▾
+        </span>
+      </button>
 
       {composerOpen || creating ? <div style={{ marginBottom: 10 }}>{composer}</div> : null}
 
-      <ul className="max-list">
-        {services.map((service) => {
-          const busy = busySlug === service.slug;
-          const live = service.status === "live";
-          const editing = editingSlug === service.slug;
-          const summary = [
-            KIND_LABEL[service.config.kind],
-            pluralLeads(service.lead_count ?? 0),
-          ].join(" · ");
-          return (
-            <li
-              key={service.slug}
-              className={`max-sheet max-card${freshSlug === service.slug ? " max-card-fresh" : ""}`}
+      {!composerOpen && !creating ? (
+        <article
+          className={`max-sheet max-card${freshSlug === selected.slug ? " max-card-fresh" : ""}`}
+          style={{ marginBottom: 14 }}
+        >
+          {freshSlug === selected.slug ? (
+            <p className="max-card-flag">✓ AIRuntime готов&nbsp;— ссылку уже можно отправлять</p>
+          ) : null}
+
+          {looksLikeStub(selected) ? (
+            <p className="max-card-flag" style={{ color: "#b45309" }}>
+              Черновик: модель не собрала страницу. Проверьте меню ниже.
+            </p>
+          ) : null}
+
+          {selected.link ? (
+            <>
+              <div className="max-link-box">{selected.link}</div>
+              <div className="max-row" style={{ marginTop: 10 }}>
+                <button
+                  type="button"
+                  className="max-button max-button-compact"
+                  onClick={() => void onShare(selected)}
+                  disabled={!live}
+                >
+                  Поделиться
+                </button>
+                <button
+                  type="button"
+                  className="max-button max-button-secondary max-button-compact"
+                  onClick={() => void onCopy(selected)}
+                >
+                  {copiedSlug === selected.slug ? "Скопировано" : "Скопировать"}
+                </button>
+              </div>
+            </>
+          ) : (
+            <p className="max-note">Ссылка появится после настройки имени бота.</p>
+          )}
+
+          <div className="max-catalog">
+            <p className="max-field-label">Меню</p>
+            {catalog.map((row, index) => (
+              <div className="max-catalog-row" key={`${selected.slug}-${index}`}>
+                <input
+                  className="max-input"
+                  value={row.title}
+                  placeholder="Название"
+                  onChange={(event) =>
+                    setCatalog((current) =>
+                      current.map((item, itemIndex) =>
+                        itemIndex === index ? { ...item, title: event.target.value } : item
+                      )
+                    )
+                  }
+                />
+                <input
+                  className="max-input max-catalog-price"
+                  inputMode="numeric"
+                  placeholder="₽"
+                  value={row.price}
+                  onChange={(event) =>
+                    setCatalog((current) =>
+                      current.map((item, itemIndex) =>
+                        itemIndex === index ? { ...item, price: event.target.value } : item
+                      )
+                    )
+                  }
+                />
+                <button
+                  type="button"
+                  className="max-catalog-remove"
+                  aria-label="Убрать позицию"
+                  onClick={() =>
+                    setCatalog((current) => current.filter((_, itemIndex) => itemIndex !== index))
+                  }
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+            <div className="max-row" style={{ marginTop: 8 }}>
+              <button
+                type="button"
+                className="max-button max-button-secondary max-button-compact"
+                onClick={() => setCatalog((current) => [...current, { title: "", price: "" }])}
+              >
+                + Позиция
+              </button>
+              <button
+                type="button"
+                className="max-button max-button-compact"
+                onClick={() => void onSaveCatalog(selected)}
+                disabled={busy}
+              >
+                Сохранить меню
+              </button>
+            </div>
+            {catalogNote ? <p className="max-hint">{catalogNote}</p> : null}
+          </div>
+
+          <div className="max-card-actions">
+            <button type="button" onClick={() => setPreviewSlug(selected.slug)} disabled={busy}>
+              Посмотреть
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setEditingSlug(editing ? "" : selected.slug);
+                setEditText("");
+                setEditNote("");
+              }}
+              disabled={busy}
             >
-              {freshSlug === service.slug ? (
-                <p className="max-card-flag">✓ AIRuntime готов&nbsp;— ссылку уже можно отправлять</p>
-              ) : null}
-              <div className="max-lead-head">
-                <span className="max-option-title">{service.config.title}</span>
-                {service.new_leads > 0 ? (
-                  <span className="max-badge max-badge-new">
-                    {service.new_leads} {pluralNew(service.new_leads)}
-                  </span>
-                ) : (
-                  <span className={`max-badge ${live ? "max-badge-confirmed" : "max-badge-declined"}`}>
-                    {live ? "опубликован" : "скрыт"}
-                  </span>
-                )}
-              </div>
-              <p className="max-option-note">{summary}</p>
+                  Изменить словами
+            </button>
+            <button type="button" onClick={() => void onToggle(selected)} disabled={busy}>
+              {live ? "Скрыть" : "Опубликовать"}
+            </button>
+            <button
+              type="button"
+              className="max-danger"
+              onClick={() => void onDelete(selected)}
+              disabled={busy}
+            >
+              {confirmDeleteSlug === selected.slug ? "Точно удалить?" : "Удалить"}
+            </button>
+          </div>
 
-              {service.link ? (
-                <>
-                  <div className="max-link-box">{service.link}</div>
-                  <div className="max-row" style={{ marginTop: 10 }}>
-                    <button
-                      type="button"
-                      className="max-button max-button-compact"
-                      onClick={() => void onShare(service)}
-                      disabled={!live}
-                    >
-                      Поделиться
-                    </button>
-                    <button
-                      type="button"
-                      className="max-button max-button-secondary max-button-compact"
-                      onClick={() => void onCopy(service)}
-                    >
-                      {copiedSlug === service.slug ? "Скопировано" : "Скопировать"}
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <p className="max-note">Ссылка появится после настройки имени бота.</p>
-              )}
-
-              <div className="max-card-actions">
-                <button type="button" onClick={() => setPreviewSlug(service.slug)} disabled={busy}>
-                  Посмотреть
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditingSlug(editing ? "" : service.slug);
-                    setEditText("");
-                    setEditNote("");
-                  }}
-                  disabled={busy}
-                >
-                  Изменить
-                </button>
-                <button type="button" onClick={() => void onToggle(service)} disabled={busy}>
-                  {live ? "Скрыть" : "Опубликовать"}
-                </button>
-                <button
-                  type="button"
-                  className="max-danger"
-                  onClick={() => void onDelete(service)}
-                  disabled={busy}
-                >
-                  {confirmDeleteSlug === service.slug ? "Точно удалить?" : "Удалить"}
-                </button>
-              </div>
-
-              {editing ? (
-                <div className="max-edit">
-                  <textarea
-                    className="max-textarea"
-                    rows={3}
-                    maxLength={1000}
-                    value={editText}
-                    onChange={(event) => setEditText(event.target.value)}
-                    placeholder="Что поменять? Например: добавь развал-схождение 3000, убери субботу"
-                    disabled={busy}
-                  />
-                  {editNote ? <p className="max-hint">{editNote}</p> : null}
-                  <button
-                    type="button"
-                    className="max-button max-button-compact"
-                    style={{ marginTop: 8 }}
-                    onClick={() => void onEdit(service)}
-                    disabled={busy || editText.trim().length < 3}
-                  >
-                    {busy ? "Меняем…" : "Применить"}
-                  </button>
-                </div>
-              ) : null}
-            </li>
-          );
-        })}
-      </ul>
+          {editing ? (
+            <div className="max-edit">
+              <textarea
+                className="max-textarea"
+                rows={3}
+                maxLength={1000}
+                value={editText}
+                onChange={(event) => setEditText(event.target.value)}
+                placeholder="Что поменять? Например: добавь развал-схождение 3000, убери субботу"
+                disabled={busy}
+              />
+              {editNote ? <p className="max-hint">{editNote}</p> : null}
+              <button
+                type="button"
+                className="max-button max-button-compact"
+                style={{ marginTop: 8 }}
+                onClick={() => void onEdit(selected)}
+                disabled={busy || editText.trim().length < 3}
+              >
+                {busy ? "Меняем…" : "Применить"}
+              </button>
+            </div>
+          ) : null}
+        </article>
+      ) : null}
 
       <h2 className="max-section-title">Календарь</h2>
-      <OwnerCalendar leads={leads} selectedKey={calendarDay} onSelect={setCalendarDay} />
+      <OwnerCalendar leads={scopedLeads} selectedKey={calendarDay} onSelect={setCalendarDay} />
       {calendarDay ? (
         <button type="button" className="max-linklike" onClick={() => setCalendarDay(null)}>
           Показать все заявки
@@ -738,7 +923,7 @@ export function OwnerPanel() {
           ? `Заявки · ${visibleLeads.length}`
           : `Заявки${newLeads.length > 0 ? ` · ${newLeads.length} ${pluralNew(newLeads.length)}` : ""}`}
       </h2>
-      {leads.length === 0 ? (
+      {scopedLeads.length === 0 ? (
         <p className="max-note">Заявок пока нет. Отправьте ссылку клиентам или повесьте QR-код.</p>
       ) : visibleLeads.length === 0 ? (
         <p className="max-note">На этот день записей нет.</p>
@@ -755,7 +940,7 @@ export function OwnerPanel() {
                 </span>
               </div>
               <p className="max-option-note">
-                {[lead.service_title, lead.item_title, lead.slot_label].filter(Boolean).join(" · ")}
+                {[lead.item_title, lead.slot_label].filter(Boolean).join(" · ")}
               </p>
               {lead.phone ? <p className="max-option-note">{lead.phone}</p> : null}
               {lead.comment ? <p className="max-option-note">{lead.comment}</p> : null}
@@ -806,6 +991,26 @@ export function OwnerPanel() {
         </div>
       ) : null}
       <div style={{ height: 24 }} aria-hidden />
+
+      <OwnerServicePicker
+        open={pickerOpen}
+        services={services}
+        selectedSlug={selected.slug}
+        onSelect={(slug) => {
+          if (slug === selectedSlug) return;
+          setSelectedSlug(slug);
+          setCalendarDay(null);
+          setEditingSlug("");
+          setConfirmDeleteSlug("");
+          haptic("tap");
+        }}
+        onClose={() => setPickerOpen(false)}
+        onAdd={() => {
+          setPickerOpen(false);
+          setComposerOpen(true);
+          haptic("tap");
+        }}
+      />
     </div>
   );
 }

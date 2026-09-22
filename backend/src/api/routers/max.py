@@ -342,6 +342,19 @@ class EditServiceRequest(BaseModel):
     instruction: str = Field(min_length=3, max_length=1000)
 
 
+class CatalogItemIn(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=280)
+    price_rub: int | None = Field(default=None, ge=0, le=10_000_000)
+
+
+class PatchServiceRequest(BaseModel):
+    title: str | None = Field(default=None, max_length=120)
+    tagline: str | None = Field(default=None, max_length=160)
+    about: str | None = Field(default=None, max_length=600)
+    items: list[CatalogItemIn] | None = Field(default=None, max_length=24)
+
+
 @router.post("/miniapp/owner/services/{slug}/edit")
 async def edit_service(
     slug: str,
@@ -357,6 +370,27 @@ async def edit_service(
         **_owner_service_payload(service, _new_leads(db, service), _lead_count(db, service)),
         "changed": changed,
     }
+
+
+@router.patch("/miniapp/owner/services/{slug}")
+def patch_service(
+    slug: str,
+    payload: PatchServiceRequest,
+    db: Session = Depends(get_db),
+    launch: MaxLaunchContext = Depends(require_launch_context),
+) -> dict:
+    owner = _owner_or_404(db, launch)
+    service = _owned_service_or_404(db, owner, slug)
+    storefronts.update_catalog(
+        db,
+        service,
+        title=payload.title,
+        tagline=payload.tagline,
+        about=payload.about,
+        items=None if payload.items is None else [item.model_dump() for item in payload.items],
+    )
+    db.refresh(service)
+    return _owner_service_payload(service, _new_leads(db, service), _lead_count(db, service))
 
 
 class ServiceStatusRequest(BaseModel):

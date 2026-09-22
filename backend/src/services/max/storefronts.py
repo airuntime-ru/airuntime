@@ -18,7 +18,7 @@ from src.core.config import settings
 from src.db.models.max_platform import SERVICE_LIVE, MaxOwner, MaxService
 from src.services.max.briefing import BriefingError, decode_attachments, fetch_site_brief
 from src.services.max.generator import apply_edit, generate_config
-from src.services.max.schema import ServiceConfig, slugify
+from src.services.max.schema import ServiceConfig, normalise, slugify
 
 MAX_SERVICES_PER_OWNER = 10
 
@@ -92,7 +92,7 @@ def customer_chat_url(user_id: int | None) -> str:
 def _compose_prompt(brief: str, site_text: str, file_notes: str) -> str:
     parts: list[str] = []
     if brief.strip():
-        parts.append("Описание владельца:\n" + brief.strip())
+        parts.append(brief.strip())
     if site_text:
         parts.append(site_text)
     if file_notes:
@@ -146,3 +146,34 @@ async def edit_storefront(db: Session, service: MaxService, instruction: str) ->
         store_config(service, updated)
         db.commit()
     return changed
+
+
+def update_catalog(
+    db: Session,
+    service: MaxService,
+    *,
+    title: str | None = None,
+    tagline: str | None = None,
+    about: str | None = None,
+    items: list[dict[str, object]] | None = None,
+) -> ServiceConfig:
+    """Edit the catalog in place - title, tagline, about, items - without calling the model.
+
+    The owner of a café needs to fix a price in two taps, not by writing a prompt that
+    might or might not be applied.
+    """
+    data = load_config(service).model_dump()
+    if title is not None:
+        cleaned = title.strip()
+        if cleaned:
+            data["title"] = cleaned[:120]
+    if tagline is not None:
+        data["tagline"] = tagline.strip()[:160]
+    if about is not None:
+        data["about"] = about.strip()[:600]
+    if items is not None:
+        data["items"] = items
+    updated = normalise(ServiceConfig.model_validate(data))
+    store_config(service, updated)
+    db.commit()
+    return updated

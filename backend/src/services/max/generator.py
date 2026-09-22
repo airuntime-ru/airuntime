@@ -88,6 +88,8 @@ _SYSTEM_PROMPT = """Ты — генератор сервисов AIRuntime дл�
 Кафе — «Аллергии, пожелания к заказу». Никогда не ставь «марка авто», если это не про машины.
 - mood: calm — обучение, психология, медицина, репетитор; warm — еда, дети, уют; \
 bold — авто, барбер, спорт, ремонт; minimal — консультации, B2B, заявки.
+- title — название вывески (бренд или как владелец назвал точку). Никогда не копируй \
+служебные подписи вроде «Описание владельца», «Сайт владельца», «Название страницы».
 - title и tagline — как вывеска, не канцелярия. Никаких «Качественные услуги», \
 «Индивидуальный подход», «Профессионализм». about — 1-3 конкретных предложения: \
 для кого, в каком формате, что получает клиент.
@@ -179,9 +181,51 @@ def _extract_json(raw: str) -> dict:
     return payload
 
 
-_MENU_TERMS = ("меню", "кафе", "ресторан", "кофейн", "доставк", "пицц", "суши", "бар", "пекарн")
+_MENU_TERMS = (
+    "меню",
+    "кафе",
+    "ресторан",
+    "кофейн",
+    "доставк",
+    "пицц",
+    "суши",
+    "бар",
+    "пекарн",
+    "кофемани",
+)
 _LANDING_TERMS = ("лендинг", "landing", "заявк", "консультац", "презентац", "курс", "вебинар")
 _TUTOR_TERMS = ("репетитор", "урок", "егэ", "огэ", "занят", "математик", "английск", "физик")
+
+_SKIP_TITLE_PREFIXES = (
+    "описание владельца",
+    "сайт владельца",
+    "текст страницы",
+    "цвета с сайта",
+    "позиции с сайта",
+    "что написал",
+    "описание:",
+)
+
+_GRAY_ACCENTS = {
+    "#fff",
+    "#ffffff",
+    "#000",
+    "#000000",
+    "#212121",
+    "#a0a1a4",
+    "#f5f5f5",
+    "#f3f4f5",
+    "#b0b3b6",
+    "#2e7cf6",
+}
+
+_PRICED_LINE = re.compile(
+    r"^\s*[-•*]?\s*(.+?)\s*[—–\-:]\s*(\d{2,7})\s*(?:₽|руб(?:\.|лей|ля)?)?\s*$",
+    re.M,
+)
+_PRICED_INLINE = re.compile(
+    r"([A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё0-9&«»\"'(). -]{1,40}?)\s+(\d{2,6})(?:\s*(?:₽|руб))?"
+)
 
 
 def _fallback_mood(prompt: str, kind: str) -> str:
@@ -195,32 +239,104 @@ def _fallback_mood(prompt: str, kind: str) -> str:
     return "bold"
 
 
+def _fallback_title(prompt: str) -> str:
+    brand = ""
+    owner_line = ""
+    page_name = ""
+    for raw in (prompt or "").splitlines():
+        stripped = raw.strip().strip(":")
+        if not stripped:
+            continue
+        lower = stripped.lower()
+        if lower.startswith("бренд:"):
+            brand = stripped.split(":", 1)[-1].strip()
+            continue
+        if lower.startswith("название страницы"):
+            page_name = stripped.split(":", 1)[-1].split("—")[0].split(" - ")[0].strip()
+            continue
+        if any(lower.startswith(prefix) for prefix in _SKIP_TITLE_PREFIXES):
+            continue
+        if not owner_line:
+            owner_line = stripped.split(".")[0].strip()
+    title = owner_line or brand or page_name or "Мой сервис"
+    if title.lower() in _SKIP_TITLE_PREFIXES or title.endswith(":"):
+        title = brand or page_name or "Мой сервис"
+    return title[:60]
+
+
+def _fallback_accent(prompt: str) -> str | None:
+    for color in re.findall(r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})\b", prompt or ""):
+        if color.lower() in _GRAY_ACCENTS:
+            continue
+        return color
+    return None
+
+
+def _parse_priced_items(prompt: str) -> list[dict[str, object]]:
+    found: list[dict[str, object]] = []
+    seen: set[str] = set()
+
+    def add(name: str, price: int) -> None:
+        title = re.sub(r"\s+", " ", name).strip(" .,;:—-–")
+        if len(title) < 2 or title.lower() in seen:
+            return
+        if title.lower() in {"заказ", "меню", "сайт", "с", "до", "позиции с сайта"}:
+            return
+        if price < 40 or price > 500_000:
+            return
+        seen.add(title.lower())
+        found.append({"title": title[:120], "price_rub": price})
+
+    for match in _PRICED_LINE.finditer(prompt or ""):
+        add(match.group(1), int(match.group(2)))
+    if found:
+        return found[:8]
+
+    for match in _PRICED_INLINE.finditer(prompt or ""):
+        preceding = (prompt or "")[max(0, match.start() - 3) : match.start()].lower()
+        if preceding.endswith("с ") or preceding.endswith("до "):
+            continue
+        add(match.group(1), int(match.group(2)))
+    return found[:8]
+
+
 def _fallback_config(prompt: str) -> ServiceConfig:
     """A usable draft when the model is unavailable - the wizard must never dead-end."""
     lowered = (prompt or "").lower()
+    priced = _parse_priced_items(prompt)
     if any(term in lowered for term in _MENU_TERMS):
-        kind, items = "menu", ["Позиция 1", "Позиция 2", "Позиция 3"]
+        kind = "menu"
+        items = priced or [{"title": "Кофе"}, {"title": "Выпечка"}]
     elif any(term in lowered for term in _LANDING_TERMS):
-        kind, items = "landing", ["Консультация"]
+        kind = "landing"
+        items = priced or [{"title": "Консультация"}]
     elif any(term in lowered for term in _TUTOR_TERMS):
-        kind, items = "booking", ["Занятие"]
+        kind = "booking"
+        items = priced or [{"title": "Занятие"}]
     else:
-        kind, items = "booking", ["Услуга 1"]
+        kind = "booking"
+        items = priced or [{"title": "Услуга"}]
 
-    title = (prompt or "Мой сервис").strip().split("\n")[0][:60] or "Мой сервис"
-    return normalise(
-        ServiceConfig.model_validate(
-            {
-                "kind": kind,
-                "title": title,
-                "tagline": "Заполните описание в приложении",
-                "about": "",
-                "mood": _fallback_mood(prompt, kind),
-                "items": [{"title": item} for item in items],
-                "slots": fallback_slots() if kind == "booking" else [],
-            }
-        )
-    )
+    title = _fallback_title(prompt)
+    tagline = ""
+    for raw in (prompt or "").splitlines():
+        stripped = raw.strip()
+        if stripped.lower().startswith("описание:") and "заполните" not in stripped.lower():
+            tagline = stripped.split(":", 1)[-1].strip()[:160]
+            break
+    payload: dict[str, object] = {
+        "kind": kind,
+        "title": title,
+        "tagline": tagline,
+        "about": "",
+        "mood": _fallback_mood(prompt, kind),
+        "items": items,
+        "slots": fallback_slots() if kind == "booking" else [],
+    }
+    accent = _fallback_accent(prompt)
+    if accent:
+        payload["accent"] = accent
+    return normalise(ServiceConfig.model_validate(payload))
 
 
 async def _config_from_model(

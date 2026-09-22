@@ -416,6 +416,24 @@ class TestSiteBriefing:
         with pytest.raises(BriefingError):
             normalise_site_url("http://localhost/secret")
 
+    def test_next_data_menu_survives_a_javascript_storefront(self) -> None:
+        from src.services.max.briefing import _extract_site
+
+        html = (
+            "<html><head><title>Кофемания</title>"
+            '<script type="application/ld+json">'
+            '{"@type":"Organization","name":"Кофемания","telephone":"+74951201203"}'
+            "</script>"
+            '<script id="__NEXT_DATA__">'
+            '{"props":{"pageProps":{"categories":[{"title":"Кофе",'
+            '"products":[{"title":"Раф","price":86000}]}]}}}'
+            "</script></head><body>unused</body></html>"
+        )
+        text = _extract_site(html, "https://coffeemania.ru")
+        assert "Бренд: Кофемания" in text
+        assert "Раф — 860 ₽" in text
+        assert "+74951201203" in text
+
 
 class TestGeneratorFailsLoudly:
     """A provider adapter signals a failed turn with an event, not an exception. Collecting
@@ -491,6 +509,32 @@ class TestGeneratorFailsLoudly:
         assert config.mood == "calm"
         assert len(config.items) == 1
         assert "авто" not in config.comment_hint.lower()
+
+    def test_fallback_keeps_real_prices_instead_of_placeholder_items(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def boom(*args: Any, **kwargs: Any) -> str:
+            raise RuntimeError("routerai/nope: HTTP 400")
+
+        monkeypatch.setattr(generator, "_complete", boom)
+        prompt = (
+            "Описание владельца:\n"
+            "Кофейня у метро Чкаловская. Капучино 250, раф 290, круассан 180, сырники 320.\n\n"
+            "Сайт владельца: https://coffeemania.ru\n"
+            "Название страницы: Кофемания — рестораны Москвы\n"
+            "Бренд: Кофемания\n"
+            "Позиции с сайта:\n"
+            "- Фисташковый латте — 870 ₽\n"
+            "- Тирамису — 650 ₽\n"
+        )
+        config, used_llm = asyncio.run(generator.generate_config(prompt))
+        assert used_llm is False
+        assert "описан" not in config.title.lower()
+        assert "Чкаловская" in config.title or config.title == "Кофемания"
+        titles = [item.title.lower() for item in config.items]
+        assert titles
+        assert not any(title.startswith("позиция") for title in titles)
+        assert all(item.price_rub for item in config.items)
 
 
 # --------------------------------------------------------------------------------------
@@ -596,7 +640,7 @@ class TestTheBotIsAFrontDoor:
         (welcome,) = fake_api.messages
         assert welcome["chat_id"] == 777001
         assert welcome["html"] is True
-        assert welcome["image_url"].endswith("/brand/max-welcome-v5.jpg")
+        assert welcome["image_url"].endswith("/brand/max-welcome-v6.jpg")
         assert "AIRuntime" in welcome["text"]
         assert "приложени" in welcome["text"]
         assert "одним сообщением" not in welcome["text"]
@@ -829,6 +873,23 @@ class TestOwnerToCustomerFlow:
         assert body["changed"] is True
         assert body["slug"] == service["slug"]
         assert "Шиномонтаж" in [item["title"] for item in body["config"]["items"]]
+
+    def test_owner_can_edit_the_catalog_without_the_model(self, client: TestClient) -> None:
+        service = create_storefront(client)
+        response = client.patch(
+            f"/api/v1/max/miniapp/owner/services/{service['slug']}",
+            json={
+                "title": "Кофемания Чкаловская",
+                "items": [{"title": "Капучино", "price_rub": 250}],
+            },
+            headers=owner_headers(),
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["slug"] == service["slug"]
+        assert body["config"]["title"] == "Кофемания Чкаловская"
+        assert body["config"]["items"][0]["title"] == "Капучино"
+        assert body["config"]["items"][0]["price_rub"] == 250
 
     def test_unpublished_storefront_is_hidden_from_customers_but_not_its_owner(
         self, client: TestClient
