@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from uuid import UUID
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -186,23 +187,23 @@ def planned_public_url(project: Project) -> str | None:
 
 
 def assert_subdomain_available(
-    db: Session, subdomain: str, *, exclude_project_id: str | None = None
+    db: Session, subdomain: str, *, exclude_project_id: UUID | str | None = None
 ) -> None:
     query = db.query(Project).filter(Project.deploy_subdomain == subdomain)
     if exclude_project_id:
-        query = query.filter(Project.id != exclude_project_id)
+        query = query.filter(Project.id != UUID(str(exclude_project_id)))
     if query.first():
         raise HTTPException(status_code=409, detail="Этот поддомен уже занят")
 
 
 def is_subdomain_available(
-    db: Session, subdomain: str, *, exclude_project_id: str | None = None
+    db: Session, subdomain: str, *, exclude_project_id: UUID | str | None = None
 ) -> bool:
     if subdomain in RESERVED_SUBDOMAINS or not SUBDOMAIN_RE.fullmatch(subdomain):
         return False
     query = db.query(Project).filter(Project.deploy_subdomain == subdomain)
     if exclude_project_id:
-        query = query.filter(Project.id != exclude_project_id)
+        query = query.filter(Project.id != UUID(str(exclude_project_id)))
     return query.first() is None
 
 
@@ -257,7 +258,7 @@ def allocate_unique_subdomain(
     db: Session,
     base: str,
     *,
-    exclude_project_id: str | None = None,
+    exclude_project_id: UUID | str | None = None,
     fallback_suffix: str | None = None,
 ) -> str:
     """Try `base`, then `base-2`…; fall back to `base-<suffix>` if exhausted."""
