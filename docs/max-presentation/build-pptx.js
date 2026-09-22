@@ -19,7 +19,7 @@ const JSZip = require("jszip"); // pptxgenjs's own dependency
 const pptxgen = require("pptxgenjs");
 
 // The commit slide 1 points the jury at - keep it equal to the hash in deck.html.
-const COMMIT = "376b483180331187bd900c2dce8a18bda4ca5672";
+const COMMIT = "eadc752d7bfc2ec65e96972c4c60e3be6547a8ab";
 
 // --- palette -----------------------------------------------------------------------
 const MAX_BLUE = "0077FF";
