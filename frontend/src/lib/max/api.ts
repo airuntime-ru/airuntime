@@ -129,14 +129,28 @@ export function setLeadStatus(leadId: string, status: Lead["status"]): Promise<L
   });
 }
 
+export type AttachedFile = {
+  filename: string;
+  content_type: string;
+  data_base64: string;
+};
+
 export type CreatedService = OwnerService & { used_llm: boolean };
 
 /** One description in, a published storefront out. Takes as long as the model does -
  *  usually 5-10 s - so the caller shows progress rather than a frozen button. */
-export function createService(brief: string): Promise<CreatedService> {
+export function createService(input: {
+  brief: string;
+  site_url?: string;
+  files?: AttachedFile[];
+}): Promise<CreatedService> {
   return request<CreatedService>("/max/miniapp/owner/services", {
     method: "POST",
-    body: JSON.stringify({ brief }),
+    body: JSON.stringify({
+      brief: input.brief,
+      site_url: input.site_url || "",
+      files: input.files || [],
+    }),
   });
 }
 

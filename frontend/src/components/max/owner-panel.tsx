@@ -10,7 +10,7 @@
  * opens this screen and brings news.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Storefront } from "@/components/max/storefront";
 import {
@@ -22,6 +22,7 @@ import {
   fetchOwnerOverview,
   setLeadStatus,
   setServiceStatus,
+  type AttachedFile,
   type Lead,
   type OwnerService,
 } from "@/lib/max/api";
@@ -32,6 +33,73 @@ type Phase = "loading" | "ready" | "error";
 // The backend refuses anything shorter: "привет" is not something a storefront can be
 // built from, and saying so before the request beats a round trip to find out.
 const MIN_BRIEF = 12;
+const MAX_ATTACHMENTS = 4;
+
+function looksLikeUrl(value: string): boolean {
+  const text = value.trim();
+  if (!text || /\s/.test(text)) return false;
+  try {
+    const parsed = new URL(text.includes("://") ? text : `https://${text}`);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function bufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunk = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunk));
+  }
+  return btoa(binary);
+}
+
+function resizeImage(file: File): Promise<AttachedFile> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    const url = URL.createObjectURL(file);
+    image.onload = () => {
+      const max = 1024;
+      const scale = Math.min(1, max / Math.max(image.width, image.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(image.width * scale));
+      canvas.height = Math.max(1, Math.round(image.height * scale));
+      const context = canvas.getContext("2d");
+      if (!context) {
+        URL.revokeObjectURL(url);
+        reject(new Error("canvas"));
+        return;
+      }
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
+      URL.revokeObjectURL(url);
+      resolve({
+        filename: file.name.replace(/\.[^.]+$/, "") + ".jpg",
+        content_type: "image/jpeg",
+        data_base64: dataUrl.split(",")[1] || "",
+      });
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Не удалось прочитать изображение"));
+    };
+    image.src = url;
+  });
+}
+
+async function fileToAttachment(file: File): Promise<AttachedFile> {
+  if (file.type.startsWith("image/")) return resizeImage(file);
+  if (file.size > 900_000) {
+    throw new Error(`${file.name}: файл больше 900 КБ`);
+  }
+  return {
+    filename: file.name,
+    content_type: file.type || "application/octet-stream",
+    data_base64: bufferToBase64(await file.arrayBuffer()),
+  };
+}
 
 const EXAMPLES: { label: string; brief: string }[] = [
   {
@@ -122,9 +190,12 @@ export function OwnerPanel() {
   // Creating a storefront.
   const [composerOpen, setComposerOpen] = useState(false);
   const [brief, setBrief] = useState("");
+  const [siteUrl, setSiteUrl] = useState("");
+  const [attachments, setAttachments] = useState<AttachedFile[]>([]);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
   const [freshSlug, setFreshSlug] = useState("");
+  const fileInput = useRef<HTMLInputElement>(null);
 
   // Working on an existing one.
   const [busySlug, setBusySlug] = useState("");
@@ -186,26 +257,48 @@ export function OwnerPanel() {
 
   const onCreate = useCallback(async () => {
     const text = brief.trim();
-    if (text.length < MIN_BRIEF || creating) return;
+    const url = siteUrl.trim();
+    const ready = text.length >= MIN_BRIEF || looksLikeUrl(url) || attachments.length > 0;
+    if (!ready || creating) return;
     haptic("tap");
     setCreating(true);
     setCreateError("");
     guardClosing(true);
     try {
-      const created = await createService(text);
+      const created = await createService({
+        brief: text,
+        site_url: url,
+        files: attachments,
+      });
       setServices((current) => [created, ...current]);
       setFreshSlug(created.slug);
       setBrief("");
+      setSiteUrl("");
+      setAttachments([]);
       setComposerOpen(false);
       haptic("success");
     } catch (cause: unknown) {
-      setCreateError(messageOf(cause, "Не удалось собрать AIRuntime. Попробуйте ещё раз."));
+      setCreateError(messageOf(cause, "Не удалось собрать страницу. Попробуйте ещё раз."));
       haptic("error");
     } finally {
       guardClosing(false);
       setCreating(false);
     }
-  }, [brief, creating]);
+  }, [attachments, brief, creating, siteUrl]);
+
+  const onPickFiles = useCallback(async (list: FileList | null) => {
+    if (!list || list.length === 0) return;
+    const room = MAX_ATTACHMENTS - attachments.length;
+    const chosen = Array.from(list).slice(0, room);
+    try {
+      const next = await Promise.all(chosen.map(fileToAttachment));
+      setAttachments((current) => [...current, ...next].slice(0, MAX_ATTACHMENTS));
+      setCreateError("");
+    } catch (cause: unknown) {
+      setCreateError(messageOf(cause, "Не удалось прикрепить файл"));
+    }
+    if (fileInput.current) fileInput.current.value = "";
+  }, [attachments.length]);
 
   const onEdit = useCallback(
     async (service: OwnerService) => {
@@ -360,21 +453,24 @@ export function OwnerPanel() {
     );
   }
 
+  const canCreate =
+    brief.trim().length >= MIN_BRIEF || looksLikeUrl(siteUrl) || attachments.length > 0;
+
   const composer = creating ? (
     <section className="max-sheet max-progress" role="status" aria-live="polite">
       <div className="max-progress-track" aria-hidden>
         <i />
       </div>
-      <p className="max-progress-title">Собираем AIRuntime…</p>
+      <p className="max-progress-title">Собираем страницу записи…</p>
       <p className="max-note" style={{ marginTop: 4 }}>
         Обычно это около десяти секунд. Не закрывайте приложение.
       </p>
-      <p className="max-progress-brief">«{brief.trim()}»</p>
+      {brief.trim() ? <p className="max-progress-brief">«{brief.trim()}»</p> : null}
     </section>
   ) : (
     <section className="max-sheet max-composer">
       <label className="max-field-label" htmlFor="max-brief">
-        Расскажите о бизнесе
+        Что предлагаете клиентам
       </label>
       <textarea
         id="max-brief"
@@ -383,9 +479,9 @@ export function OwnerPanel() {
         maxLength={2000}
         value={brief}
         onChange={(event) => setBrief(event.target.value)}
-        placeholder="Например: барбершоп на Садовой. Стрижка 1200, борода 700. Каждый день с 10 до 21."
+        placeholder="Барбершоп на Садовой. Стрижка 1200, борода 700. Каждый день с 10 до 21."
       />
-      <div className="max-chips max-examples" role="group" aria-label="Примеры описаний">
+      <div className="max-chips max-examples" role="group" aria-label="Примеры">
         {EXAMPLES.map((example) => (
           <button
             key={example.label}
@@ -398,9 +494,63 @@ export function OwnerPanel() {
           </button>
         ))}
       </div>
-      <p className="max-hint">
-        Названия, цены, адрес и часы работы&nbsp;— всё, что напишете, попадёт в AIRuntime.
+
+      <label className="max-field-label" htmlFor="max-site" style={{ marginTop: 16 }}>
+        Сайт <span className="max-optional">необязательно</span>
+      </label>
+      <input
+        id="max-site"
+        className="max-input"
+        type="url"
+        inputMode="url"
+        autoComplete="url"
+        placeholder="https://yoursite.ru"
+        value={siteUrl}
+        onChange={(event) => setSiteUrl(event.target.value)}
+      />
+      <p className="max-hint">Подтянем услуги, цены и цвета, если они есть на странице.</p>
+
+      <p className="max-field-label" style={{ marginTop: 16 }}>
+        Файлы <span className="max-optional">необязательно</span>
       </p>
+      <input
+        ref={fileInput}
+        type="file"
+        hidden
+        multiple
+        accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,text/plain,.pdf,.txt"
+        onChange={(event) => void onPickFiles(event.target.files)}
+      />
+      {attachments.length > 0 ? (
+        <ul className="max-attach-list">
+          {attachments.map((file, index) => (
+            <li key={`${file.filename}-${index}`}>
+              <span>{file.filename}</span>
+              <button
+                type="button"
+                className="max-attach-remove"
+                onClick={() =>
+                  setAttachments((current) => current.filter((_, item) => item !== index))
+                }
+              >
+                Убрать
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {attachments.length < MAX_ATTACHMENTS ? (
+        <button
+          type="button"
+          className="max-button max-button-secondary max-button-compact"
+          style={{ marginTop: 8 }}
+          onClick={() => fileInput.current?.click()}
+        >
+          Прикрепить логотип, прайс или референс
+        </button>
+      ) : null}
+      <p className="max-hint">Фото смотрим как образец стиля. PDF и текст — как прайс и описание.</p>
+
       {createError ? (
         <div className="max-error" role="alert" style={{ marginTop: 12 }}>
           {createError}
@@ -410,10 +560,10 @@ export function OwnerPanel() {
         type="button"
         className="max-button"
         style={{ marginTop: 14 }}
-        disabled={brief.trim().length < MIN_BRIEF}
+        disabled={!canCreate}
         onClick={() => void onCreate()}
       >
-        Собрать AIRuntime
+        Собрать страницу записи
       </button>
       {services.length > 0 ? (
         <button
@@ -433,30 +583,11 @@ export function OwnerPanel() {
   if (services.length === 0) {
     return (
       <div className="max-shell">
-        <header className="max-hero max-welcome">
-          <h1>AIRuntime за одно сообщение</h1>
-          <p>
-            Опишите бизнес&nbsp;— соберём AIRuntime с услугами, ценами и онлайн-записью. Клиенты
-            откроют его прямо в MAX.
-          </p>
+        <header className="max-intro">
+          <h1>Страница записи в MAX</h1>
+          <p>Опишите бизнес, при желании добавьте сайт или файлы. Клиенты запишутся здесь, заявки придут вам в чат.</p>
         </header>
-        <div style={{ marginTop: 12 }}>{composer}</div>
-        {!creating ? (
-          <ol className="max-steps">
-            <li>
-              <b>Опишите бизнес</b>
-              <span>одним сообщением, как рассказали бы другу</span>
-            </li>
-            <li>
-              <b>Отправьте ссылку</b>
-              <span>клиентам в чат или повесьте QR-код</span>
-            </li>
-            <li>
-              <b>Получайте заявки</b>
-              <span>они придут в чат с ботом</span>
-            </li>
-          </ol>
-        ) : null}
+        {composer}
       </div>
     );
   }
@@ -506,7 +637,7 @@ export function OwnerPanel() {
                   </span>
                 ) : (
                   <span className={`max-badge ${live ? "max-badge-confirmed" : "max-badge-declined"}`}>
-                    {live ? "опубликована" : "скрыта"}
+                    {live ? "опубликован" : "скрыт"}
                   </span>
                 )}
               </div>

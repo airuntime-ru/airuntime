@@ -1,0 +1,234 @@
+"""Turn a site URL and owner files into extra briefing for the storefront generator.
+
+The mini app lets someone paste a website or attach a logo, a price list, a design
+reference. None of that is the storefront itself: we fetch or decode it here, fold the
+usable bits into the prompt, and hand photos to the model as images. A bad URL must not
+become an SSRF, and a 20 MB PDF must not land in the wizard request.
+"""
+
+from __future__ import annotations
+
+import base64
+import ipaddress
+import logging
+import re
+import socket
+from io import BytesIO
+from urllib.parse import urlparse
+
+import httpx
+
+from src.services.file_context import IMAGE_CONTENT_TYPES, ImageAttachment
+
+logger = logging.getLogger(__name__)
+
+MAX_FILES = 4
+MAX_FILE_BYTES = 900_000
+SITE_TIMEOUT = httpx.Timeout(8.0, connect=4.0)
+SITE_BYTES = 400_000
+SITE_TEXT_CHARS = 3500
+
+_ALLOWED_IMAGE_TYPES = IMAGE_CONTENT_TYPES | {"image/jpg"}
+_TEXT_TYPES = {"text/plain", "text/markdown", "text/csv", "application/json"}
+_PDF_TYPE = "application/pdf"
+
+_TAG = re.compile(r"<[^>]+>", re.S)
+_NOISE = re.compile(r"<(script|style|noscript|svg)[\s\S]*?</\1>", re.I)
+_WS = re.compile(r"\s+")
+_HEX = re.compile(r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})\b")
+_TITLE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
+_META_DESC = re.compile(
+    r'<meta[^>]+(?:name|property)=["\'](?:description|og:description)["\'][^>]+content=["\'](.*?)["\']',
+    re.I | re.S,
+)
+_META_DESC_REV = re.compile(
+    r'<meta[^>]+content=["\'](.*?)["\'][^>]+(?:name|property)=["\'](?:description|og:description)["\']',
+    re.I | re.S,
+)
+
+
+class BriefingError(ValueError):
+    """A user-facing reason the extra briefing could not be used."""
+
+
+def _host_blocked(host: str) -> bool:
+    host = (host or "").strip().lower().rstrip(".")
+    if not host or host == "localhost" or host.endswith(".localhost") or host.endswith(".local"):
+        return True
+    try:
+        parsed_ip = ipaddress.ip_address(host)
+        return not parsed_ip.is_global
+    except ValueError:
+        pass
+    try:
+        answers = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return True
+    for answer in answers:
+        try:
+            ip = ipaddress.ip_address(answer[4][0])
+        except (ValueError, TypeError, IndexError):
+            continue
+        if not ip.is_global:
+            return True
+    return False
+
+
+def normalise_site_url(raw: str) -> str:
+    text = (raw or "").strip()
+    if not text:
+        return ""
+    if "://" not in text:
+        text = "https://" + text
+    parsed = urlparse(text)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username:
+        raise BriefingError("Укажите обычную ссылку на сайт, вида https://example.ru")
+    if parsed.port not in (None, 80, 443):
+        raise BriefingError("Укажите обычную ссылку на сайт, вида https://example.ru")
+    if _host_blocked(parsed.hostname):
+        raise BriefingError("Эту ссылку открыть нельзя")
+    return parsed.geturl()
+
+
+def _visible_text(html: str) -> str:
+    cleaned = _NOISE.sub(" ", html)
+    cleaned = _TAG.sub(" ", cleaned)
+    return _WS.sub(" ", cleaned).strip()
+
+
+def _extract_site(html: str, url: str) -> str:
+    title_match = _TITLE.search(html)
+    title = _WS.sub(" ", _TAG.sub("", title_match.group(1))).strip() if title_match else ""
+    desc_match = _META_DESC.search(html) or _META_DESC_REV.search(html)
+    description = _WS.sub(" ", desc_match.group(1)).strip() if desc_match else ""
+    body = _visible_text(html)[:SITE_TEXT_CHARS]
+    colors = []
+    for color in _HEX.findall(html[:80_000]):
+        if color.lower() in {"#fff", "#ffffff", "#000", "#000000"}:
+            continue
+        if color not in colors:
+            colors.append(color)
+        if len(colors) == 6:
+            break
+    parts = [f"Сайт владельца: {url}"]
+    if title:
+        parts.append(f"Название страницы: {title}")
+    if description:
+        parts.append(f"Описание: {description}")
+    if colors:
+        parts.append("Цвета с сайта: " + ", ".join(colors))
+    if body:
+        parts.append("Текст страницы:\n" + body)
+    return "\n".join(parts)
+
+
+def fetch_site_brief(url: str) -> str:
+    """Download a public page and return a compact text briefing. Empty on fetch failure."""
+    try:
+        target = normalise_site_url(url)
+    except BriefingError:
+        raise
+    if not target:
+        return ""
+    try:
+        response = httpx.get(
+            target,
+            timeout=SITE_TIMEOUT,
+            follow_redirects=True,
+            headers={"User-Agent": "AIRuntime-MAX/1.0 (+https://airuntime.ru)"},
+        )
+    except httpx.HTTPError as exc:
+        logger.info("max_site_fetch_failed url=%s", target, extra={"error": type(exc).__name__})
+        raise BriefingError(
+            "Не удалось открыть сайт. Проверьте ссылку или опишите бизнес текстом."
+        ) from None
+    if response.status_code >= 400:
+        raise BriefingError("Сайт не открылся. Проверьте ссылку или опишите бизнес текстом.")
+    final_host = urlparse(str(response.url)).hostname or ""
+    if _host_blocked(final_host):
+        raise BriefingError("Эту ссылку открыть нельзя")
+    html = response.content[:SITE_BYTES].decode(response.encoding or "utf-8", errors="replace")
+    return _extract_site(html, str(response.url))
+
+
+def _pdf_text(data: bytes) -> str:
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return ""
+    try:
+        reader = PdfReader(BytesIO(data))
+        chunks: list[str] = []
+        for page in reader.pages[:8]:
+            chunks.append(page.extract_text() or "")
+        return _WS.sub(" ", "\n".join(chunks)).strip()[:SITE_TEXT_CHARS]
+    except Exception:
+        logger.info("max_pdf_extract_failed", exc_info=True)
+        return ""
+
+
+def _shrink_image(data: bytes, content_type: str) -> tuple[bytes, str]:
+    """Keep vision payloads small enough for a 10-second wizard turn."""
+    try:
+        from PIL import Image
+
+        image = Image.open(BytesIO(data))
+        image = image.convert("RGB")
+        image.thumbnail((1024, 1024))
+        buffer = BytesIO()
+        image.save(buffer, format="JPEG", quality=80, optimize=True)
+        return buffer.getvalue(), "image/jpeg"
+    except Exception:
+        return data, content_type
+
+
+def decode_attachments(
+    files: list[dict[str, str]],
+) -> tuple[list[ImageAttachment], str]:
+    """Return vision images and extra text (PDF / notes) from the mini app payload."""
+    if len(files) > MAX_FILES:
+        raise BriefingError(f"Можно прикрепить не больше {MAX_FILES} файлов")
+    images: list[ImageAttachment] = []
+    notes: list[str] = []
+    for item in files:
+        filename = str(item.get("filename") or "file")[:200]
+        content_type = str(item.get("content_type") or "").split(";")[0].strip().lower()
+        if content_type == "image/jpg":
+            content_type = "image/jpeg"
+        try:
+            data = base64.b64decode(item.get("data_base64") or "", validate=False)
+        except Exception as exc:
+            raise BriefingError(f"Не удалось прочитать файл {filename}") from exc
+        if not data:
+            continue
+        if len(data) > MAX_FILE_BYTES:
+            raise BriefingError(f"{filename} слишком большой — до 900 КБ на файл")
+        if content_type in _ALLOWED_IMAGE_TYPES or filename.lower().endswith(
+            (".png", ".jpg", ".jpeg", ".webp", ".gif")
+        ):
+            payload, mime = _shrink_image(data, content_type or "image/jpeg")
+            images.append(
+                ImageAttachment(
+                    filename=filename,
+                    content_type=mime,
+                    data_base64=base64.b64encode(payload).decode("ascii"),
+                )
+            )
+            notes.append(f"Фото «{filename}»: логотип, интерьер или референс дизайна.")
+        elif content_type == _PDF_TYPE or filename.lower().endswith(".pdf"):
+            extracted = _pdf_text(data)
+            if extracted:
+                notes.append(f"Текст из файла «{filename}»:\n{extracted}")
+            else:
+                notes.append(
+                    f"Владелец приложил PDF «{filename}», текст из него прочитать не удалось."
+                )
+        elif content_type in _TEXT_TYPES or filename.lower().endswith((".txt", ".md", ".csv")):
+            notes.append(
+                f"Текст из файла «{filename}»:\n{data.decode('utf-8', errors='replace')[:SITE_TEXT_CHARS]}"
+            )
+        else:
+            raise BriefingError(
+                f"{filename}: можно прикрепить фото, PDF или текстовый файл с прайсом"
+            )
+    return images, "\n\n".join(notes)

@@ -35,6 +35,7 @@ from src.db.models.max_platform import (
 from src.db.session import get_db
 from src.services.max import bot as max_bot
 from src.services.max import storefronts
+from src.services.max.briefing import BriefingError
 from src.services.max.init_data import InitDataError, MaxLaunchContext, verify_init_data
 from src.services.max.schema import ServiceConfig
 
@@ -234,8 +235,16 @@ def _new_leads(db: Session, service: MaxService) -> int:
 MIN_BRIEF_LENGTH = 12
 
 
+class AttachedFile(BaseModel):
+    filename: str = Field(default="file", max_length=200)
+    content_type: str = Field(default="", max_length=100)
+    data_base64: str = Field(min_length=8, max_length=1_400_000)
+
+
 class CreateServiceRequest(BaseModel):
-    brief: str = Field(min_length=1, max_length=2000)
+    brief: str = Field(default="", max_length=2000)
+    site_url: str = Field(default="", max_length=500)
+    files: list[AttachedFile] = Field(default_factory=list, max_length=4)
 
 
 @router.post("/miniapp/owner/services", status_code=status.HTTP_201_CREATED)
@@ -250,7 +259,9 @@ async def create_service(
     shows progress for it. The owner row is created here if this is someone's first
     storefront: the mini app, not the chat, is now where people start."""
     brief = payload.brief.strip()
-    if len(brief) < MIN_BRIEF_LENGTH:
+    site_url = payload.site_url.strip()
+    files = [item.model_dump() for item in payload.files]
+    if len(brief) < MIN_BRIEF_LENGTH and not site_url and not files:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Опишите чуть подробнее: чем вы занимаетесь и что предлагаете клиентам",
@@ -272,7 +283,14 @@ async def create_service(
                 "удалите ненужную, чтобы создать новую"
             ),
         )
-    service, used_llm = await storefronts.create_storefront(db, owner, brief)
+    try:
+        service, used_llm = await storefronts.create_storefront(
+            db, owner, brief, site_url=site_url, files=files
+        )
+    except BriefingError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
     return {**_owner_service_payload(service, 0), "used_llm": used_llm}
 
 

@@ -8,6 +8,7 @@ what had to go once they moved into the mini app.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import secrets
 
@@ -15,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from src.core.config import settings
 from src.db.models.max_platform import SERVICE_LIVE, MaxOwner, MaxService
+from src.services.max.briefing import BriefingError, decode_attachments, fetch_site_brief
 from src.services.max.generator import apply_edit, generate_config
 from src.services.max.schema import ServiceConfig, slugify
 
@@ -75,14 +77,39 @@ def service_link(service: MaxService) -> str:
     return settings.build_max_service_link(service.slug)
 
 
-async def create_storefront(db: Session, owner: MaxOwner, brief: str) -> tuple[MaxService, bool]:
+def _compose_prompt(brief: str, site_text: str, file_notes: str) -> str:
+    parts: list[str] = []
+    if brief.strip():
+        parts.append("Описание владельца:\n" + brief.strip())
+    if site_text:
+        parts.append(site_text)
+    if file_notes:
+        parts.append(file_notes)
+    return "\n\n".join(parts)
+
+
+async def create_storefront(
+    db: Session,
+    owner: MaxOwner,
+    brief: str,
+    *,
+    site_url: str = "",
+    files: list[dict[str, str]] | None = None,
+) -> tuple[MaxService, bool]:
     """One description in, a published storefront out. Returns ``(service, used_llm)``.
 
     Published straight away on purpose: the owner is looking at it in the next second, and
     "draft until you find the publish button" would be a step between them and the link
     the whole product exists to hand them.
     """
-    config, used_llm = await generate_config(brief)
+    site_text = ""
+    if site_url.strip():
+        site_text = await asyncio.to_thread(fetch_site_brief, site_url)
+    images, file_notes = decode_attachments(files or [])
+    prompt = _compose_prompt(brief, site_text, file_notes)
+    if not prompt.strip():
+        raise BriefingError("Опишите бизнес, укажите сайт или приложите файл")
+    config, used_llm = await generate_config(prompt, images=images)
     service = MaxService(
         owner_id=owner.id,
         slug=unique_slug(db, config.title),
@@ -90,7 +117,7 @@ async def create_storefront(db: Session, owner: MaxOwner, brief: str) -> tuple[M
         title=config.title[:255],
         status=SERVICE_LIVE,
         config_json="{}",
-        prompt=brief[:4000],
+        prompt=prompt[:4000],
     )
     store_config(service, config)
     db.add(service)

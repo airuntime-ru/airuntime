@@ -28,6 +28,7 @@ from src.db.models.max_platform import MaxLead, MaxOwner, MaxService
 from src.services.agent.events import TurnFinished
 from src.services.max import bot as max_bot
 from src.services.max import generator, storefronts
+from src.services.max.briefing import BriefingError, normalise_site_url
 from src.services.max.client import MaxApiError, MaxBotClient, button_open_app
 from src.services.max.init_data import InitDataError, verify_contact_hash, verify_init_data
 from src.services.max.schema import ServiceConfig, normalise, slugify
@@ -129,7 +130,7 @@ def fake_api(monkeypatch: pytest.MonkeyPatch) -> FakeMaxApi:
 def stub_generator(monkeypatch: pytest.MonkeyPatch) -> None:
     """Replace the LLM with a deterministic storefront - the model itself is not under test."""
 
-    async def generate_config(prompt: str) -> tuple[ServiceConfig, bool]:
+    async def generate_config(prompt: str, **_: Any) -> tuple[ServiceConfig, bool]:
         return (
             normalise(
                 ServiceConfig.model_validate(
@@ -405,6 +406,16 @@ class TestOpenAppButtonShape:
         assert re.fullmatch(r"[\w-]*", slug) and len(slug) <= 512
 
 
+class TestSiteBriefing:
+    def test_private_hosts_are_rejected(self) -> None:
+        with pytest.raises(BriefingError):
+            normalise_site_url("http://127.0.0.1/")
+        with pytest.raises(BriefingError):
+            normalise_site_url("http://10.1.2.3/")
+        with pytest.raises(BriefingError):
+            normalise_site_url("http://localhost/secret")
+
+
 class TestGeneratorFailsLoudly:
     """A provider adapter signals a failed turn with an event, not an exception. Collecting
     only TextDelta turned `the model is misconfigured` into `the model said nothing`, and
@@ -412,7 +423,7 @@ class TestGeneratorFailsLoudly:
 
     def test_raises_when_the_turn_ends_in_an_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         class ErroringProvider:
-            def build_messages(self, history: list, text: str) -> list:
+            def build_messages(self, history: list, text: str, **_: Any) -> list:
                 return [{"role": "user", "content": text}]
 
             async def stream_turn(self, **kwargs: Any):
@@ -432,7 +443,7 @@ class TestGeneratorFailsLoudly:
         # owner's real prices and a stub.
         replies = ["", '{"kind": "booking", "title": "Автосервис на Лесной", "items": []}']
 
-        async def complete(system_prompt: str, user_text: str) -> str:
+        async def complete(system_prompt: str, user_text: str, **_: Any) -> str:
             return replies.pop(0)
 
         monkeypatch.setattr(generator, "_complete", complete)
@@ -444,7 +455,7 @@ class TestGeneratorFailsLoudly:
     def test_an_unconfigured_provider_is_not_retried(self, monkeypatch: pytest.MonkeyPatch) -> None:
         calls = 0
 
-        async def complete(system_prompt: str, user_text: str) -> str:
+        async def complete(system_prompt: str, user_text: str, **_: Any) -> str:
             nonlocal calls
             calls += 1
             raise generator.LlmUnavailable("No LLM provider is configured")
@@ -765,6 +776,48 @@ class TestOwnerToCustomerFlow:
         assert response.status_code == 422
         assert "подробнее" in response.json()["detail"]
         assert db.query(MaxService).count() == 0
+
+    def test_a_private_site_url_is_refused(self, client: TestClient, db: Session) -> None:
+        response = client.post(
+            "/api/v1/max/miniapp/owner/services",
+            json={"brief": "", "site_url": "http://127.0.0.1/"},
+            headers=owner_headers(),
+        )
+        assert response.status_code == 422
+        assert db.query(MaxService).count() == 0
+
+    def test_a_site_url_alone_is_enough_to_build(
+        self, client: TestClient, db: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            storefronts,
+            "fetch_site_brief",
+            lambda url: f"Сайт владельца: {url}\nДиагностика подвески 1500",
+        )
+        response = client.post(
+            "/api/v1/max/miniapp/owner/services",
+            json={"brief": "", "site_url": "https://lesnaya.example"},
+            headers=owner_headers(),
+        )
+        assert response.status_code == 201, response.text
+        assert db.query(MaxService).count() == 1
+
+    def test_an_attached_image_is_accepted(self, client: TestClient, db: Session) -> None:
+        png = (
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhK"
+            "mMIQAAAABJRU5ErkJggg=="
+        )
+        response = client.post(
+            "/api/v1/max/miniapp/owner/services",
+            json={
+                "brief": BRIEF,
+                "files": [
+                    {"filename": "logo.png", "content_type": "image/png", "data_base64": png}
+                ],
+            },
+            headers=owner_headers(),
+        )
+        assert response.status_code == 201, response.text
 
     def test_the_eleventh_storefront_is_refused(self, client: TestClient) -> None:
         for _ in range(storefronts.MAX_SERVICES_PER_OWNER):

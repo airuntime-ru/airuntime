@@ -21,6 +21,7 @@ import re
 from src.core.config import settings
 from src.services.agent.events import TextDelta, TurnFinished
 from src.services.agent.providers import get_agent_provider
+from src.services.file_context import ImageAttachment
 from src.services.max.schema import ServiceConfig, normalise
 from src.services.provider.factory import resolve_provider_and_model
 from src.services.system_settings import resolve_platform_api_key
@@ -41,9 +42,9 @@ class LlmUnavailable(RuntimeError):
 
 _SYSTEM_PROMPT = """Ты — генератор сервисов AIRuntime для мессенджера MAX.
 
-Пользователь одним сообщением описывает свой бизнес или идею сервиса. Твоя задача — \
-превратить это описание в JSON-конфигурацию готового сервиса, которую клиенты откроют \
-прямо в MAX.
+Владелец описывает бизнес в мини-приложении. К описанию могут быть приложены сайт \
+(текст страницы и цвета) и файлы: логотип, фото, прайс, референс дизайна. Твоя задача — \
+превратить это в JSON-конфигурацию готового сервиса, которую клиенты откроют прямо в MAX.
 
 Верни СТРОГО один JSON-объект без markdown, без пояснений, без ```-ограждений.
 
@@ -78,7 +79,12 @@ _SYSTEM_PROMPT = """Ты — генератор сервисов AIRuntime дл�
 - contacts: заполняй только тем, что пользователь реально написал. Не выдумывай телефон, \
 адрес и часы работы — оставляй пустую строку.
 - Весь текст — на русском языке, деловой и короткий. Без восклицательных знаков и эмодзи.
-- Никаких обещаний, гарантий, лицензий и цен, которых не было в описании пользователя."""
+- Никаких обещаний, гарантий, лицензий и цен, которых не было в описании, на сайте \
+или в файлах владельца.
+- Если есть сайт или прайс — услуги и цены бери оттуда, ничего не выдумывай.
+- Если есть фото или цвета сайта — accent должен им соответствовать, а не «типичному» \
+цвету отрасли.
+- Фото смотри как дизайнер: характер, палитра, настроение. В JSON картинки не вставляй."""
 
 _EDIT_SYSTEM_PROMPT = """Ты редактируешь JSON-конфигурацию сервиса AIRuntime в мессенджере MAX.
 
@@ -110,13 +116,15 @@ def _resolve_llm() -> tuple[str, str, str]:
     return wire_provider, model, api_key
 
 
-async def _complete(system_prompt: str, user_text: str) -> str:
+async def _complete(
+    system_prompt: str, user_text: str, *, images: list[ImageAttachment] | None = None
+) -> str:
     wire_provider, model, api_key = _resolve_llm()
     if not api_key:
         raise LlmUnavailable("No LLM provider is configured")
 
     provider = get_agent_provider(wire_provider)
-    messages = provider.build_messages([], user_text[:6000])
+    messages = provider.build_messages([], user_text[:8000], images=images or ())
     collected = ""
     failure = ""
     async for event in provider.stream_turn(
@@ -176,7 +184,7 @@ def _fallback_config(prompt: str) -> ServiceConfig:
             {
                 "kind": kind,
                 "title": title,
-                "tagline": "Заполните описание в боте",
+                "tagline": "Заполните описание в приложении",
                 "about": "",
                 "items": [{"title": item} for item in items],
                 "slots": (
@@ -190,7 +198,11 @@ def _fallback_config(prompt: str) -> ServiceConfig:
 
 
 async def _config_from_model(
-    system_prompt: str, user_text: str, *, what: str
+    system_prompt: str,
+    user_text: str,
+    *,
+    what: str,
+    images: list[ImageAttachment] | None = None,
 ) -> ServiceConfig | None:
     """One storefront out of the model, or None once the attempts are used up.
 
@@ -203,7 +215,7 @@ async def _config_from_model(
     """
     for attempt in range(1, _ATTEMPTS + 1):
         try:
-            raw = await _complete(system_prompt, user_text)
+            raw = await _complete(system_prompt, user_text, images=images)
             return normalise(ServiceConfig.model_validate(_extract_json(raw)))
         except LlmUnavailable:
             logger.warning("%s: no model configured, not retrying", what, exc_info=True)
@@ -213,9 +225,13 @@ async def _config_from_model(
     return None
 
 
-async def generate_config(prompt: str) -> tuple[ServiceConfig, bool]:
+async def generate_config(
+    prompt: str, *, images: list[ImageAttachment] | None = None
+) -> tuple[ServiceConfig, bool]:
     """Return ``(config, used_llm)`` for a fresh storefront."""
-    config = await _config_from_model(_SYSTEM_PROMPT, prompt, what="max_generate_config")
+    config = await _config_from_model(
+        _SYSTEM_PROMPT, prompt, what="max_generate_config", images=images
+    )
     if config is None:
         return _fallback_config(prompt), False
     return config, True
