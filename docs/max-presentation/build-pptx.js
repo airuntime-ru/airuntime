@@ -6,11 +6,20 @@
  *
  * What pptxgenjs cannot draw - gradient fills, a repeating starfield, rounded image
  * corners - ships as images made by make-assets.py: bg-cover.jpg (also the HTML cover's
- * background), bg-dark.png, screen-*.png, bubble-owner.png, qr-bot.png. That is why the
- * dark slides, the cover and the closing slide look like their HTML counterparts.
+ * background), bg-dark.png, screen-*.png, card-owner-lead.png, bubble-owner.png,
+ * qr-bot.png. That is why the dark slides, the cover and the closing slide look like their
+ * HTML counterparts.
+ *
+ * Slide 1 never carries working tokens: this file is in git. The jury gets them in the PDF
+ * printed by build-pdf.py --jury.
  */
 
+const fs = require("fs");
+const JSZip = require("jszip"); // pptxgenjs's own dependency
 const pptxgen = require("pptxgenjs");
+
+// The commit slide 1 points the jury at - keep it equal to the hash in deck.html.
+const COMMIT = "376b483180331187bd900c2dce8a18bda4ca5672";
 
 // --- palette -----------------------------------------------------------------------
 const MAX_BLUE = "0077FF";
@@ -26,8 +35,11 @@ const ON_DARK_2 = "A9B7CE";
 const DARK_CARD = "141C2E";
 const ACCENT_ON_DARK = "8EC4FF";
 const PINK = "FF9AC4";
+const GOOD = "1F8A55";
+const HOT = "D31169";
 
 const FONT = "Calibri";
+const MONO = "Consolas";
 const W = 13.33;
 const H = 7.5;
 const M = 0.55; // slide margin
@@ -80,105 +92,92 @@ function chrome(slide, n, dark, label) {
 
 function head(slide, eyebrow, title, sub, dark) {
   slide.addText(eyebrow.toUpperCase(), {
-    x: M,
-    y: 0.34,
-    w: CW,
-    h: 0.26,
-    fontFace: FONT,
-    fontSize: 11,
-    bold: true,
-    color: dark ? ACCENT_ON_DARK : MAX_BLUE,
-    charSpacing: 2.2,
-    isTextBox: true,
-    margin: 0,
+    x: M, y: 0.34, w: CW, h: 0.26,
+    fontFace: FONT, fontSize: 11, bold: true, color: dark ? ACCENT_ON_DARK : MAX_BLUE, charSpacing: 2.2,
+    isTextBox: true, margin: 0,
   });
   slide.addText(title, {
-    x: M,
-    y: 0.62,
-    w: CW,
-    h: 0.62,
-    fontFace: FONT,
-    fontSize: 34,
-    bold: true,
-    color: dark ? WHITE : INK,
-    isTextBox: true,
-    margin: 0,
+    x: M, y: 0.62, w: CW, h: 0.62,
+    fontFace: FONT, fontSize: 32, bold: true, color: dark ? WHITE : INK,
+    isTextBox: true, margin: 0,
   });
   if (sub) {
     slide.addText(sub, {
-      x: M,
-      y: 1.28,
-      w: CW * 0.82,
-      h: 0.34,
-      fontFace: FONT,
-      fontSize: 14,
-      color: dark ? ON_DARK_2 : INK_2,
-      isTextBox: true,
-      margin: 0,
+      x: M, y: 1.28, w: CW, h: 0.5, valign: "top",
+      fontFace: FONT, fontSize: 14, color: dark ? ON_DARK_2 : INK_2, lineSpacingMultiple: 1.05,
+      isTextBox: true, margin: 0,
     });
   }
+}
+
+/**
+ * "plain **bold** plain" -> text runs. Bold runs take `strong`, the rest `base`: the deck
+ * leads a line with its key words in ink and lets the explanation follow in grey.
+ */
+function rich(str, base, strong) {
+  return str
+    .split("**")
+    .map((text, i) => ({ text, bold: i % 2 === 1 }))
+    .filter((part) => part.text)
+    .map((part) => ({
+      text: part.text,
+      options: part.bold ? { ...base, bold: true, color: strong } : { ...base },
+    }));
 }
 
 /** Rounded card. A tint and a shadow set it apart - never an edge stripe. */
 function card(slide, o) {
+  let fill = SURFACE_2;
+  let line = LINE;
+  if (o.dark) {
+    fill = o.accent ? "10284F" : DARK_CARD;
+    line = o.accent ? "3E6DA8" : "2A3550";
+  } else if (o.white) {
+    fill = WHITE;
+  } else if (o.tint) {
+    fill = "EAF1FE";
+    line = "C7DBFB";
+  }
   slide.addShape(pres.ShapeType.roundRect, {
-    x: o.x,
-    y: o.y,
-    w: o.w,
-    h: o.h,
+    x: o.x, y: o.y, w: o.w, h: o.h,
     rectRadius: 0.1,
-    fill: { color: o.dark ? DARK_CARD : o.tint ? "EAF1FE" : SURFACE_2 },
-    line: { color: o.dark ? "2A3550" : o.tint ? "C7DBFB" : LINE, width: 1 },
+    fill: { color: fill },
+    line: { color: line, width: 1 },
     shadow: { type: "outer", color: "0B1730", blur: 10, offset: 2, angle: 90, opacity: 0.07 },
   });
 }
 
-/** Body text inside a card, with the title as its own bold run. */
+/** Title + body inside a card; `**` in the body marks bold words. */
 function cardText(slide, o) {
   const runs = [];
   if (o.title) {
-    runs.push({ text: o.title, options: { bold: true, fontSize: 15, color: o.dark ? WHITE : INK } });
-    if (o.body) runs.push({ text: "\n", options: { fontSize: 6 } });
+    runs.push({ text: o.title, options: { bold: true, fontSize: o.titleSize || 15, color: o.titleColor || (o.dark ? WHITE : INK), breakLine: !!o.body } });
+    if (o.body) runs.push({ text: " ", options: { fontSize: 5, breakLine: true } });
   }
   if (o.body) {
-    runs.push({
-      text: o.body,
-      options: { fontSize: o.size || 12.5, color: o.dark ? ON_DARK_2 : INK_2 },
-    });
+    runs.push(...rich(o.body, { fontSize: o.size || 12.5, color: o.dark ? ON_DARK_2 : INK_2 }, o.dark ? WHITE : INK));
   }
   slide.addText(runs, {
-    x: o.x + 0.24,
-    y: o.y + 0.2,
-    w: o.w - 0.48,
-    h: o.h - 0.4,
-    fontFace: FONT,
-    valign: "top",
-    lineSpacingMultiple: 1.12,
-    isTextBox: true,
-    margin: 0,
+    x: o.x + 0.24, y: o.y + 0.2, w: o.w - 0.48, h: o.h - 0.4,
+    fontFace: FONT, valign: "top", lineSpacingMultiple: 1.12,
+    isTextBox: true, margin: 0,
   });
 }
 
+/** Bulleted list; `**` in an item marks its bold lead-in. */
 function bullets(slide, o) {
-  const items = o.items.map((t, i) => ({
-    text: t,
-    options: {
-      bullet: { code: "2022" },
-      breakLine: i !== o.items.length - 1,
-      paraSpaceAfter: 5,
-    },
-  }));
-  slide.addText(items, {
-    x: o.x,
-    y: o.y,
-    w: o.w,
-    h: o.h,
-    fontFace: FONT,
-    fontSize: o.size || 12.5,
-    color: o.dark ? ON_DARK_2 : INK_2,
-    lineSpacingMultiple: 1.1,
-    isTextBox: true,
-    margin: 0,
+  const runs = [];
+  o.items.forEach((item, i) => {
+    const parts = rich(item, { color: o.dark ? ON_DARK_2 : INK_2 }, o.dark ? WHITE : INK);
+    parts[0].options.bullet = { code: "2022", indent: 15 };
+    parts[0].options.paraSpaceAfter = o.gap ?? 5;
+    if (i !== o.items.length - 1) parts[parts.length - 1].options.breakLine = true;
+    runs.push(...parts);
+  });
+  slide.addText(runs, {
+    x: o.x, y: o.y, w: o.w, h: o.h, valign: "top",
+    fontFace: FONT, fontSize: o.size || 12.5, color: o.dark ? ON_DARK_2 : INK_2, lineSpacingMultiple: 1.08,
+    isTextBox: true, margin: 0,
   });
 }
 
@@ -187,71 +186,59 @@ function stat(slide, o) {
   card(slide, { x: o.x, y: o.y, w: o.w, h: o.h, dark: o.dark });
   slide.addText(
     [
-      { text: o.value, options: { fontSize: 32, bold: true, color: o.dark ? WHITE : INK } },
+      { text: o.value, options: { fontSize: o.valueSize || 32, bold: true, color: o.dark ? WHITE : INK } },
       o.unit
-        ? { text: " " + o.unit, options: { fontSize: 15, bold: true, color: o.dark ? ON_DARK_2 : INK_2 } }
+        ? { text: " " + o.unit, options: { fontSize: 14, bold: true, color: o.dark ? ON_DARK_2 : INK_2 } }
         : { text: "" },
     ],
-    {
-      x: o.x + 0.22,
-      y: o.y + 0.16,
-      w: o.w - 0.44,
-      h: 0.5,
-      fontFace: FONT,
-      isTextBox: true,
-      margin: 0,
-    }
+    { x: o.x + 0.2, y: o.y + 0.16, w: o.w - 0.4, h: 0.5, fontFace: FONT, isTextBox: true, margin: 0 }
   );
   slide.addText(o.label, {
-    x: o.x + 0.22,
-    y: o.y + 0.68,
-    w: o.w - 0.44,
-    h: o.h - 0.9,
-    fontFace: FONT,
-    fontSize: 11,
-    color: o.dark ? ON_DARK_2 : INK_2,
-    lineSpacingMultiple: 1.08,
-    isTextBox: true,
-    margin: 0,
+    x: o.x + 0.2, y: o.y + 0.68, w: o.w - 0.4, h: o.h - 0.95, valign: "top",
+    fontFace: FONT, fontSize: 11, color: o.dark ? ON_DARK_2 : INK_2, lineSpacingMultiple: 1.08,
+    isTextBox: true, margin: 0,
   });
   if (o.src) {
     slide.addText(o.src, {
-      x: o.x + 0.22,
-      y: o.y + o.h - 0.32,
-      w: o.w - 0.44,
-      h: 0.24,
-      fontFace: FONT,
-      fontSize: 9,
-      color: INK_3,
-      isTextBox: true,
-      margin: 0,
+      x: o.x + 0.2, y: o.y + o.h - 0.32, w: o.w - 0.4, h: 0.24,
+      fontFace: FONT, fontSize: 9, color: INK_3, isTextBox: true, margin: 0,
     });
   }
 }
 
-/** A numbered disc - the deck's one repeated ornament. */
-function disc(slide, x, y, label, colour) {
-  slide.addShape(pres.ShapeType.ellipse, {
-    x,
-    y,
-    w: 0.36,
-    h: 0.36,
-    fill: { color: colour || MAX_BLUE },
-    line: { color: colour || MAX_BLUE, width: 0 },
+/** A small rounded label, like .pill / .tag in deck.html. Returns its width. */
+function pill(slide, o) {
+  const w = o.w || 0.16 + o.text.length * 0.075;
+  slide.addShape(pres.ShapeType.roundRect, {
+    x: o.x, y: o.y, w, h: 0.27, rectRadius: 0.06,
+    fill: { color: o.fill }, line: { color: o.fill, width: 0 },
+  });
+  slide.addText(o.text, {
+    x: o.x, y: o.y, w, h: 0.27, align: "center", valign: "middle",
+    fontFace: FONT, fontSize: 9.5, bold: true, color: o.color, charSpacing: 0.4,
+    isTextBox: true, margin: 0,
+  });
+  return w;
+}
+
+// Pill colours pre-blended over the card they sit on (the HTML uses rgba tints).
+const PILL = {
+  fact: { color: GOOD, fill: "D7E8E5" },
+  guess: { color: HOT, fill: "F4E0EE" },
+  blue: { color: MAX_BLUE, fill: "D8E8FB" },
+  could: { color: MAX_VIOLET, fill: "E6E0FB" },
+  wont: { color: INK_3, fill: "E1E4E9" },
+};
+
+/** A numbered square - the roadmap's step marker. */
+function stepMark(slide, x, y, label) {
+  slide.addShape(pres.ShapeType.roundRect, {
+    x, y, w: 0.27, h: 0.27, rectRadius: 0.07,
+    fill: { color: MAX_BLUE }, line: { color: MAX_BLUE, width: 0 },
   });
   slide.addText(label, {
-    x,
-    y,
-    w: 0.36,
-    h: 0.36,
-    align: "center",
-    valign: "middle",
-    fontFace: FONT,
-    fontSize: 13,
-    bold: true,
-    color: WHITE,
-    isTextBox: true,
-    margin: 0,
+    x, y, w: 0.27, h: 0.27, align: "center", valign: "middle",
+    fontFace: FONT, fontSize: 11, bold: true, color: WHITE, isTextBox: true, margin: 0,
   });
 }
 
@@ -318,6 +305,59 @@ function phone(slide, o) {
   return h;
 }
 
+/** Three phones in a row with a numbered caption under each - slides 8 and 9. */
+function phoneRow(slide, shots) {
+  const fw = 2.08;
+  const top = 1.8;
+  const gap = 0.4;
+  const colw = (CW - gap * 2) / 3;
+  shots.forEach(([name, title, note], i) => {
+    const x = M + i * (colw + gap);
+    const fh = phone(slide, { x: x + (colw - fw) / 2, y: top, w: fw, name });
+    slide.addText(title, {
+      x, y: top + fh + 0.1, w: colw, h: 0.28, align: "center",
+      fontFace: FONT, fontSize: 13, bold: true, color: INK, isTextBox: true, margin: 0,
+    });
+    slide.addText(note, {
+      x: x + 0.15, y: top + fh + 0.4, w: colw - 0.3, h: 0.6, align: "center", valign: "top",
+      fontFace: FONT, fontSize: 10.5, color: INK_2, lineSpacingMultiple: 1.08, isTextBox: true, margin: 0,
+    });
+  });
+}
+
+/** A bot message as MAX shows it: sender line, text, one inline button. */
+function botMessage(slide, o) {
+  slide.addShape(pres.ShapeType.roundRect, {
+    x: o.x, y: o.y, w: o.w, h: o.h, rectRadius: 0.16,
+    fill: { color: WHITE }, line: { color: LINE, width: 1 },
+    shadow: { type: "outer", color: "091228", blur: 18, offset: 6, angle: 90, opacity: 0.14 },
+  });
+  slide.addText(o.from.toUpperCase(), {
+    x: o.x + 0.2, y: o.y + 0.16, w: o.w - 0.4, h: 0.22,
+    fontFace: FONT, fontSize: 9.5, bold: true, color: MAX_BLUE, charSpacing: 1, isTextBox: true, margin: 0,
+  });
+  slide.addText(o.lines, {
+    x: o.x + 0.2, y: o.y + 0.42, w: o.w - 0.4, h: o.h - 1.0, valign: "top",
+    fontFace: FONT, fontSize: 12, color: INK, lineSpacingMultiple: 1.12, isTextBox: true, margin: 0,
+  });
+  slide.addShape(pres.ShapeType.roundRect, {
+    x: o.x + 0.2, y: o.y + o.h - 0.56, w: o.w - 0.4, h: 0.38, rectRadius: 0.09,
+    fill: { color: "E5F1FF" }, line: { color: "E5F1FF", width: 0 },
+  });
+  slide.addText(o.button, {
+    x: o.x + 0.2, y: o.y + o.h - 0.56, w: o.w - 0.4, h: 0.38, align: "center", valign: "middle",
+    fontFace: FONT, fontSize: 11.5, bold: true, color: MAX_BLUE, isTextBox: true, margin: 0,
+  });
+}
+
+/** A caption line under a picture. */
+function caption(slide, text, x, y, w) {
+  slide.addText(text, {
+    x, y, w, h: 0.5, align: "center", valign: "top",
+    fontFace: FONT, fontSize: 10.5, color: INK_3, lineSpacingMultiple: 1.08, isTextBox: true, margin: 0,
+  });
+}
+
 function coverSlide() {
   const s = pres.addSlide();
   s.background = { path: "bg-cover.jpg" };
@@ -344,55 +384,68 @@ function darkSlide() {
   head(s, "Слайд 1 · служебный · не оценивается", "Техническая информация для проверки");
 
   const rows = [
-    ["Чат-бот в MAX", "https://max.ru/t403_hakaton_max_bot\n«Хакатон МАХ 403», user_id 395683755"],
-    ["Мини-приложение", "https://airuntime.ru/max\nОткрывается кнопкой open_app и по ?startapp=<slug>"],
-    ["Git-репозиторий", "github.com/airuntime-ru/airuntime"],
-    ["Commit hash", "376b483 · ветка main\n376b483180331187bd900c2dce8a18bda4ca5672"],
-    ["Собственный API", "Не используется как отдельно проверяемый контракт\nВнутренние эндпоинты — /api/v1/max/*"],
-    ["Тестовые записи", "Не требуются: вход — сам аккаунт MAX"],
+    ["Чат-бот в MAX", "https://max.ru/t403_hakaton_max_bot", "«Хакатон МАХ 403», user_id 395683755", 0.62],
+    ["Мини-приложение", "https://airuntime.ru/max", "Подключено к боту: кнопка «Открыть Витрину» и ссылки max.ru/t403_hakaton_max_bot?startapp=<slug>", 0.8],
+    ["Git-репозиторий", "github.com/airuntime-ru/airuntime", "", 0.42],
+    ["Commit hash", COMMIT, `ветка main · короткий ${COMMIT.slice(0, 7)}`, 0.62],
+    ["Собственный API", "Не используется", "Эндпоинты /api/v1/max/* обслуживают только мини-приложение", 0.62],
+    ["Тестовые учётки", "Не нужны: вход — аккаунт MAX", "Для роли клиента — второй аккаунт MAX", 0.62],
   ];
-  let y = 1.44;
-  for (const [k, v] of rows) {
-    const lines = v.split("\n");
+  let y = 1.42;
+  for (const [k, v, sub, h] of rows) {
     s.addText(k, {
-      x: M, y, w: 1.85, h: 0.3, fontFace: FONT, fontSize: 11.5, color: INK_3,
+      x: M, y, w: 1.8, h: 0.28, valign: "top", fontFace: FONT, fontSize: 12, color: INK_3,
       isTextBox: true, margin: 0,
     });
+    const code = /^(https:|github\.com|[0-9a-f]{40}$)/.test(v);
     s.addText(
       [
-        { text: lines[0], options: { fontSize: 12, color: INK, bold: true } },
-        ...(lines[1] ? [{ text: "\n" + lines[1], options: { fontSize: 10.5, color: INK_3 } }] : []),
+        { text: v, options: { fontSize: code ? 11.5 : 12.5, color: INK, bold: !code, fontFace: code ? MONO : FONT, breakLine: !!sub } },
+        ...(sub ? [{ text: sub, options: { fontSize: 10.5, color: INK_3 } }] : []),
       ],
-      { x: M + 1.9, y, w: 4.5, h: 0.6, fontFace: FONT, isTextBox: true, margin: 0, lineSpacingMultiple: 1.05 }
+      { x: M + 1.85, y, w: 4.75, h: h - 0.04, valign: "top", fontFace: FONT, lineSpacingMultiple: 1.05, isTextBox: true, margin: 0 }
     );
-    y += lines[1] ? 0.68 : 0.5;
+    y += h;
   }
 
+  card(s, { x: M, y: 5.12, w: 6.5, h: 1.66 });
+  s.addText("Запуск и переменные окружения", {
+    x: M + 0.24, y: 5.28, w: 6.0, h: 0.28, fontFace: FONT, fontSize: 14, bold: true, color: INK,
+    isTextBox: true, margin: 0,
+  });
+  const t = (text, br) => ({ text, options: { breakLine: !!br } });
+  const c = (text, br) => ({ text, options: { fontFace: MONO, color: INK, breakLine: !!br } });
+  s.addText(
+    [
+      t("Все компоненты одной командой: "), c("docker compose up --build", true),
+      c("MAX_BOT_TOKEN"), t(" = передаётся в PDF для жюри; в репозитории токенов нет", true),
+      c("MAX_BOT_USERNAME"), t(" = "), c("t403_hakaton_max_bot"), t(" · "), c("MAX_WEBHOOK_SECRET"), t(" — любая строка", true),
+      c("OPENAI_API_KEY"), t(" = по запросу; без ключа витрина собирается шаблоном", true),
+      t("Остальное — "), c(".env.example"), t(", пункты README по заданию — раздел «Для проверки»"),
+    ],
+    {
+      x: M + 0.24, y: 5.62, w: 6.05, h: 1.08, valign: "top", fontFace: FONT, fontSize: 10.5, color: INK_2,
+      lineSpacingMultiple: 1.12, isTextBox: true, margin: 0,
+    }
+  );
+
   const cx = 7.35;
-  card(s, { x: cx, y: 1.5, w: W - cx - M, h: 5.15, tint: true });
+  card(s, { x: cx, y: 1.42, w: W - cx - M, h: 5.36, tint: true });
   s.addText("Порядок прохождения основного сценария", {
-    x: cx + 0.28, y: 1.72, w: W - cx - M - 0.56, h: 0.3,
+    x: cx + 0.28, y: 1.64, w: W - cx - M - 0.56, h: 0.3,
     fontFace: FONT, fontSize: 15, bold: true, color: INK, isTextBox: true, margin: 0,
   });
   bullets(s, {
-    x: cx + 0.28, y: 2.16, w: W - cx - M - 0.56, h: 4.3, size: 12.5,
+    x: cx + 0.28, y: 2.1, w: W - cx - M - 0.56, h: 4.5, size: 12.5, gap: 8,
     items: [
       "Открыть max.ru/t403_hakaton_max_bot, нажать «Начать», затем «Открыть Витрину»",
-      "В мини-приложении описать бизнес одним сообщением: «Автосервис на Лесной. Диагностика 1500, замена масла 900, шиномонтаж 2400. Работаем с 9 до 20» — и нажать «Собрать витрину»",
-      "Через несколько секунд витрина опубликована: ссылка для клиентов, «Поделиться», «Посмотреть»",
-      "Открыть эту ссылку с другого аккаунта MAX — это роль клиента",
+      "Описать бизнес **одним сообщением**: «Автосервис на Лесной. Диагностика 1500, замена масла 900, шиномонтаж 2400. Работаем с 9 до 20» — и нажать «Собрать витрину»",
+      "Через ~10 секунд витрина опубликована: ссылка, «Поделиться», «Посмотреть»",
+      "Открыть ссылку **со второго аккаунта MAX** — это роль клиента",
       "Выбрать услугу и время, указать имя, нажать «Записаться»",
       "Владельцу в чат с ботом придёт заявка с кнопкой «Открыть заявки»",
-      "Нажать «Подтвердить» в приложении — клиенту придёт уведомление в MAX",
+      "Нажать «Подтвердить» — клиенту придёт ответ в MAX",
     ],
-  });
-
-  card(s, { x: M, y: 5.3, w: 6.3, h: 1.35 });
-  cardText(s, {
-    x: M, y: 5.3, w: 6.3, h: 1.35,
-    title: "Переменные окружения",
-    size: 11,
-    body: "MAX_BOT_TOKEN (передаётся отдельно) · MAX_BOT_USERNAME=t403_hakaton_max_bot · MAX_WEBHOOK_SECRET · MAX_MINIAPP_URL · OPENAI_API_KEY. Полный список — в .env.example",
   });
   chrome(s, 1, false);
 }
@@ -445,7 +498,7 @@ function darkSlide() {
   s.addText("ВЛАДЕЛЕЦ ОПИСЫВАЕТ БИЗНЕС", { ...small, fontSize: 8.25, x: px(614), y: px(104), w: px(300), h: px(16), color: ON_COVER_MUTED });
   s.addImage({ path: "bubble-owner.png", x: px(614), y: px(132), w: px(272), h: px(110) });
   s.addText(
-    "Автосервис на Лесной пр. 12. Диагностика подвески 1500, замена масла 900, шиномонтаж 2400. С\u00A09\u00A0до\u00A020, +7\u00A0812\u00A0000-00-00",
+    "Автосервис на Лесной пр. 12. Диагностика подвески 1500, замена масла 900, шиномонтаж 2400. С 9 до 20, +7 812 000-00-00",
     {
       x: px(631), y: px(142), w: px(240), h: px(90), valign: "middle",
       fontFace: FONT, fontSize: 11, color: WHITE, lineSpacingMultiple: 1.1, isTextBox: true, margin: 0,
@@ -462,7 +515,7 @@ function darkSlide() {
     shadow: { type: "outer", color: "000000", blur: 30, offset: 12, angle: 90, opacity: 0.5 },
   });
   s.addShape(pres.ShapeType.ellipse, {
-    x: px(658), y: px(420), w: px(22), h: px(22), fill: { color: "1F8A55" }, line: { color: "1F8A55", width: 0 },
+    x: px(658), y: px(420), w: px(22), h: px(22), fill: { color: GOOD }, line: { color: GOOD, width: 0 },
   });
   s.addText("✓", {
     x: px(658), y: px(420), w: px(22), h: px(22), align: "center", valign: "middle",
@@ -493,300 +546,443 @@ function darkSlide() {
 // ====================================================================================
 {
   const s = lightSlide();
-  head(s, "Executive summary", "Что мы сделали");
+  head(s, "Executive summary", "Витрина: запись в MAX из одного сообщения");
   s.addText(
-    "Микробизнес услуг ведёт запись руками — в личных сообщениях и по телефону. Витрина превращает одно сообщение в мини-приложении MAX в работающую витрину с онлайн-записью, которую клиенты открывают прямо в MAX. Заявки приходят владельцу в чат с ботом.",
-    { x: M, y: 1.35, w: CW, h: 0.78, fontFace: FONT, fontSize: 15, color: INK_2, lineSpacingMultiple: 1.15, isTextBox: true, margin: 0 }
+    "Владелец микробизнеса услуг описывает бизнес одним сообщением в мини-приложении MAX — через ~10 секунд у него опубликованная витрина с онлайн-записью. Клиенты записываются, не выходя из MAX, заявки приходят владельцу в чат.",
+    { x: M, y: 1.4, w: CW, h: 0.9, valign: "top", fontFace: FONT, fontSize: 15, color: INK_2, lineSpacingMultiple: 1.15, isTextBox: true, margin: 0 }
   );
 
-  const tw = (CW - 0.3 * 3) / 4;
-  const tiles = [
-    ["1", "", "сообщение от владельца до готовой витрины"],
-    ["~10", "сек", "до ссылки, которую можно отправить клиенту"],
-    ["2", "", "касания клиента: выбрать услугу и время"],
-    ["0", "", "строк кода и сторонних сервисов у предпринимателя"],
-  ];
-  tiles.forEach(([v, u, l], i) => {
-    stat(s, { x: M + i * (tw + 0.3), y: 2.35, w: tw, h: 1.7, value: v, unit: u, label: l });
+  const cw = (CW - 0.2 * 3) / 4;
+  [
+    ["Для кого", "Самозанятые и микро-ИП в услугах с записью на время: автосервис, барбершоп, маникюр, репетитор. 1–5 человек, без сайта и CRM."],
+    ["Проблема", "Запись ведётся вручную в личных сообщениях: ночные заявки теряются, случаются двойные брони, прайс пересказывается каждому."],
+    ["Решение", "Чат-бот и мини-приложение в MAX: описание → витрина с услугами, ценами и временем → запись → заявка владельцу → ответ клиенту."],
+    ["Результат", "Запись круглосуточно и без переписки: клиент проходит путь сам за два касания, владельцу остаётся одна кнопка."],
+  ].forEach(([t, b], i) => {
+    const x = M + i * (cw + 0.2);
+    card(s, { x, y: 2.42, w: cw, h: 2.1, tint: true });
+    cardText(s, { x, y: 2.42, w: cw, h: 2.1, title: t, body: b, size: 12.5 });
   });
 
-  const cw3 = (CW - 0.3 * 2) / 3;
-  const cards = [
-    ["Для кого", "Самозанятые и микро-ИП в услугах: автосервис, барбершоп, мастер маникюра, репетитор, клининг. 1–5 человек, без сайта и без CRM."],
-    ["Что закрывает", "Ручную запись: заявки ночью, двойные брони, переписку вместо работы. Клиент и владелец остаются в MAX."],
-    ["Почему именно MAX", "Витрина открывается внутри чат-бота, телефон берётся из аккаунта MAX, ответ приходит туда же, где клиент записывался."],
-  ];
-  cards.forEach(([t, b], i) => {
-    const x = M + i * (cw3 + 0.3);
-    card(s, { x, y: 4.35, w: cw3, h: 2.4, tint: true });
-    cardText(s, { x, y: 4.35, w: cw3, h: 2.4, title: t, body: b, size: 13 });
+  [
+    ["1", "", "сообщение от владельца до готовой витрины"],
+    ["~10", "сек", "до ссылки для клиентов (замер на проде)"],
+    ["2", "", "касания клиента: выбрать услугу и время"],
+    ["0", "", "строк кода и сторонних сервисов у предпринимателя"],
+  ].forEach(([v, u, l], i) => {
+    stat(s, { x: M + i * (cw + 0.2), y: 4.72, w: cw, h: 1.55, value: v, unit: u, label: l });
   });
   chrome(s, 3, false);
 }
 
 // ====================================================================================
-// 4. Audience & problem
+// 4. Criteria map - the jury scores criterion by criterion; this is the index
 // ====================================================================================
 {
   const s = lightSlide();
-  head(s, "Аудитория и проблема", "Кто именно и что именно болит");
+  head(s, "Навигация по критериям", "Где в презентации ответ на каждый критерий",
+    "Критерии и веса — из задания трека. Справа — номера слайдов, где на критерий отвечаем прямо.");
 
-  card(s, { x: M, y: 1.45, w: 6.5, h: 3.75, tint: true });
-  s.addText("Формулировка проблемы", {
-    x: M + 0.28, y: 1.68, w: 6, h: 0.3, fontFace: FONT, fontSize: 14, bold: true, color: MAX_BLUE, isTextBox: true, margin: 0,
-  });
-  s.addText(
-    [
-      { text: "Владелец микросервиса в сфере услуг", options: { bold: true, color: INK } },
-      { text: " в ситуации, когда клиенты пишут в личные сообщения в любое время, ", options: { color: INK_2 } },
-      { text: "хочет", options: { bold: true, color: INK } },
-      { text: " принимать записи без ручного согласования каждой, ", options: { color: INK_2 } },
-      { text: "но сталкивается с тем", options: { bold: true, color: INK } },
-      { text: ", что онлайн-запись требует либо платной CRM с настройкой, либо разработки сайта или бота, ", options: { color: INK_2 } },
-      { text: "из-за чего", options: { bold: true, color: INK } },
-      { text: " продолжает вести запись вручную — теряет ночные заявки, допускает двойные брони и тратит рабочее время на переписку.", options: { color: INK_2 } },
-    ],
-    { x: M + 0.28, y: 2.1, w: 5.95, h: 3.0, fontFace: FONT, fontSize: 14.5, lineSpacingMultiple: 1.2, isTextBox: true, margin: 0 }
-  );
-  s.addText(
-    "Сегмент выбран узко намеренно: одна отрасль, один сценарий, один участок процесса, который цифровое решение закрывает от начала до результата.",
-    { x: M, y: 5.4, w: 6.5, h: 0.6, fontFace: FONT, fontSize: 11.5, color: INK_3, lineSpacingMultiple: 1.1, isTextBox: true, margin: 0 }
-  );
-
-  const gx = 7.45;
-  const gw = (W - gx - M - 0.28) / 2;
-  const facts = [
-    ["6,6", "млн", "субъектов МСП в едином реестре", "ФНС России, июль 2026"],
-    ["81,8", "%", "всех действующих юрлиц и ИП — это МСП", "ФНС России, 2026"],
-    ["+3,5", "%", "рост числа субъектов МСП год к году", "ФНС России, 2026"],
-    ["1,8", "млн", "работников — заявленная кадровая потребность", "Росстат / Роструд, май 2026"],
+  const colw = (CW - 0.2) / 2;
+  const product = [
+    ["Потенциал масштабирования", "35%", "17–19", "Контексты и регионы помимо пилота, что переносится и что адаптируется, условия, риски, порядок тиражирования по шагам"],
+    ["Пользовательская ценность", "25%", "5–7", "Приоритетный сегмент, проблема по формуле, факты отдельно от допущений, сравнение с тем, как запись ведут сейчас"],
+    ["UX/UI и удобство", "20%", "8–10", "Путь владельца и клиента на реальных экранах; как интерфейс сообщает о загрузке, результате и ошибке"],
+    ["Обоснованность и целостность", "15%", "6, 11–13", "Гипотеза, ожидаемый эффект с метриками, границы MVP по MoSCoW, почему продукт устроен именно так"],
   ];
-  facts.forEach(([v, u, l, src], i) => {
-    stat(s, {
-      x: gx + (i % 2) * (gw + 0.28),
-      y: 1.45 + Math.floor(i / 2) * 2.0,
-      w: gw, h: 1.82, value: v, unit: u, label: l, src,
+  const technical = [
+    ["Работоспособность, интеграция, архитектура", "30+20+20%", "1, 13, 16", "Порядок проверки, состав и связи компонентов, реальные интеграции с MAX Bot API и MAX Bridge"],
+    ["Стабильность, безопасность, документация", "10+10+10%", "14", "Обработка ошибок и повторов, модель доверия, зафиксированные зависимости, README по пунктам задания"],
+    ["Платформенный бонус", "+0,15", "15", "Возможности MAX сверх минимума: контакт из аккаунта, «Поделиться» в чаты, кнопки с переходом на нужный экран"],
+    ["Сценарий запуска (финал)", "15%", "19", "Первый район, каналы привлечения, участники, сроки, метрики и следующий шаг после пилота"],
+  ];
+  const rowH = 0.92;
+  [product, technical].forEach((rows, col) => {
+    const x = M + col * (colw + 0.2);
+    rows.forEach(([title, weight, slides, what], i) => {
+      const y = 1.9 + i * (rowH + 0.14);
+      card(s, { x, y, w: colw, h: rowH, tint: col === 1 });
+      s.addText(
+        [
+          { text: title, options: { bold: true, fontSize: 12.5, color: INK } },
+          { text: "  " + weight, options: { bold: true, fontSize: 9.5, color: MAX_BLUE } },
+        ],
+        { x: x + 0.2, y: y + 0.12, w: colw - 1.4, h: 0.3, fontFace: FONT, isTextBox: true, margin: 0 }
+      );
+      s.addText(what, {
+        x: x + 0.2, y: y + 0.42, w: colw - 1.4, h: 0.44, valign: "top",
+        fontFace: FONT, fontSize: 10.5, color: INK_2, lineSpacingMultiple: 1.05, isTextBox: true, margin: 0,
+      });
+      s.addText(slides, {
+        x: x + colw - 1.15, y, w: 0.95, h: rowH, align: "right", valign: "middle",
+        fontFace: FONT, fontSize: 17, bold: true, color: INK, isTextBox: true, margin: 0,
+      });
     });
   });
   s.addText(
-    "Данные описывают размер и динамику аудитории. Оценку доли микробизнеса без онлайн-записи мы выносим в допущения — см. слайд 14.",
-    { x: gx, y: 5.5, w: W - gx - M, h: 0.6, fontFace: FONT, fontSize: 11, color: INK_3, lineSpacingMultiple: 1.1, isTextBox: true, margin: 0 }
+    "Слева — продуктовая оценка, справа (с оттенком) — техническая оценка, бонус и финал. Ограничения и допущения — слайд 20, источники — слайд 21.",
+    { x: M, y: 6.2, w: CW, h: 0.3, fontFace: FONT, fontSize: 10.5, color: INK_3, isTextBox: true, margin: 0 }
   );
   chrome(s, 4, false);
 }
 
 // ====================================================================================
-// 5. As Is / To Be
+// 5. Audience & problem
 // ====================================================================================
 {
   const s = lightSlide();
-  head(s, "Участок процесса", "Что меняется в пользовательском пути",
-    "Мы не автоматизируем весь бизнес-процесс — только тот участок, где эффект заметен сразу.");
+  head(s, "Пользовательская ценность · аудитория и проблема", "Кто именно и что именно болит");
 
-  const cw = (CW - 0.35) / 2;
-  card(s, { x: M, y: 1.85, w: cw, h: 2.95 });
-  s.addText("AS IS — СЕГОДНЯ", {
-    x: M + 0.28, y: 2.08, w: cw - 0.56, h: 0.26, fontFace: FONT, fontSize: 11, bold: true, color: "D31169", charSpacing: 1.4, isTextBox: true, margin: 0,
+  const lw = 6.45;
+  card(s, { x: M, y: 1.45, w: lw, h: 1.62 });
+  cardText(s, {
+    x: M, y: 1.45, w: lw, h: 1.62, title: "Приоритетный сегмент", size: 12.5,
+    body: "Владелец микробизнеса услуг с записью на время: 1–5 человек, без сайта и CRM, запись сейчас — в личных сообщениях. Пилотные ниши — автосервис, барбершоп, мастер маникюра. **Не в пилоте**: сети и франшизы — там решает головной офис.",
   });
+
+  card(s, { x: M, y: 3.22, w: lw, h: 2.72, tint: true });
+  s.addText("Формулировка проблемы", {
+    x: M + 0.26, y: 3.42, w: lw - 0.52, h: 0.3, fontFace: FONT, fontSize: 15, bold: true, color: MAX_BLUE, isTextBox: true, margin: 0,
+  });
+  s.addText(
+    rich(
+      "**Владелец микросервиса в сфере услуг** в ситуации, когда клиенты пишут в личные сообщения в любое время, **хочет** принимать записи без ручного согласования каждой, **но сталкивается с тем**, что онлайн-запись требует платного сервиса с настройкой либо разработки сайта или бота, **из-за чего** ведёт запись вручную — теряет ночные заявки, допускает двойные брони и тратит рабочее время на переписку.",
+      { color: INK_2 },
+      INK
+    ),
+    { x: M + 0.26, y: 3.85, w: lw - 0.52, h: 2.0, valign: "top", fontFace: FONT, fontSize: 14, lineSpacingMultiple: 1.2, isTextBox: true, margin: 0 }
+  );
+
+  const rx = 7.2;
+  const rw = W - M - rx;
+  const pw = pill(s, { x: rx, y: 1.45, text: "Факты", ...PILL.fact, fill: "E3F1EB" });
+  s.addText("размер и динамика аудитории", {
+    x: rx + pw + 0.1, y: 1.45, w: 3.5, h: 0.27, valign: "middle", fontFace: FONT, fontSize: 11, color: INK_3, isTextBox: true, margin: 0,
+  });
+  const tw = (rw - 0.14 * 2) / 3;
+  [
+    ["6,6", "млн", "субъектов МСП в реестре", "ФНС России, июль 2026"],
+    ["81,8", "%", "юрлиц и ИП — это МСП", "ФНС России, 2026"],
+    ["+3,5", "%", "рост за год", "ФНС России, 2026"],
+  ].forEach(([v, u, l, src], i) => {
+    stat(s, { x: rx + i * (tw + 0.14), y: 1.85, w: tw, h: 1.62, value: v, unit: u, label: l, src, valueSize: 26 });
+  });
+  card(s, { x: rx, y: 3.62, w: rw, h: 1.15, white: true });
+  s.addText(
+    rich("**Задача названа в задании трека:** ценность цифрового решения — во взаимодействии с клиентами, «например, оформления заказа, записи на услугу, бронирования… непосредственно в MAX».", { color: INK_2 }, INK),
+    { x: rx + 0.22, y: 3.78, w: rw - 0.44, h: 0.9, valign: "top", fontFace: FONT, fontSize: 12, lineSpacingMultiple: 1.12, isTextBox: true, margin: 0 }
+  );
+  pill(s, { x: rx, y: 4.95, text: "Допущение", ...PILL.guess, fill: "FFE8F2" });
+  s.addText(
+    "Доля микросервисов, которые ведут запись вручную и считают это проблемой, исследованием не подтверждена. Её проверяет пилот (слайд 19), допущения собраны на слайде 20.",
+    { x: rx, y: 5.32, w: rw, h: 0.8, valign: "top", fontFace: FONT, fontSize: 11, color: INK_3, lineSpacingMultiple: 1.1, isTextBox: true, margin: 0 }
+  );
+  chrome(s, 5, false);
+}
+
+// ====================================================================================
+// 6. As Is / To Be
+// ====================================================================================
+{
+  const s = lightSlide();
+  head(s, "Пользовательская ценность · участок процесса", "Что меняется в пользовательском пути",
+    "Мы не автоматизируем весь бизнес-процесс — только приём и подтверждение записи, где эффект заметен сразу.");
+
+  const cw = (CW - 0.3) / 2;
+  card(s, { x: M, y: 1.85, w: cw, h: 3.1 });
+  pill(s, { x: M + 0.26, y: 2.05, text: "As Is — сегодня", ...PILL.guess });
   bullets(s, {
-    x: M + 0.28, y: 2.45, w: cw - 0.56, h: 2.2,
+    x: M + 0.26, y: 2.5, w: cw - 0.52, h: 2.3, size: 12.5,
     items: [
       "Клиент пишет в личные сообщения или звонит",
       "Владелец отвечает вручную, сверяется с блокнотом",
       "Согласование времени занимает несколько сообщений",
       "Ночные заявки остаются без ответа",
       "Прайс приходится пересказывать каждому заново",
-      "Подтверждение и напоминание — снова вручную",
+      "Подтверждение — снова вручную",
     ],
   });
 
-  const x2 = M + cw + 0.35;
-  card(s, { x: x2, y: 1.85, w: cw, h: 2.95, tint: true });
-  s.addText("TO BE — С ВИТРИНОЙ", {
-    x: x2 + 0.28, y: 2.08, w: cw - 0.56, h: 0.26, fontFace: FONT, fontSize: 11, bold: true, color: "1F8A55", charSpacing: 1.4, isTextBox: true, margin: 0,
-  });
+  const x2 = M + cw + 0.3;
+  card(s, { x: x2, y: 1.85, w: cw, h: 3.1, tint: true });
+  pill(s, { x: x2 + 0.26, y: 2.05, text: "To Be — с Витриной", ...PILL.fact, fill: "D5EBE6" });
   bullets(s, {
-    x: x2 + 0.28, y: 2.45, w: cw - 0.56, h: 2.2,
+    x: x2 + 0.26, y: 2.5, w: cw - 0.52, h: 2.3, size: 12.5,
     items: [
-      "Исчезает пересказ прайса: услуги и цены видны в витрине",
-      "Упрощается выбор времени: клиент берёт слот сам",
-      "Автоматически собирается заявка и падает в чат владельца",
-      "Быстрее приходит ответ: подтверждение — одна кнопка",
-      "Проще результат: запись принимается круглосуточно",
-      "Владелец по-прежнему решает сам",
+      "**Исчезает** пересказ прайса: услуги и цены видны в витрине",
+      "**Упрощается** выбор времени: клиент берёт слот сам",
+      "**Автоматически** собирается заявка и приходит в чат владельца",
+      "**Быстрее** ответ: подтверждение — одна кнопка, клиенту приходит сообщение",
+      "**Проще** результат: запись принимается круглосуточно",
+      "Владелец по-прежнему решает сам — продукт не назначает встречи за него",
     ],
   });
 
-  card(s, { x: M, y: 5.0, w: CW, h: 1.1 });
+  card(s, { x: M, y: 5.15, w: CW, h: 1.3, white: true });
   s.addText(
-    [
-      { text: "Гипотеза. ", options: { bold: true, color: INK } },
-      { text: "Если мы поможем владельцу микросервиса принимать записи витриной в MAX, собранной из одного сообщения, доля заявок, дошедших до подтверждения, вырастет, а время на переписку сократится — потому что клиент проходит путь сам, а владельцу остаётся одно решение.", options: { color: INK_2 } },
-    ],
-    { x: M + 0.28, y: 5.22, w: CW - 0.56, h: 0.7, fontFace: FONT, fontSize: 13, lineSpacingMultiple: 1.15, isTextBox: true, margin: 0 }
-  );
-  chrome(s, 5, false);
-}
-
-// ====================================================================================
-// 6. Owner scenario
-// ====================================================================================
-{
-  const s = lightSlide();
-  head(s, "Основной сценарий · часть 1", "Владелец: одно сообщение");
-
-  const cw = (CW - 0.3 * 3) / 4;
-  const steps = [
-    ["Открывает бота", "Находит @t403_hakaton_max_bot и нажимает «Начать» — в ответ одна кнопка «Открыть Витрину». Регистрации нет."],
-    ["Описывает бизнес", "Обычными словами, одним сообщением прямо в мини-приложении: название, услуги, цены, часы работы."],
-    ["Получает витрину", "Через несколько секунд витрина опубликована: ссылка для клиентов, «Поделиться» в чаты MAX и просмотр глазами клиента."],
-    ["Правит текстом", "«Добавь развал-схождение 3000», «убери слоты на завтра» — правка тем же способом, что и создание. Ссылка не меняется."],
-  ];
-  steps.forEach(([t, b], i) => {
-    const x = M + i * (cw + 0.3);
-    card(s, { x, y: 1.45, w: cw, h: 2.15 });
-    disc(s, x + 0.24, y0(), String(i + 1));
-    s.addText(t, { x: x + 0.24, y: 2.1, w: cw - 0.48, h: 0.3, fontFace: FONT, fontSize: 14, bold: true, color: INK, isTextBox: true, margin: 0 });
-    s.addText(b, { x: x + 0.24, y: 2.45, w: cw - 0.48, h: 1.0, fontFace: FONT, fontSize: 11.5, color: INK_2, lineSpacingMultiple: 1.1, isTextBox: true, margin: 0 });
-  });
-  function y0() { return 1.66; }
-
-  card(s, { x: M, y: 3.85, w: CW, h: 2.25 });
-  s.addText("Что приходит владельцу в чат", {
-    x: M + 0.3, y: 4.05, w: 5.6, h: 0.3, fontFace: FONT, fontSize: 14, bold: true, color: INK, isTextBox: true, margin: 0,
-  });
-  s.addShape(pres.ShapeType.roundRect, {
-    x: M + 0.3, y: 4.42, w: 5.6, h: 1.45, rectRadius: 0.06,
-    fill: { color: WHITE }, line: { color: LINE, width: 1 },
-  });
-  s.addText(
-    "Новая заявка · Автосервис на Лесной\n\nДиагностика подвески · Сегодня 14:00\nПётр, +7 999 000-11-22\n«Mazda 6, стучит подвеска»\n[ Открыть заявки ]",
-    { x: M + 0.45, y: 4.55, w: 5.3, h: 1.2, fontFace: "Courier New", fontSize: 10, color: INK, lineSpacingMultiple: 1.15, isTextBox: true, margin: 0 }
-  );
-
-  const rx = M + 6.2;
-  s.addText("Ссылку можно раздать как угодно", {
-    x: rx, y: 4.05, w: W - rx - M, h: 0.3, fontFace: FONT, fontSize: 14, bold: true, color: INK, isTextBox: true, margin: 0,
-  });
-  bullets(s, {
-    x: rx, y: 4.45, w: W - rx - M, h: 1.0,
-    items: [
-      "Отправить в переписке существующим клиентам",
-      "Повесить QR-кодом на стойке, в витрине, на визитке",
-      "Поставить в описание канала или профиля",
-    ],
-  });
-  s.addText(
-    "Ссылка открывает мини-приложение внутри MAX — клиент не уходит в браузер и ничего не устанавливает.",
-    { x: rx, y: 5.5, w: W - rx - M, h: 0.45, fontFace: FONT, fontSize: 10.5, color: INK_3, lineSpacingMultiple: 1.1, isTextBox: true, margin: 0 }
+    rich("**Гипотеза.** Если мы поможем владельцу микросервиса принимать записи витриной в MAX, собранной из одного сообщения, доля заявок, дошедших до подтверждения, вырастет, а время на переписку сократится — потому что клиент проходит путь сам, а владельцу остаётся одно решение. Как это проверить — слайд 11.", { color: INK_2 }, INK),
+    { x: M + 0.28, y: 5.33, w: CW - 0.56, h: 0.98, valign: "top", fontFace: FONT, fontSize: 13.5, lineSpacingMultiple: 1.15, isTextBox: true, margin: 0 }
   );
   chrome(s, 6, false);
 }
 
 // ====================================================================================
-// 7. Customer scenario - real screenshots
+// 7. Versus today
 // ====================================================================================
 {
   const s = lightSlide();
-  head(s, "Основной сценарий · часть 2", "Клиент: два касания до записи");
+  head(s, "Пользовательская ценность · преимущество", "Почему не так, как запись ведут сейчас",
+    "Сравнение по тому, что важно владельцу микробизнеса. Цены и сроки альтернатив мы не исследовали, поэтому сравниваем качественно.");
 
-  const shots = [
-    ["storefront", "Выбор", "Услуги с ценами и длительностью, ближайшие слоты. Имя подставляется из профиля MAX."],
-    ["booking", "Отправка", "Телефон берётся из MAX по кнопке — вводить ничего не нужно. Кнопка действия закреплена внизу."],
-    ["owner", "Ответ", "Заявка приходит владельцу в чат и в кабинет. Подтверждение — одна кнопка, клиент узнаёт в MAX."],
+  const OURS = "EAF3FF";
+  const rule = { type: "solid", pt: 1, color: LINE };
+  const none = { type: "none" };
+  const border = [none, none, rule, none];
+  const th = (text, ours) => ({
+    text: text.toUpperCase(),
+    options: { bold: true, fontSize: 9.5, color: ours ? MAX_BLUE : INK_3, fill: { color: ours ? OURS : WHITE }, border, charSpacing: 0.6 },
+  });
+  const td = (text, i) => ({
+    text,
+    options: {
+      fontSize: 11.5,
+      bold: i === 0 || i === 4,
+      color: i === 0 || i === 4 ? INK : INK_2,
+      fill: { color: i === 4 ? OURS : WHITE },
+      border,
+    },
+  });
+  const rows = [
+    ["Запуск", "уже есть", "регистрация, настройка услуг и расписания", "задание, подрядчик, ожидание", "одно сообщение, ~10 секунд"],
+    ["Кто нужен", "никто", "владелец разбирается в настройках", "разработчик", "никто: описание обычными словами"],
+    ["Где записывается клиент", "в переписке", "на отдельной странице или в приложении сервиса", "на сайте или в отдельном боте", "внутри MAX, по ссылке или QR-коду"],
+    ["Заявка ночью", "ждёт ответа до утра", "принимается", "принимается", "принимается и сразу приходит в чат"],
+    ["Прайс и свободное время", "пересказываются каждому", "видны клиенту", "видны клиенту", "видны, правятся одной фразой"],
+    ["Телефон клиента", "пишет вручную", "вводит в форму", "вводит в форму", "одной кнопкой из аккаунта MAX"],
   ];
-  // Sized by height: frame + caption have to fit between the title (ends at 1.24in) and
-  // the footer (6.98in). A 2.16in frame is 4.21in tall, which leaves both gaps visible.
-  const fw = 2.16;
-  const top = 1.5;
-  const colw = (CW - 0.5 * 2) / 3;
-  shots.forEach(([name, title, note], i) => {
-    const x = M + i * (colw + 0.5);
-    const fh = phone(s, { x: x + (colw - fw) / 2, y: top, w: fw, name });
-    s.addText(title, {
-      x, y: top + fh + 0.18, w: colw, h: 0.3, align: "center",
-      fontFace: FONT, fontSize: 14, bold: true, color: INK, isTextBox: true, margin: 0,
-    });
-    s.addText(note, {
-      x, y: top + fh + 0.5, w: colw, h: 0.5, align: "center", valign: "top",
-      fontFace: FONT, fontSize: 11, color: INK_2, lineSpacingMultiple: 1.1, isTextBox: true, margin: 0,
-    });
+  const restW = (CW - 1.95) / 4;
+  s.addTable(
+    [
+      [th(""), th("Переписка в личных сообщениях"), th("Сервис онлайн-записи или CRM"), th("Сайт или бот на заказ"), th("Витрина в MAX", true)],
+      ...rows.map((r) => r.map((cell, i) => td(cell, i))),
+    ],
+    {
+      x: M, y: 1.95, w: CW, colW: [1.95, restW, restW, restW, restW],
+      rowH: [0.5, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6],
+      fontFace: FONT, valign: "top", margin: [0.07, 0.1, 0.05, 0.1],
+    }
+  );
+  s.addText("Где мы сознательно слабее: нет онлайн-оплаты и календаря занятости — это границы MVP, а не упущение (слайд 12).", {
+    x: M, y: 6.25, w: CW, h: 0.3, fontFace: FONT, fontSize: 11, color: INK_3, isTextBox: true, margin: 0,
   });
   chrome(s, 7, false);
 }
 
 // ====================================================================================
-// 8. Expected effect
+// 8. Scenario: owner - real screens
 // ====================================================================================
 {
   const s = lightSlide();
-  head(s, "Ожидаемый эффект", "Что должно измениться и как это проверить",
-    "На этапе хакатона это гипотезы. Важно не то, какие цифры мы заявим, а то, что каждую можно измерить после пилота.");
-
-  const cw = (CW - 0.35) / 2;
-  card(s, { x: M, y: 1.9, w: cw, h: 4.55 });
-  s.addText("Метрики, которые снимает сам продукт", {
-    x: M + 0.28, y: 2.12, w: cw - 0.56, h: 0.3, fontFace: FONT, fontSize: 14, bold: true, color: INK, isTextBox: true, margin: 0,
-  });
-  bullets(s, {
-    x: M + 0.28, y: 2.6, w: cw - 0.56, h: 3.0, size: 13.5,
-    items: [
-      "Доля доведённых записей — открыл витрину → отправил заявку",
-      "Время до подтверждения — от заявки до нажатия кнопки",
-      "Доля заявок вне рабочих часов — замер того, что терялось",
-      "Ручных сообщений на одну запись — целевое значение 0",
-      "Время от «описал» до первой заявки",
-    ],
-  });
-  s.addText("Все события уже проходят через наш бэкенд — отдельная аналитика не нужна.", {
-    x: M + 0.28, y: 5.75, w: cw - 0.56, h: 0.45, fontFace: FONT, fontSize: 11, color: INK_3, isTextBox: true, margin: 0,
-  });
-
-  const x2 = M + cw + 0.35;
-  card(s, { x: x2, y: 1.9, w: cw, h: 4.55, tint: true });
-  s.addText("Как измеряем", {
-    x: x2 + 0.28, y: 2.12, w: cw - 0.56, h: 0.3, fontFace: FONT, fontSize: 14, bold: true, color: INK, isTextBox: true, margin: 0,
-  });
-  bullets(s, {
-    x: x2 + 0.28, y: 2.6, w: cw - 0.56, h: 1.6, size: 13.5,
-    items: [
-      "Базовая линия снимается до запуска: неделя ручного подсчёта",
-      "Пилот — та же неделя через витрину, сравнение по тем же величинам",
-      "Сравниваем на одном и том же бизнесе, а не между разными",
-    ],
-  });
-  s.addShape(pres.ShapeType.roundRect, {
-    x: x2 + 0.28, y: 4.5, w: cw - 0.56, h: 1.6, rectRadius: 0.08,
-    fill: { color: WHITE }, line: { color: "C7DBFB", width: 1 },
-  });
-  s.addText(
-    [
-      { text: "Критерий успеха пилота: ", options: { bold: true, color: INK } },
-      { text: "владелец после недели отказывается возвращаться к ручной записи, и хотя бы одна заявка пришла вне рабочих часов и была подтверждена.", options: { color: INK_2 } },
-    ],
-    { x: x2 + 0.48, y: 4.72, w: cw - 0.96, h: 1.2, fontFace: FONT, fontSize: 13, lineSpacingMultiple: 1.15, isTextBox: true, margin: 0 }
-  );
+  head(s, "UX · основной сценарий, часть 1", "Владелец: одно сообщение → опубликованная витрина",
+    "Вход — «Начать» в чат-боте, затем «Открыть Витрину». Регистрации нет: аккаунт MAX и есть вход.");
+  phoneRow(s, [
+    ["owner-compose", "1. Описывает бизнес", "Одним сообщением, как рассказал бы другу. Есть готовые примеры; кнопка активна, когда описание осмысленное."],
+    ["owner-building", "2. Видит, что идёт сборка", "Индикатор и подсказка не закрывать приложение; если закрыть случайно, MAX переспросит."],
+    ["owner-ready", "3. Получает результат", "«✓ Витрина готова»: ссылка, «Поделиться» в чаты MAX, «Посмотреть» глазами клиента."],
+  ]);
   chrome(s, 8, false);
 }
 
 // ====================================================================================
-// 9. Architecture (dark)
+// 9. Scenario: customer - real screens
+// ====================================================================================
+{
+  const s = lightSlide();
+  head(s, "UX · основной сценарий, часть 2", "Клиент: два касания до записи",
+    "Клиент открывает ссылку или QR-код владельца — витрина сразу внутри MAX, без установки и регистрации.");
+  phoneRow(s, [
+    ["storefront", "1. Выбор", "Услуги с ценами и длительностью, адрес и часы в шапке. Время появляется после выбора услуги."],
+    ["booking", "2. Отправка", "Имя подставлено из профиля MAX, телефон — одной кнопкой. Над кнопкой видно, что именно бронируется."],
+    ["customer-done", "3. Готово", "Заявка принята: услуга и время на экране, а ответ владельца придёт сюда, в MAX."],
+  ]);
+  chrome(s, 9, false);
+}
+
+// ====================================================================================
+// 10. Feedback loop: lead -> owner's decision -> answer to the customer
+// ====================================================================================
+{
+  const s = lightSlide();
+  head(s, "UX · обратная связь", "Заявка → решение владельца → ответ клиенту");
+
+  const mw = 3.72;
+  botMessage(s, {
+    x: M, y: 1.72, w: mw, h: 2.1, from: "Бот · владельцу", button: "Открыть заявки",
+    lines: [
+      { text: "Новая заявка", options: { bold: true } },
+      { text: " · Автосервис на Лесной", options: { breakLine: true } },
+      { text: "Диагностика подвески · Сегодня 14:00", options: { breakLine: true } },
+      { text: "Пётр Клиент, +7 999 000-11-22", options: { breakLine: true } },
+      { text: "«Mazda 6, стучит подвеска»", options: { italic: true, color: INK_3 } },
+    ],
+  });
+  caption(s, "Приходит в чат с ботом сразу, в любое время суток", M, 4.12, mw);
+
+  // The owner's side, cut from the real screen at full size: a whole phone at this width
+  // would shrink the one thing that matters - the buttons - into illegibility.
+  const cx = M + mw + 0.4;
+  const cwid = CW - 2 * (mw + 0.4);
+  const inner = cwid - 0.14;
+  const innerH = (inner * 432) / 740;
+  s.addShape(pres.ShapeType.roundRect, {
+    x: cx, y: 1.62, w: cwid, h: innerH + 0.14, rectRadius: 0.18,
+    fill: { color: "F2F4F7" }, line: { color: "E3E8EF", width: 0.75 },
+    shadow: { type: "outer", color: "091228", blur: 18, offset: 6, angle: 90, opacity: 0.18 },
+  });
+  s.addImage({ path: "card-owner-lead.png", x: cx + 0.07, y: 1.69, w: inner, h: innerH });
+  caption(s, "В кабинете — «Подтвердить» или «Отклонить» одной кнопкой", cx, 4.12, cwid);
+
+  const rx = W - M - mw;
+  botMessage(s, {
+    x: rx, y: 1.85, w: mw, h: 1.85, from: "Бот · клиенту", button: "Открыть витрину",
+    lines: [
+      { text: "Запись подтверждена", options: { bold: true, breakLine: true } },
+      { text: "Автосервис на Лесной", options: { breakLine: true } },
+      { text: "Диагностика подвески · Сегодня 14:00" },
+    ],
+  });
+  caption(s, "Клиенту в MAX — туда же, где он записывался. При отказе — кнопка «Выбрать другое время»", rx, 4.12, mw);
+
+  [M + mw + 0.06, rx - 0.34].forEach((ax) => {
+    s.addText("→", {
+      x: ax, y: 2.55, w: 0.28, h: 0.4, align: "center", valign: "middle",
+      fontFace: FONT, fontSize: 22, color: INK_3, isTextBox: true, margin: 0,
+    });
+  });
+
+  card(s, { x: M, y: 5.0, w: CW, h: 1.25 });
+  const sw = (CW - 0.48 - 0.25 * 3) / 4;
+  [
+    ["Загрузка", "Скелетоны экрана и индикатор сборки витрины"],
+    ["Результат", "«Витрина готова», «Заявка принята», статусы заявок"],
+    ["Ошибка", "Понятный текст и «Повторить»; введённое не теряется"],
+    ["Без тупиков", "Каждое сообщение бота открывает нужный экран; в предпросмотре — «Назад»"],
+  ].forEach(([t, b], i) => {
+    s.addText(
+      [
+        { text: t, options: { bold: true, fontSize: 12.5, color: INK, breakLine: true } },
+        { text: b, options: { fontSize: 11, color: INK_2 } },
+      ],
+      { x: M + 0.24 + i * (sw + 0.25), y: 5.17, w: sw, h: 0.95, valign: "top", fontFace: FONT, lineSpacingMultiple: 1.1, isTextBox: true, margin: 0 }
+    );
+  });
+  chrome(s, 10, false);
+}
+
+// ====================================================================================
+// 11. Expected effect
+// ====================================================================================
+{
+  const s = lightSlide();
+  head(s, "Обоснованность · ожидаемый эффект", "Что должно измениться и как это проверить",
+    "Улучшаем один участок — приём и подтверждение записи. На этапе хакатона это гипотезы; важно, что каждую можно измерить после пилота.");
+
+  const cw = (CW - 0.3) / 2;
+  card(s, { x: M, y: 1.95, w: cw, h: 4.1 });
+  s.addText("Метрики, которые снимает сам продукт", {
+    x: M + 0.26, y: 2.15, w: cw - 0.52, h: 0.3, fontFace: FONT, fontSize: 14.5, bold: true, color: INK, isTextBox: true, margin: 0,
+  });
+  bullets(s, {
+    x: M + 0.26, y: 2.6, w: cw - 0.52, h: 2.9, size: 12.5, gap: 7,
+    items: [
+      "**Доля доведённых записей** — открыл витрину → отправил заявку",
+      "**Время до подтверждения** — от заявки до нажатия владельцем кнопки",
+      "**Доля заявок вне рабочих часов** — прямой замер того, что раньше терялось",
+      "**Ручных сообщений на одну запись** — целевое значение 0",
+      "**Время от «описал» до первой заявки** — скорость выхода на результат",
+    ],
+  });
+  s.addText("Все события уже проходят через наш бэкенд — отдельная аналитика для замера не нужна.", {
+    x: M + 0.26, y: 5.42, w: cw - 0.52, h: 0.5, valign: "top", fontFace: FONT, fontSize: 10.5, color: INK_3, isTextBox: true, margin: 0,
+  });
+
+  const x2 = M + cw + 0.3;
+  card(s, { x: x2, y: 1.95, w: cw, h: 4.1, tint: true });
+  s.addText("Как измеряем", {
+    x: x2 + 0.26, y: 2.15, w: cw - 0.52, h: 0.3, fontFace: FONT, fontSize: 14.5, bold: true, color: INK, isTextBox: true, margin: 0,
+  });
+  bullets(s, {
+    x: x2 + 0.26, y: 2.6, w: cw - 0.52, h: 1.85, size: 12.5, gap: 7,
+    items: [
+      "Базовая линия снимается **до** запуска: владелец неделю считает заявки и время на переписку вручную",
+      "Пилот — три недели через витрину, сравнение по тем же величинам",
+      "Сравниваем на одном и том же бизнесе, а не между разными",
+    ],
+  });
+  s.addShape(pres.ShapeType.roundRect, {
+    x: x2 + 0.26, y: 4.4, w: cw - 0.52, h: 1.4, rectRadius: 0.08,
+    fill: { color: WHITE }, line: { color: "C7DBFB", width: 1 },
+  });
+  s.addText(
+    rich("**Критерий успеха пилота:** владелец после пилота не возвращается к ручной записи, и хотя бы одна заявка пришла вне рабочих часов и была подтверждена.", { color: INK_2 }, INK),
+    { x: x2 + 0.46, y: 4.58, w: cw - 0.92, h: 1.1, valign: "top", fontFace: FONT, fontSize: 13, lineSpacingMultiple: 1.15, isTextBox: true, margin: 0 }
+  );
+  chrome(s, 11, false);
+}
+
+// ====================================================================================
+// 12. MVP scope (MoSCoW)
+// ====================================================================================
+{
+  const s = lightSlide();
+  head(s, "Обоснованность · границы MVP", "Что вошло в MVP и что сознательно нет",
+    "MVP закрывает один сценарий от описания до ответа клиенту. Приоритеты — по MoSCoW; Won't Have — осознанное ограничение объёма.");
+
+  const cw = (CW - 0.2 * 3) / 4;
+  [
+    ["MUST", PILL.fact, "сделано", ["Описание → опубликованная витрина", "Запись клиента внутри MAX", "Заявка владельцу в чат", "Подтверждение и ответ клиенту"]],
+    ["SHOULD", PILL.blue, "сделано", ["Правка витрины одной фразой", "Скрыть, опубликовать, удалить", "«Поделиться» в чаты MAX", "Телефон из аккаунта MAX", "Просмотр глазами клиента"]],
+    ["COULD", PILL.could, "после пилота", ["Напоминание клиенту накануне", "Календарь занятости вместо текстовых слотов", "Тип «аренда»: сутки и залог"]],
+    ["WON'T", PILL.wont, "сознательно", ["Онлайн-оплата: витрина доводит до заявки", "Сотрудники и роли", "Интеграции с CRM и внешними календарями", "Код под каждый бизнес: витрина — это данные"]],
+  ].forEach(([tag, colours, label, items], i) => {
+    const x = M + i * (cw + 0.2);
+    card(s, { x, y: 1.95, w: cw, h: 2.95 });
+    const tw = pill(s, { x: x + 0.24, y: 2.15, text: tag, ...colours });
+    s.addText(label, {
+      x: x + 0.24 + tw + 0.1, y: 2.15, w: cw - tw - 0.6, h: 0.27, valign: "middle",
+      fontFace: FONT, fontSize: 13.5, bold: true, color: INK, isTextBox: true, margin: 0,
+    });
+    bullets(s, { x: x + 0.24, y: 2.6, w: cw - 0.48, h: 2.2, size: 12, gap: 5, items });
+  });
+
+  card(s, { x: M, y: 5.1, w: CW, h: 0.95, tint: true });
+  s.addText(
+    rich("**Почему границы именно такие:** каждый пункт Must нужен, чтобы клиент дошёл от ссылки до подтверждённой записи; без любого из них сценарий обрывается. Всё, что требует денег клиента, сотрудников или чужих систем, откладываем до проверки главной гипотезы.", { color: INK_2 }, INK),
+    { x: M + 0.28, y: 5.25, w: CW - 0.56, h: 0.7, valign: "top", fontFace: FONT, fontSize: 13, lineSpacingMultiple: 1.15, isTextBox: true, margin: 0 }
+  );
+  chrome(s, 12, false);
+}
+
+// ====================================================================================
+// 13. Architecture (dark)
 // ====================================================================================
 {
   const s = darkSlide();
-  head(s, "Архитектура", "Состав решения", null, true);
+  head(s, "Техническая оценка · архитектура", "Состав решения и почему он такой", null, true);
 
   const colTitles = ["МЕССЕНДЖЕР MAX", "БЭКЕНД AIRUNTIME", "ХРАНЕНИЕ И ИНФРАСТРУКТУРА"];
   const colX = [M, 5.0, 9.4];
-  const colW = [3.9, 3.9, 3.38];
+  const colW = [3.55, 3.9, 3.38];
   colTitles.forEach((t, i) => {
     s.addText(t, {
-      x: colX[i], y: 1.5, w: colW[i], h: 0.25,
+      x: colX[i], y: 1.42, w: colW[i], h: 0.25,
       fontFace: FONT, fontSize: 10, bold: true, color: ACCENT_ON_DARK, charSpacing: 1.8, isTextBox: true, margin: 0,
     });
   });
 
-  const boxes = [
+  const boxH = 0.78;
+  const rowY = [1.75, 2.7, 3.65];
+  [
     [0, 0, "Чат-бот", "приветствие и уведомления", true],
     [0, 1, "Мини-приложение", "создание, витрина, заявки", true],
     [1, 0, "Вебхук", "секрет в пути, всегда 200", false],
@@ -795,321 +991,393 @@ function darkSlide() {
     [2, 0, "PostgreSQL", "владельцы, витрины, заявки", false],
     [2, 1, "Docker + Traefik", "HTTPS, сертификат Минцифры", false],
     [2, 2, "LLM-провайдер", "внешний, с фоллбэком", false],
-  ];
-  const rowY = [1.85, 2.9, 3.95];
-  boxes.forEach(([c, r, t, sub, accent]) => {
+  ].forEach(([c, r, t, sub, accent]) => {
     s.addShape(pres.ShapeType.roundRect, {
-      x: colX[c], y: rowY[r], w: colW[c], h: 0.82, rectRadius: 0.09,
+      x: colX[c], y: rowY[r], w: colW[c], h: boxH, rectRadius: 0.09,
       fill: { color: accent ? "10284F" : DARK_CARD },
       line: { color: accent ? "3E6DA8" : "2A3550", width: 1 },
     });
     s.addText(t, {
-      x: colX[c] + 0.22, y: rowY[r] + 0.13, w: colW[c] - 0.44, h: 0.28,
+      x: colX[c] + 0.22, y: rowY[r] + 0.12, w: colW[c] - 0.44, h: 0.28,
       fontFace: FONT, fontSize: 13.5, bold: true, color: WHITE, isTextBox: true, margin: 0,
     });
     s.addText(sub, {
-      x: colX[c] + 0.22, y: rowY[r] + 0.43, w: colW[c] - 0.44, h: 0.28,
+      x: colX[c] + 0.22, y: rowY[r] + 0.42, w: colW[c] - 0.44, h: 0.26,
       fontFace: FONT, fontSize: 10.5, color: ON_DARK_2, isTextBox: true, margin: 0,
     });
   });
 
+  const arrow = { color: "7FB6FF", width: 1.5, endArrowType: "triangle" };
   [[0, 0], [0, 1], [1, 0], [1, 1], [1, 2]].forEach(([c, r]) => {
     s.addShape(pres.ShapeType.line, {
-      x: colX[c] + colW[c] + 0.06, y: rowY[r] + 0.41, w: colX[c + 1] - colX[c] - colW[c] - 0.12, h: 0,
-      line: { color: "7FB6FF", width: 1.5, endArrowType: "triangle" },
+      x: colX[c] + colW[c] + 0.06, y: rowY[r] + boxH / 2, w: colX[c + 1] - colX[c] - colW[c] - 0.12, h: 0,
+      line: { ...arrow },
+    });
+  });
+  // The mini-app API hands descriptions to the generator.
+  s.addShape(pres.ShapeType.line, {
+    x: colX[1] + colW[1] / 2, y: rowY[1] + boxH + 0.02, w: 0, h: rowY[2] - rowY[1] - boxH - 0.04,
+    line: { ...arrow },
+  });
+  [["обновления", 0], ["initData", 1]].forEach(([label, r]) => {
+    s.addText(label, {
+      x: colX[0] + colW[0] + 0.08, y: rowY[r] + 0.1, w: 0.85, h: 0.2,
+      fontFace: FONT, fontSize: 8.5, color: "8C9AB3", isTextBox: true, margin: 0,
     });
   });
 
-  const cw3 = (CW - 0.3 * 2) / 3;
-  const notes = [
-    ["Витрина — это данные, а не код", "Один мультитенантный мини-апп рендерит все витрины из валидированного конфига. «Описал → клиент может записаться» занимает секунды и не ломается от неудачного ответа модели."],
-    ["Две разные модели доверия", "Вебхук аутентифицируется секретом в пути — MAX не подписывает доставки. Мини-апп — подписью initData. Ни один эндпоинт не принимает id пользователя из тела запроса."],
-    ["Отказоустойчивость по умолчанию", "Вебхук всегда отвечает 200: ошибка обработчика стала бы штормом повторов. Если LLM недоступна, витрина собирается черновиком."],
-  ];
-  notes.forEach(([t, b], i) => {
-    const x = M + i * (cw3 + 0.3);
-    card(s, { x, y: 5.05, w: cw3, h: 1.6, dark: true });
-    cardText(s, { x, y: 5.05, w: cw3, h: 1.6, title: t, body: b, dark: true, size: 11 });
+  const cw3 = (CW - 0.25 * 2) / 3;
+  [
+    ["Витрина — это данные, а не код", "Модель заполняет схему, а не пишет программу: один мультитенантный мини-апп рендерит все витрины. «Описал → клиент может записаться» занимает секунды, а кривое поле обрезает валидация."],
+    ["Бот — вход, мини-приложение — работа", "Как советует задание: чат-бот — для уведомлений и коротких действий, форма, каталог и список заявок — в мини-приложении. Первая версия с мастером в чате делала витрину из любого сообщения, мы её заменили."],
+    ["Одно приложение, две роли", "Мини-приложение подключено к чат-боту и не живёт отдельно. Роль задаёт стартовый параметр: без него — кабинет владельца, со слагом витрины — витрина для клиента."],
+  ].forEach(([t, b], i) => {
+    const x = M + i * (cw3 + 0.25);
+    card(s, { x, y: 4.72, w: cw3, h: 2.05, dark: true });
+    cardText(s, { x, y: 4.72, w: cw3, h: 2.05, title: t, body: b, dark: true, size: 11, titleSize: 13.5 });
   });
-  chrome(s, 9, true);
+  chrome(s, 13, true);
 }
 
 // ====================================================================================
-// 10. MAX capabilities
+// 14. Reliability & security
 // ====================================================================================
 {
   const s = lightSlide();
-  head(s, "Использование платформы", "Что мы берём у MAX и зачем",
-    "Каждая возможность закрывает шаг сценария, а не добавлена ради галочки.");
+  head(s, "Техническая оценка · надёжность и безопасность", "Стабильность, безопасность, проверяемость");
 
-  const cw = (CW - 0.3 * 2) / 3;
-  const items = [
-    ["open_app", "Витрина открывается внутри чат-бота. Клиент не уходит в браузер и ничего не устанавливает."],
-    ["startapp deep link", "Одна ссылка на витрину, пригодная для QR-кода. Она же приводит клиента в бота."],
-    ["requestContact()", "Телефон берётся из аккаунта MAX по кнопке и приходит подписанным."],
-    ["shareMaxContent()", "«Поделиться» открывает родной экран MAX «Отправить в чат» — ссылка уходит клиентам, не выходя из мессенджера."],
-    ["getViewportSize / getLaunchContext", "Интерфейс подстраивается под область просмотра и под источник запуска."],
-    ["Обратная связь замыкается в MAX", "Клиент записался в MAX — и ответ получает там же, а не в письме."],
-  ];
-  items.forEach(([t, b], i) => {
-    const x = M + (i % 3) * (cw + 0.3);
-    const y = 1.95 + Math.floor(i / 3) * 1.72;
-    card(s, { x, y, w: cw, h: 1.55, tint: i === 5 });
-    cardText(s, { x, y, w: cw, h: 1.55, title: t, body: b, size: 11.5 });
-  });
-
-  card(s, { x: M, y: 5.45, w: CW, h: 0.95 });
-  s.addText(
-    [
-      { text: "Мобильная и веб-версия. ", options: { bold: true, color: INK } },
-      { text: "Мини-приложение — обычные HTML, CSS и JavaScript на HTTPS, вёрстка проверена от 320 px. Функциональность одинакова в обеих версиях; MAX Bridge деградирует мягко, если метод в конкретной сборке недоступен.", options: { color: INK_2 } },
-    ],
-    { x: M + 0.28, y: 5.62, w: CW - 0.56, h: 0.6, fontFace: FONT, fontSize: 12, lineSpacingMultiple: 1.12, isTextBox: true, margin: 0 }
-  );
-  chrome(s, 10, false);
-}
-
-// ====================================================================================
-// 11. Data & integrations
-// ====================================================================================
-{
-  const s = lightSlide();
-  head(s, "Данные и интеграции", "Откуда берутся данные и что мы с ними делаем");
-
-  const cw = (CW - 0.35) / 2;
-  card(s, { x: M, y: 1.5, w: cw, h: 2.05 });
-  s.addText("Данные в решении", { x: M + 0.28, y: 1.7, w: cw - 0.56, h: 0.3, fontFace: FONT, fontSize: 14, bold: true, color: INK, isTextBox: true, margin: 0 });
-  bullets(s, {
-    x: M + 0.28, y: 2.08, w: cw - 0.56, h: 1.3,
-    items: [
-      "Описание бизнеса — вводит сам владелец в мини-приложении",
-      "Профиль и идентификатор MAX — из подписанных параметров",
-      "Телефон клиента — только если он сам им поделился",
-      "Заявки — то, что клиент выбрал в витрине",
-    ],
-  });
-
-  card(s, { x: M, y: 3.75, w: cw, h: 2.15 });
-  s.addText("Что мы НЕ делаем", { x: M + 0.28, y: 3.95, w: cw - 0.56, h: 0.3, fontFace: FONT, fontSize: 14, bold: true, color: INK, isTextBox: true, margin: 0 });
-  bullets(s, {
-    x: M + 0.28, y: 4.33, w: cw - 0.56, h: 1.4,
-    items: [
-      "Не собираем данные, которые пользователь не ввёл сам",
-      "Не имитируем интеграции с государственными системами",
-      "Не передаём токены и секреты в модель и не храним в репозитории",
-      "Не включаем продуктовую аналитику на поверхности мини-аппа",
-    ],
-  });
-
-  const x2 = M + cw + 0.35;
-  card(s, { x: x2, y: 1.5, w: cw, h: 2.05, tint: true });
-  s.addText("Интеграции", { x: x2 + 0.28, y: 1.7, w: cw - 0.56, h: 0.3, fontFace: FONT, fontSize: 14, bold: true, color: INK, isTextBox: true, margin: 0 });
-  bullets(s, {
-    x: x2 + 0.28, y: 2.08, w: cw - 0.56, h: 1.3,
-    items: [
-      "MAX Bot API — platform-api2.max.ru: вебхук, сообщения, кнопки. Реальная",
-      "MAX Bridge — стартовые параметры, запрос контакта. Реальная",
-      "LLM-провайдер — описание → конфигурация витрины, с фоллбэком",
-    ],
-  });
-
-  card(s, { x: x2, y: 3.75, w: cw, h: 2.15 });
-  cardText(s, {
-    x: x2, y: 3.75, w: cw, h: 2.15,
-    title: "Смоделированные данные",
-    body: "В демонстрации используются витрины, созданные нами при проверке сценария: «Автосервис на Лесной» и подобные. Это не реальные организации, а примеры, введённые вручную через того же бота, которым пользуется предприниматель. Данные не подставлялись в обход продуктового сценария.",
-  });
-  chrome(s, 11, false);
-}
-
-// ====================================================================================
-// 12. Scaling (dark)
-// ====================================================================================
-{
-  const s = darkSlide();
-  head(s, "Потенциал масштабирования", "Что остаётся неизменным, а что придётся менять",
-    "Сильное решение тиражируется не потому, что перечислено много регионов, а потому, что понятно, как именно.", true);
-
-  const cw = (CW - 0.35) / 2;
-  card(s, { x: M, y: 1.95, w: cw, h: 2.5, dark: true });
-  s.addText("Ядро продукта — переносится без изменений", {
-    x: M + 0.28, y: 2.15, w: cw - 0.56, h: 0.3, fontFace: FONT, fontSize: 14, bold: true, color: ACCENT_ON_DARK, isTextBox: true, margin: 0,
-  });
-  bullets(s, {
-    x: M + 0.28, y: 2.53, w: cw - 0.56, h: 1.75, dark: true, size: 11.5,
-    items: [
-      "Механика «одно сообщение → работающий сервис в MAX»",
-      "Схема витрины: позиции, цена, длительность, слоты, поля заявки",
-      "Диалог владельца: создание, правка текстом, публикация",
-      "Маршрут заявки: клиент → чат владельца → ответ клиенту",
-      "Модель доверия и проверка подписи стартовых параметров",
-      "Мультитенантный рендер: новый арендатор не требует деплоя",
-    ],
-  });
-
-  const x2 = M + cw + 0.35;
-  card(s, { x: x2, y: 1.95, w: cw, h: 2.5, dark: true });
-  s.addText("Переменная часть — адаптируется под контекст", {
-    x: x2 + 0.28, y: 2.15, w: cw - 0.56, h: 0.3, fontFace: FONT, fontSize: 14, bold: true, color: PINK, isTextBox: true, margin: 0,
-  });
-  bullets(s, {
-    x: x2 + 0.28, y: 2.53, w: cw - 0.56, h: 1.75, dark: true, size: 11.5,
-    items: [
-      "Тип витрины: запись → меню и заказ → заявка. Заложены три типа",
-      "Словарь отрасли: «услуга» / «позиция» / «объект» в подсказках модели",
-      "Правила слотов: длительность, рабочие часы, праздники региона",
-      "Роли участников: один мастер → сотрудники → филиалы",
-      "Интеграции: календарь, складские остатки, онлайн-оплата",
-    ],
-  });
-
-  const cw3 = (CW - 0.3 * 2) / 3;
-  const next = [
-    ["Куда тиражируем первым", "Общепит: то же «выбрать позицию → оставить заявку». Тип menu уже поддержан."],
-    ["Следующий контекст", "Локальная аренда: инвентарь, сутки вместо часов, залог. Понадобится календарь занятости."],
-    ["Что понадобится", "Модерация витрин при росте, лимиты на владельца (заложены), партнёрский профиль MAX."],
-  ];
-  next.forEach(([t, b], i) => {
-    const x = M + i * (cw3 + 0.3);
-    card(s, { x, y: 4.7, w: cw3, h: 1.55, dark: true });
-    cardText(s, { x, y: 4.7, w: cw3, h: 1.55, title: t, body: b, dark: true, size: 11 });
-  });
-  chrome(s, 12, true);
-}
-
-// ====================================================================================
-// 13. Pilot
-// ====================================================================================
-{
-  const s = lightSlide();
-  head(s, "Сценарий пилота", "Первый ограниченный запуск");
-
-  const cw = (CW - 0.3 * 2) / 3;
-  const cells = [
-    ["Для кого и где", "5–10 микросервисов услуг в одном районе одного города. Критерий: ведут запись в личных сообщениях и не имеют сайта."],
-    ["Как встроится в процесс", "Витрина заменяет пересказ прайса и согласование времени. Приём, оплата, сама услуга — как было."],
-    ["Кто участвует", "Владелец (создаёт и подтверждает), его клиенты, мы (смотрим метрики). Внешние владельцы процесса не нужны."],
-    ["Как клиенты получат доступ", "Владелец рассылает ссылку существующим клиентам и вешает QR-код на точке. Аудитория у бизнеса уже есть."],
-    ["Что понадобится", "Верифицированный профиль на «MAX для партнёров», модерация бота, домен с HTTPS, ключ LLM-провайдера."],
-    ["Следующий шаг после пилота", "Если критерий успеха выполнен — открываем тип menu для общепита в том же районе, сохраняя ядро."],
-  ];
-  cells.forEach(([t, b], i) => {
-    const x = M + (i % 3) * (cw + 0.3);
-    const y = 1.5 + Math.floor(i / 3) * 1.85;
-    card(s, { x, y, w: cw, h: 1.68, tint: i === 5 });
-    cardText(s, { x, y, w: cw, h: 1.68, title: t, body: b, size: 11.5 });
-  });
-
-  card(s, { x: M, y: 5.35, w: CW, h: 1.0 });
-  s.addText(
-    [
-      { text: "Метрики пилота: ", options: { bold: true, color: INK } },
-      { text: "доля доведённых записей, время до подтверждения, доля заявок вне рабочих часов, число ручных сообщений на запись — все снимаются самим продуктом и сравниваются с базовой линией, собранной до запуска.", options: { color: INK_2 } },
-    ],
-    { x: M + 0.28, y: 5.55, w: CW - 0.56, h: 0.65, fontFace: FONT, fontSize: 12, lineSpacingMultiple: 1.12, isTextBox: true, margin: 0 }
-  );
-  chrome(s, 13, false);
-}
-
-// ====================================================================================
-// 14. Limits, assumptions, risks
-// ====================================================================================
-{
-  const s = lightSlide();
-  head(s, "Ограничения, риски, допущения", "Что мы знаем и чего пока не знаем",
-    "Разделяем подтверждённое источником и то, что остаётся нашей гипотезой.");
-
-  const cw = (CW - 0.3 * 2) / 3;
-  const cols = [
-    ["ОГРАНИЧЕНИЯ MVP", MAX_BLUE, [
-      "Слоты — текстовые варианты, а не календарь занятости",
-      "Нет онлайн-оплаты: витрина доводит до заявки",
-      "Один владелец на витрину, без сотрудников и ролей",
-      "До 10 витрин на владельца",
-      "Напоминания клиенту пока не отправляются",
+  const cw = (CW - 0.25 * 2) / 3;
+  [
+    ["Стабильность и ошибки", [
+      "Вебхук всегда отвечает 200 и не вызывает модель — MAX не повторяет доставку",
+      "Запрос к MAX API повторяется, только если не дошёл: без дублей сообщений",
+      "Генерация — до трёх попыток, затем шаблон: сценарий не упирается в тупик",
+      "Ошибка в интерфейсе — понятный текст и «Повторить», введённое не теряется",
+      "Повторный прогон сценария — новая витрина со своим адресом; после 10 — понятное сообщение, лишние удаляются кнопкой",
     ]],
-    ["ДОПУЩЕНИЯ — ТРЕБУЮТ ПРОВЕРКИ", "D31169", [
-      "Что заметная доля микросервисов ведёт запись вручную и считает это проблемой",
-      "Что владелец опишет бизнес одним сообщением, а не бросит на полпути",
-      "Что клиенту привычнее записаться в MAX, чем написать в личные сообщения",
-      "Оценки стоимости альтернатив мы не подтверждали исследованием",
+    ["Безопасность и данные", [
+      "Личность в мини-приложении — только из подписи initData по токену бота, срок жизни — час",
+      "Вебхук — секрет в пути, в логах маскируется; неверный секрет → 404",
+      "Владелец видит и меняет только свои витрины и заявки",
+      "Ввод пользователей экранируется в сообщениях бота; в модель уходят только описание и правки",
+      "Секретов в репозитории нет, .env.example без значений",
     ]],
-    ["РИСКИ", "D31169", [
-      "Качество генерации: модель может неверно разобрать описание. Митигация — правка текстом и фоллбэк",
-      "Доступность LLM: витрина собирается черновиком, сценарий не блокируется",
-      "Модерация и доверие: при росте числа арендаторов нужна проверка содержимого",
+    ["Воспроизводимость и документация", [
+      "Все локальные компоненты — одной командой docker compose up --build",
+      "Версии зафиксированы: requirements.txt + requirements.lock, package-lock.json",
+      "README закрывает пункты задания по порядку, с таблицей проверки и ожидаемыми результатами",
+      "54 автотеста: подделка подписи, чужой токен, чужие витрины, сквозной сценарий через HTTP",
     ]],
-  ];
-  cols.forEach(([t, colour, items], i) => {
-    const x = M + i * (cw + 0.3);
-    card(s, { x, y: 1.95, w: cw, h: 3.2 });
+  ].forEach(([t, items], i) => {
+    const x = M + i * (cw + 0.25);
+    card(s, { x, y: 1.45, w: cw, h: 4.05 });
     s.addText(t, {
-      x: x + 0.28, y: 2.15, w: cw - 0.56, h: 0.26,
-      fontFace: FONT, fontSize: 10.5, bold: true, color: colour, charSpacing: 1.2, isTextBox: true, margin: 0,
+      x: x + 0.24, y: 1.64, w: cw - 0.48, h: 0.3, fontFace: FONT, fontSize: 14.5, bold: true, color: INK, isTextBox: true, margin: 0,
     });
-    bullets(s, { x: x + 0.28, y: 2.53, w: cw - 0.56, h: 2.4, size: 11.5, items });
+    bullets(s, { x: x + 0.24, y: 2.08, w: cw - 0.48, h: 3.3, size: 11.5, gap: 6, items });
   });
 
-  card(s, { x: M, y: 5.4, w: CW, h: 1.0, tint: true });
+  card(s, { x: M, y: 5.68, w: CW, h: 0.95, tint: true });
   s.addText(
-    [
-      { text: "Что уже проверено на практике: ", options: { bold: true, color: INK } },
-      { text: "сквозной путь «одно сообщение → заявка в чате владельца» проходит целиком и покрыт 54 автотестами, включая попытки подделать подпись стартовых параметров, подставить чужой токен, переиспользовать просроченные параметры и записаться на услугу, которой в витрине нет.", options: { color: INK_2 } },
-    ],
-    { x: M + 0.28, y: 5.58, w: CW - 0.56, h: 0.68, fontFace: FONT, fontSize: 12, lineSpacingMultiple: 1.12, isTextBox: true, margin: 0 }
+    rich("**Проверено на проде:** витрина из описания собирается за ~9 секунд с реальной моделью, правка — за ~3 секунды; сообщения бота с баннером и кнопками проходят валидацию MAX API.", { color: INK_2 }, INK),
+    { x: M + 0.28, y: 5.84, w: CW - 0.56, h: 0.68, valign: "top", fontFace: FONT, fontSize: 12.5, lineSpacingMultiple: 1.12, isTextBox: true, margin: 0 }
   );
   chrome(s, 14, false);
 }
 
 // ====================================================================================
-// 15. Sources (dark)
+// 15. MAX capabilities - the platform bonus
+// ====================================================================================
+{
+  const s = lightSlide();
+  head(s, "Платформенный бонус · возможности MAX", "Что мы берём у MAX сверх минимума",
+    "Минимум задания — чат-бот с подключённым мини-приложением. Всё ниже — сверх него, и каждая возможность работает в основном сценарии от начала до результата.");
+
+  const code = (text) => ({ text, options: { fontFace: MONO, bold: true, fontSize: 13, color: INK } });
+  const word = (text) => ({ text, options: { bold: true, fontSize: 14, color: INK } });
+  const cw = (CW - 0.25 * 2) / 3;
+  [
+    [[code("requestContact()")], "Телефон клиента из аккаунта MAX одной кнопкой. Запись без ввода номера — меньше ошибок и шагов в форме."],
+    [[code("shareMaxContent()")], "«Поделиться» открывает родной экран MAX «Отправить в чат»: владелец раздаёт ссылку клиентам, не выходя из мессенджера."],
+    [[word("Кнопки "), code("open_app"), word(" с "), code("payload")], "Каждое сообщение бота открывает нужный экран: владельцу — заявки, клиенту — его витрину. Диплинк startapp — для ссылки и QR-кода."],
+    [[word("Профиль из "), code("initData")], "Имя клиента уже подставлено в форму записи, а владелец входит без регистрации — аккаунт MAX и есть вход."],
+    [[code("BackButton"), word(" и подтверждение закрытия")], "Родная кнопка «Назад» в предпросмотре витрины; если закрыть приложение во время сборки, MAX переспросит."],
+    [[code("HapticFeedback")], "Тактильный отклик на ключевые действия на телефоне: сборка готова, заявка подтверждена."],
+  ].forEach(([title, body], i) => {
+    const x = M + (i % 3) * (cw + 0.25);
+    const y = 1.98 + Math.floor(i / 3) * 1.78;
+    card(s, { x, y, w: cw, h: 1.6 });
+    s.addText(title, { x: x + 0.24, y: y + 0.18, w: cw - 0.48, h: 0.32, fontFace: FONT, isTextBox: true, margin: 0 });
+    s.addText(body, {
+      x: x + 0.24, y: y + 0.58, w: cw - 0.48, h: 0.92, valign: "top",
+      fontFace: FONT, fontSize: 11.5, color: INK_2, lineSpacingMultiple: 1.1, isTextBox: true, margin: 0,
+    });
+  });
+
+  card(s, { x: M, y: 5.6, w: CW, h: 0.95, tint: true });
+  s.addText(
+    rich("**Мобильная и веб-версия MAX:** одна вёрстка, проверенная от 320 px. Если клиент MAX не поддерживает метод Bridge, приложение мягко обходится без него — например, «Поделиться» превращается в копирование ссылки.", { color: INK_2 }, INK),
+    { x: M + 0.28, y: 5.76, w: CW - 0.56, h: 0.68, valign: "top", fontFace: FONT, fontSize: 12, lineSpacingMultiple: 1.12, isTextBox: true, margin: 0 }
+  );
+  chrome(s, 15, false);
+}
+
+// ====================================================================================
+// 16. Data & integrations
+// ====================================================================================
+{
+  const s = lightSlide();
+  head(s, "Техническая оценка · данные и интеграции", "Откуда берутся данные и что мы с ними делаем");
+
+  const cw = (CW - 0.25) / 2;
+  const x2 = M + cw + 0.25;
+  const block = (x, y, h, title, items, o = {}) => {
+    card(s, { x, y, w: cw, h, tint: o.tint });
+    s.addText(title, {
+      x: x + 0.26, y: y + 0.18, w: cw - 0.52, h: 0.3, fontFace: FONT, fontSize: 14.5, bold: true, color: INK, isTextBox: true, margin: 0,
+    });
+    bullets(s, { x: x + 0.26, y: y + 0.6, w: cw - 0.52, h: h - 0.75, size: 12, gap: 5, items });
+  };
+  block(M, 1.45, 2.3, "Данные в решении", [
+    "**Описание бизнеса** — вводит сам владелец в мини-приложении",
+    "**Профиль и идентификатор MAX** — из подписанных стартовых параметров",
+    "**Телефон клиента** — только если клиент сам поделился через MAX или ввёл вручную",
+    "**Заявки** — то, что клиент выбрал в витрине",
+  ]);
+  block(M, 3.93, 2.15, "Правила работы с моделью", [
+    "Модель только структурирует текст владельца: цены и контакты не придумывает — чего нет в описании, остаётся пустым",
+    "Результат владелец видит сразу и правит одной фразой",
+    "Модель недоступна — витрина собирается шаблоном, сценарий не блокируется",
+  ]);
+  block(x2, 1.45, 2.55, "Интеграции — все реальные", [
+    "**MAX Bot API** — platform-api2.max.ru: вебхук, сообщения, кнопки",
+    "**MAX Bridge** — стартовые параметры, контакт, «Поделиться», навигация",
+    "**LLM-провайдер** — описание → конфигурация витрины, с детерминированным фоллбэком",
+    "Государственные информационные системы **не используются и не имитируются**",
+  ], { tint: true });
+  card(s, { x: x2, y: 4.18, w: cw, h: 1.9 });
+  cardText(s, {
+    x: x2, y: 4.18, w: cw, h: 1.9, title: "Демонстрационные данные", size: 12, titleSize: 14.5,
+    body: "«Автосервис на Лесной» и заявки на слайдах 8–10 — демо: не реальные организации и клиенты. Витрины созданы через тот же продуктовый сценарий, а экраны сняты с подставленными демо-данными.",
+  });
+  chrome(s, 16, false);
+}
+
+// ====================================================================================
+// 17. Scaling: core and variable part (dark)
+// ====================================================================================
+{
+  const s = darkSlide();
+  head(s, "Потенциал масштабирования · ядро и переменная часть", "Что переносится без изменений, а что адаптируется",
+    "Решение тиражируется не потому, что перечислено много регионов, а потому, что понятно, какая часть меняется.", true);
+
+  const cw = (CW - 0.3) / 2;
+  [
+    ["Ядро — переносится без изменений", ACCENT_ON_DARK, true, [
+      "Механика «одно сообщение → работающий сервис в MAX»",
+      "Схема витрины: позиции, цены, длительность, время, поля заявки",
+      "Маршрут заявки: клиент → чат владельца → ответ клиенту",
+      "Модель доверия и проверка подписи стартовых параметров",
+      "Мультитенантный рендер: новая витрина не требует деплоя",
+    ]],
+    ["Переменная часть — адаптируется под контекст", PINK, false, [
+      "Тип витрины: запись / меню / заявка — **три типа уже есть**",
+      "Словарь отрасли в подсказках модели: услуга, позиция, объект",
+      "Правила времени: длительность, часы работы, праздники региона",
+      "Роли участников: мастер → сотрудники → филиалы",
+      "Интеграции: календарь, складские остатки, оплата",
+    ]],
+  ].forEach(([t, colour, accent, items], i) => {
+    const x = M + i * (cw + 0.3);
+    card(s, { x, y: 1.9, w: cw, h: 2.3, dark: true, accent });
+    s.addText(t, {
+      x: x + 0.26, y: 2.1, w: cw - 0.52, h: 0.3, fontFace: FONT, fontSize: 14.5, bold: true, color: colour, isTextBox: true, margin: 0,
+    });
+    bullets(s, { x: x + 0.26, y: 2.52, w: cw - 0.52, h: 2.0, dark: true, size: 12, gap: 5, items });
+  });
+
+  card(s, { x: M, y: 4.42, w: CW, h: 1.22, dark: true });
+  s.addText(
+    rich("**Где ещё та же проблема — «клиент хочет записаться или заказать, а владелец отвечает вручную»:** кафе и пекарни (предзаказ), аренда инвентаря и помещений, секции и студии (запись на занятия), ремонт и бытовые услуги (вызов мастера). Каждое направление использует готовый тип витрины и меняет только переменную часть. Порядок — на следующем слайде.", { color: ON_DARK_2 }, WHITE),
+    { x: M + 0.28, y: 4.6, w: CW - 0.56, h: 0.92, valign: "top", fontFace: FONT, fontSize: 12.5, lineSpacingMultiple: 1.15, isTextBox: true, margin: 0 }
+  );
+  chrome(s, 17, true);
+}
+
+// ====================================================================================
+// 18. Scaling: replication order
+// ====================================================================================
+{
+  const s = lightSlide();
+  head(s, "Потенциал масштабирования · порядок тиражирования", "Как Витрина переходит из пилота дальше");
+
+  const cw = (CW - 0.16 * 3) / 4;
+  [
+    ["1", "Пилот", "СПб, Василеостровский район, квартал у ЖК «Самоцветы»: 5–10 владельческих точек услуг", [
+      ["Адаптируем", "ничего — ядро как есть"],
+      ["Ресурсы", "команда, домен с HTTPS, ключ LLM"],
+      ["Риск", "владельцы не захотят менять привычку — отбираем тех, кто сам жалуется на переписку"],
+      ["Дальше, если", "выполнен критерий успеха (слайд 11)"],
+    ]],
+    ["2", "Соседние ниши", "Тот же район: кафе, пекарни, магазины у дома", [
+      ["Адаптируем", "тип «меню» уже есть; словарь и подсказки модели под общепит"],
+      ["Ресурсы", "те же; ограничиваемся предзаказом и самовывозом"],
+      ["Риск", "заказ без оплаты не доходит до денег — меряем долю забранных заказов"],
+      ["Дальше, если", "доля доведённых заказов не ниже, чем у записи"],
+    ]],
+    ["3", "Сети услуг", "Другие районы и города через сети барбершопов, автосервисов, студий", [
+      ["Адаптируем", "роли «сеть → филиал → мастер», витрина на филиал — первая доработка ядра"],
+      ["Ресурсы", "разработка ролей, сопровождение владельцев сетей"],
+      ["Риск", "решает головной офис — длинный цикл продаж"],
+      ["Дальше, если", "сеть переводит на витрины все свои точки"],
+    ]],
+    ["4", "Регионы", "Ленинградская область, затем другие регионы — через центры «Мой бизнес» и МСП.РФ", [
+      ["Адаптируем", "правила времени и праздники региона; модерация витрин"],
+      ["Ресурсы", "партнёрство, обучение консультантов, бюджет на модель"],
+      ["Риск", "качество генерации в новых отраслях, лимит MAX API — 30 запросов в секунду"],
+      ["Механика", "консультант собирает витрину вместе с предпринимателем на приёме"],
+    ]],
+  ].forEach(([n, title, where, facts], i) => {
+    const x = M + i * (cw + 0.16);
+    card(s, { x, y: 1.42, w: cw, h: 4.1, tint: i === 0 });
+    stepMark(s, x + 0.2, 1.6, n);
+    s.addText(title, {
+      x: x + 0.56, y: 1.58, w: cw - 0.76, h: 0.3, fontFace: FONT, fontSize: 14.5, bold: true, color: INK, isTextBox: true, margin: 0,
+    });
+    s.addText(where, {
+      x: x + 0.2, y: 2.0, w: cw - 0.4, h: 0.75, valign: "top",
+      fontFace: FONT, fontSize: 11.5, bold: true, color: INK, lineSpacingMultiple: 1.08, isTextBox: true, margin: 0,
+    });
+    const runs = [];
+    facts.forEach(([label, text], k) => {
+      runs.push({ text: label.toUpperCase(), options: { fontSize: 8.5, bold: true, color: INK_3, charSpacing: 1, breakLine: true, paraSpaceBefore: k ? 6 : 0 } });
+      runs.push({ text, options: { fontSize: 10.5, color: INK_2, breakLine: k !== facts.length - 1 } });
+    });
+    s.addText(runs, {
+      x: x + 0.2, y: 2.8, w: cw - 0.4, h: 2.65, valign: "top", fontFace: FONT, lineSpacingMultiple: 1.06, isTextBox: true, margin: 0,
+    });
+  });
+
+  card(s, { x: M, y: 5.7, w: CW, h: 0.78, tint: true });
+  s.addText(
+    rich("**Горизонт:** та же механика «одно сообщение → работающий сервис в MAX» подходит не только бизнесу — продуктовые команды проверяют гипотезы без разработки, люди делают небольшие сервисы для себя. Это ядро AIRuntime; Витрина — первый вертикальный сценарий на нём.", { color: INK_2 }, INK),
+    { x: M + 0.26, y: 5.8, w: CW - 0.52, h: 0.6, valign: "middle", fontFace: FONT, fontSize: 11.5, lineSpacingMultiple: 1.1, isTextBox: true, margin: 0 }
+  );
+  chrome(s, 18, false);
+}
+
+// ====================================================================================
+// 19. Pilot
+// ====================================================================================
+{
+  const s = lightSlide();
+  head(s, "Сценарий пилотного запуска", "Первый ограниченный запуск");
+
+  const cw = (CW - 0.2 * 2) / 3;
+  [
+    ["Где и для кого", "Санкт-Петербург, Василеостровский район — квартал у ЖК «Самоцветы» (Уральская ул., наб. реки Смоленки). 5–10 владельческих точек услуг, которые ведут запись в личных сообщениях."],
+    ["Почему здесь", "Мы уже работаем в этом квартале: карта около 160 организаций по 2ГИС и Яндекс Картам и маршрут обхода (август 2026). Знаем, где решает владелец, а где — головной офис сети."],
+    ["Как встроится в процесс", "Витрина заменяет пересказ прайса и согласование времени. Приём, оплата и сама услуга остаются как были."],
+    ["Кто участвует", "Владелец создаёт витрину и подтверждает записи, клиенты записываются, команда сопровождает и снимает метрики. Внешние владельцы процесса не нужны."],
+    ["Каналы привлечения", "Владельцев — лично, обходом: хозяин студии или кафе решает сам и сразу. Клиентов — ссылкой в переписке и QR-кодом на стойке."],
+    ["Что понадобится и сроки", "Профиль на «MAX для партнёров», домен с HTTPS, ключ LLM. Неделя 0 — отбор и базовая линия, недели 1–3 — пилот, неделя 4 — решение."],
+  ].forEach(([t, b], i) => {
+    const x = M + (i % 3) * (cw + 0.2);
+    const y = 1.45 + Math.floor(i / 3) * 1.95;
+    card(s, { x, y, w: cw, h: 1.78, tint: i === 0 });
+    cardText(s, { x, y, w: cw, h: 1.78, title: t, body: b, size: 12, titleSize: 14.5 });
+  });
+
+  card(s, { x: M, y: 5.45, w: CW, h: 1.05, tint: true });
+  s.addText(
+    rich("**Метрики пилота** — доля доведённых записей, время до подтверждения, доля заявок вне рабочих часов, ручных сообщений на запись (слайд 11). **Следующий шаг** при успехе — соседние ниши того же района на готовом типе «меню» (слайд 18).", { color: INK_2 }, INK),
+    { x: M + 0.28, y: 5.62, w: CW - 0.56, h: 0.75, valign: "top", fontFace: FONT, fontSize: 12.5, lineSpacingMultiple: 1.12, isTextBox: true, margin: 0 }
+  );
+  chrome(s, 19, false);
+}
+
+// ====================================================================================
+// 20. Limits, assumptions, risks
+// ====================================================================================
+{
+  const s = lightSlide();
+  head(s, "Ограничения, риски, допущения", "Что мы знаем и чего пока не знаем",
+    "Разделяем подтверждённое источником или замером и то, что остаётся нашей гипотезой.");
+
+  const cw = (CW - 0.25 * 2) / 3;
+  [
+    ["Ограничения MVP", PILL.blue, [
+      "Время — текстовые варианты, пересечения записей не проверяются",
+      "Один владелец на витрину, до 10 витрин",
+      "Ответ клиенту доставляется, если MAX разрешает боту написать этому пользователю",
+      "Работает там, где клиенты бизнеса уже пользуются MAX",
+      "Границы объёма — слайд 12",
+    ]],
+    ["Допущения — требуют проверки", PILL.guess, [
+      "Заметная доля микросервисов ведёт запись вручную и считает это проблемой",
+      "Владелец опишет бизнес одним сообщением, а не бросит на полпути",
+      "Клиенту привычнее записаться в MAX, чем написать в личные сообщения",
+      "Оценки стоимости и сроков альтернатив мы не подтверждали и в расчёт эффекта не берём",
+    ]],
+    ["Риски и что с ними делаем", PILL.guess, [
+      "**Качество генерации** — модель может неверно разобрать описание: правка одной фразой и шаблон",
+      "**Доступность модели** — витрина собирается шаблоном, сценарий не блокируется",
+      "**Модерация и доверие** — при росте нужна проверка содержимого витрин",
+    ]],
+  ].forEach(([t, colours, items], i) => {
+    const x = M + i * (cw + 0.25);
+    card(s, { x, y: 1.85, w: cw, h: 3.55 });
+    pill(s, { x: x + 0.24, y: 2.05, text: t, ...colours });
+    bullets(s, { x: x + 0.24, y: 2.5, w: cw - 0.48, h: 2.8, size: 12, gap: 6, items });
+  });
+
+  card(s, { x: M, y: 5.58, w: CW, h: 1.02, tint: true });
+  s.addText(
+    rich("**Что уже подтверждено:** сквозной путь «описание → витрина → запись → заявка владельцу → ответ клиенту» проходит на проде целиком и покрыт 54 автотестами — включая подделку подписи, чужой токен, просроченные параметры и запись на услугу, которой в витрине нет.", { color: INK_2 }, INK),
+    { x: M + 0.28, y: 5.74, w: CW - 0.56, h: 0.75, valign: "top", fontFace: FONT, fontSize: 12.5, lineSpacingMultiple: 1.12, isTextBox: true, margin: 0 }
+  );
+  chrome(s, 20, false);
+}
+
+// ====================================================================================
+// 21. Sources (dark)
 // ====================================================================================
 {
   const s = darkSlide();
   head(s, "Источники", "На что мы опирались", null, true);
 
-  const cw = (CW - 0.4) / 2;
-  card(s, { x: M, y: 1.7, w: cw, h: 3.0, dark: true });
-  s.addText("Данные об аудитории", {
-    x: M + 0.28, y: 1.92, w: cw - 0.56, h: 0.3, fontFace: FONT, fontSize: 14, bold: true, color: WHITE, isTextBox: true, margin: 0,
-  });
-  bullets(s, {
-    x: M + 0.28, y: 2.3, w: cw - 0.56, h: 1.85, dark: true, size: 11.5,
-    items: [
-      "ФНС России — Единый реестр субъектов МСП, июль 2026: 6,6 млн субъектов, 81,8% всех действующих юрлиц и ИП, рост 3,5% год к году",
-      "Росстат по данным Роструда — заявленная работодателями потребность в работниках, конец мая 2026",
-    ],
-  });
-  s.addText("Показатели приведены по материалам задания трека со ссылкой на первоисточники.", {
-    x: M + 0.28, y: 4.22, w: cw - 0.56, h: 0.4, fontFace: FONT, fontSize: 10.5, color: "7C8AA6", isTextBox: true, margin: 0,
-  });
-
-  const x2 = M + cw + 0.4;
-  card(s, { x: x2, y: 1.7, w: cw, h: 3.0, dark: true });
-  s.addText("Техническая документация", {
-    x: x2 + 0.28, y: 1.92, w: cw - 0.56, h: 0.3, fontFace: FONT, fontSize: 14, bold: true, color: WHITE, isTextBox: true, margin: 0,
-  });
-  bullets(s, {
-    x: x2 + 0.28, y: 2.3, w: cw - 0.56, h: 2.25, dark: true, size: 11.5,
-    items: [
-      "MAX для разработчиков — API ботов: методы, вебхуки, типы кнопок",
-      "MAX Bridge — стартовые параметры, запрос контакта, контекст запуска",
-      "Валидация данных MAX — алгоритм проверки подписи",
-      "Правила размещения чат-ботов и мини-приложений на платформе MAX",
-      "Минцифры России — корневой сертификат для доступа к API",
-    ],
+  const cw = (CW - 0.3) / 2;
+  [
+    ["Задача и аудитория", [
+      "**Задание трека «Эффективный бизнес»** — постановка, критерии оценки, рекомендации, формат сдачи",
+      "**ФНС России** — Единый реестр субъектов МСП, июль 2026: 6,6 млн субъектов, 81,8% всех действующих юрлиц и ИП, рост 3,5% год к году (приведено по заданию трека)",
+      "**Разведка квартала** у ЖК «Самоцветы», СПб, август 2026 — около 160 организаций по 2ГИС и Яндекс Картам, маршрут обхода: выбор пилотной площадки",
+    ]],
+    ["Техническая документация", [
+      "**MAX для разработчиков** — API ботов: методы, вебхуки, кнопки, лимиты запросов",
+      "**OpenAPI-спецификация MAX** — github.com/max-messenger/api-schema: форма кнопок и сообщений сверена по ней",
+      "**MAX Bridge** и **валидация данных** — стартовые параметры, контакт, «Поделиться», проверка подписи",
+      "**Минцифры России** — корневой сертификат для доступа к API платформы",
+    ]],
+  ].forEach(([t, items], i) => {
+    const x = M + i * (cw + 0.3);
+    card(s, { x, y: 1.55, w: cw, h: 3.1, dark: true });
+    s.addText(t, {
+      x: x + 0.26, y: 1.75, w: cw - 0.52, h: 0.3, fontFace: FONT, fontSize: 14.5, bold: true, color: WHITE, isTextBox: true, margin: 0,
+    });
+    bullets(s, { x: x + 0.26, y: 2.2, w: cw - 0.52, h: 2.35, dark: true, size: 12, gap: 7, items });
   });
 
-  card(s, { x: M, y: 4.95, w: CW, h: 0.95, dark: true });
+  card(s, { x: M, y: 4.9, w: CW, h: 0.95, dark: true, accent: true });
   s.addText(
-    "Документация MAX развивается: перед сдачей состав API и методов сверялся с актуальной версией разделов «API ботов», «MAX Bridge» и «Валидация данных», а не с примерами из сторонних источников.",
-    { x: M + 0.28, y: 5.15, w: CW - 0.56, h: 0.6, fontFace: FONT, fontSize: 11.5, color: ON_DARK_2, lineSpacingMultiple: 1.12, isTextBox: true, margin: 0 }
+    "Документация MAX развивается: перед сдачей состав API и методов сверялся с актуальными разделами «API ботов», «MAX Bridge» и «Валидация данных» и с официальной спецификацией, а не с примерами из сторонних источников.",
+    { x: M + 0.28, y: 5.05, w: CW - 0.56, h: 0.68, valign: "top", fontFace: FONT, fontSize: 11.5, color: ON_DARK_2, lineSpacingMultiple: 1.12, isTextBox: true, margin: 0 }
   );
-  chrome(s, 15, true);
+  chrome(s, 21, true);
 }
 
 // ====================================================================================
-// 16. Closing - bookends the cover on the same background
+// 22. Closing - bookends the cover on the same background
 // ====================================================================================
 // Its one job is to hand the jury a way to try the product in the next ten seconds, hence
 // the QR code rather than a list of URLs to retype. Boxes are deck.html's.
@@ -1160,7 +1428,23 @@ function darkSlide() {
     fontFace: FONT, fontSize: 11, color: INK_2, lineSpacingMultiple: 1.1, isTextBox: true, margin: 0,
   });
 
-  chrome(s, 16, true);
+  chrome(s, 22, true);
 }
 
-pres.writeFile({ fileName: "presentation.pptx" }).then(() => console.log("wrote presentation.pptx"));
+/**
+ * pptxgenjs repeats a paragraph's <a:pPr> in front of every run after the first, which the
+ * schema does not allow (one pPr, first). PowerPoint forgives it today; strip the repeats
+ * so the file is valid rather than tolerated. Compressing also keeps the deck well under
+ * the repository's 1000 KB limit - pptxgenjs stores slide XML uncompressed.
+ */
+async function save(fileName) {
+  const zip = await JSZip.loadAsync(await pres.write({ outputType: "nodebuffer" }));
+  for (const name of Object.keys(zip.files).filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n))) {
+    const xml = await zip.file(name).async("string");
+    zip.file(name, xml.replace(/(<\/a:r>|<a:br\/>)<a:pPr\b[^>]*?(?:\/>|>[\s\S]*?<\/a:pPr>)/g, "$1"));
+  }
+  fs.writeFileSync(fileName, await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" }));
+  console.log(`wrote ${fileName}`);
+}
+
+save("presentation.pptx");

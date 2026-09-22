@@ -138,23 +138,46 @@ def rounded_mask(size, radius, tight_corner=None, scale=4):
     return big.resize(size, Image.LANCZOS)
 
 
+# Every mini-app screen the deck shows, owner's path first, then the customer's.
+SCREENS = (
+    "owner-compose",
+    "owner-building",
+    "owner-ready",
+    "storefront",
+    "booking",
+    "customer-done",
+)
+
+
+def palette_png(im, path):
+    im.quantize(colors=256, method=Image.Quantize.FASTOCTREE, dither=Image.Dither.NONE).save(
+        path, optimize=True
+    )
+
+
 def screens():
-    """The three mini-app screenshots with rounded corners, for the pptx phone frames.
+    """The mini-app screenshots with rounded corners, for the pptx phone frames.
 
     pptxgenjs can only crop an image to an ellipse, so the rounding is baked in here and
     the bezel is a rounded shape drawn behind it. 600px wide is ~290 dpi at the size the
-    closing and cover slides use - plenty for UI text - and a palette PNG keeps each one
-    a fraction of the original.
+    cover slide uses - plenty for UI text - and a palette PNG keeps each one a fraction of
+    the original.
     """
-    for name in ("storefront", "booking", "owner"):
+    for name in SCREENS:
         src = Image.open(HERE / f"shot-{name}.png").convert("RGB")
         width = 600
         im = src.resize((width, round(src.height * width / src.width)), Image.LANCZOS)
         # 16/268 of the frame width is the corner the CSS phone uses; keep them identical.
         im.putalpha(rounded_mask(im.size, round(width * 16 / 254)))
-        im.quantize(colors=256, method=Image.Quantize.FASTOCTREE, dither=Image.Dither.NONE).save(
-            HERE / f"screen-{name}.png", optimize=True
-        )
+        palette_png(im, HERE / f"screen-{name}.png")
+
+
+def lead_card():
+    """The owner's lead card on slide 10, cut from the real screen: rounded like .lead-card img
+    (14px on a 318px-wide image) so the pptx can lay it on the same pale frame."""
+    im = Image.open(HERE / "shot-owner-lead-card.png").convert("RGB")
+    im.putalpha(rounded_mask(im.size, round(im.width * 14 / 318)))
+    palette_png(im, HERE / "card-owner-lead.png")
 
 
 def bubble():
@@ -193,9 +216,11 @@ if __name__ == "__main__":
     cover()
     dark()
     screens()
+    lead_card()
     bubble()
     qr()
     mark()
     print(
-        "wrote bg-cover.jpg, bg-dark.png, screen-*.png, bubble-owner.png, qr-bot.png, mark-airuntime.png"
+        "wrote bg-cover.jpg, bg-dark.png, screen-*.png, card-owner-lead.png, bubble-owner.png, qr-bot.png, "
+        "mark-airuntime.png"
     )

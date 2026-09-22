@@ -77,3 +77,8 @@ backend/.email-preview/
 # command in that folder's README.
 docs/max-presentation/presentation.pdf
 docs/max-presentation/node_modules/
+
+# Presentation: the jury copy carries working tokens, never commit it
+docs/max-presentation/.secrets.env
+docs/max-presentation/deck.filled.html
+docs/max-presentation/presentation.jury.pdf
