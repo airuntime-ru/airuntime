@@ -4,9 +4,11 @@
 <meta charset="utf-8" />
 <title>AIRuntime — баннер приветствия бота</title>
 <!--
-  Rendered to frontend/public/brand/max-welcome-v4.jpg. MAX's API accepts a 16:9 still
-  more reliably than 3:2 (v3 was refused and the welcome went out without a picture).
-  The chat bubble then cover-crops toward ~3:2, so type sits in a padded safe area.
+  Rendered to frontend/public/brand/max-welcome-v5.jpg.
+
+  MAX's API prefers a 16:9 still. The chat bubble then cover-crops toward a taller
+  frame and rounds the corners, which ate the left of v4 (120px inset). Content now
+  sits in a ~1:1 safe column so a letter is not lost to the crop or the radius.
 -->
 <style>
   html, body { margin: 0; padding: 0; width: 1280px; height: 720px; overflow: hidden; }
@@ -19,25 +21,25 @@
   .banner {
     position: relative;
     width: 1280px; height: 720px; overflow: hidden;
-    background: #05070f url("bg-cover.jpg") 62% 50% / cover no-repeat;
+    background: #05070f url("bg-cover.jpg") 50% 50% / cover no-repeat;
     color: #fff;
   }
   .copy {
-    position: absolute; left: 120px; top: 0; bottom: 0; width: 680px;
+    position: absolute; left: 310px; top: 0; bottom: 0; width: 430px;
     display: flex; flex-direction: column; justify-content: center;
   }
-  .lockup { display: flex; align-items: center; gap: 12px; margin-bottom: 26px; font-size: 24px; font-weight: 800; letter-spacing: .04em; }
-  .lockup img { width: 40px; height: 40px; }
+  .lockup { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; font-size: 18px; font-weight: 800; letter-spacing: .04em; }
+  .lockup img { width: 32px; height: 32px; }
   .lockup .x { font-weight: 300; color: rgba(255,255,255,.6); letter-spacing: 0; }
-  .lockup .max { display: inline-flex; align-items: center; gap: 10px; letter-spacing: -.01em; font-size: 26px; }
-  .lockup .max img { width: 40px; height: 40px; }
-  h1 { margin: 0; font-size: 80px; line-height: .95; letter-spacing: -.05em; font-weight: 800; }
-  .lead { margin: 22px 0 0; font-size: 32px; line-height: 1.28; color: rgba(234,241,255,.88); letter-spacing: -.01em; }
+  .lockup .max { display: inline-flex; align-items: center; gap: 8px; letter-spacing: -.01em; font-size: 20px; }
+  .lockup .max img { width: 32px; height: 32px; }
+  h1 { margin: 0; font-size: 56px; line-height: .95; letter-spacing: -.05em; font-weight: 800; }
+  .lead { margin: 16px 0 0; font-size: 24px; line-height: 1.28; color: rgba(234,241,255,.88); letter-spacing: -.01em; }
   .lead b { color: #fff; font-weight: 700; }
 
   .phone {
-    --pw: 220px;
-    position: absolute; right: 120px; top: 50%; transform: translateY(-50%);
+    --pw: 170px;
+    position: absolute; right: 310px; top: 50%; transform: translateY(-50%);
     width: var(--pw);
     border-radius: calc(var(--pw) * .082); padding: calc(var(--pw) * .026);
     background: linear-gradient(160deg, #2e374c, #141a28);

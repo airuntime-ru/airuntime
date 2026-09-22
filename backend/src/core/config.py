@@ -95,7 +95,7 @@ class Settings(BaseSettings):
     # keyword fallback when the platform default moves. Must exist on OPENAI_BASE_URL.
     max_wizard_model: str = "~anthropic/claude-haiku-latest"
     # Banner on the bot's welcome message. MAX downloads it from this URL itself, so it
-    # must be public HTTPS. Empty = <frontend>/brand/max-welcome-v4.jpg; "-" = no banner.
+    # must be public HTTPS. Empty = <frontend>/brand/max-welcome-v5.jpg; "-" = no banner.
     # The filename is the cache-buster: MAX reuses a previously fetched URL, so a new
     # picture has to live at a new path or the chat keeps showing the old one.
     max_welcome_image_url: str | None = None
@@ -247,7 +247,7 @@ class Settings(BaseSettings):
         configured = (self.max_welcome_image_url or "").strip()
         if configured == "-":
             return ""
-        return configured or f"{self.resolved_frontend_url.rstrip('/')}/brand/max-welcome-v4.jpg"
+        return configured or f"{self.resolved_frontend_url.rstrip('/')}/brand/max-welcome-v5.jpg"
 
     def build_max_service_link(self, slug: str) -> str:
         """Deep link that opens the storefront for ``slug`` inside the MAX bot."""
