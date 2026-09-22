@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field, field_validator
 # Three storefront shapes cover the services micro-business actually asks for. They differ
 # in wording and in whether a time slot is part of the request, not in structure.
 SERVICE_KINDS = ("booking", "menu", "landing")
+SERVICE_MOODS = ("calm", "warm", "bold", "minimal")
 
 MAX_ITEMS = 24
 MAX_SLOTS = 12
@@ -107,15 +108,20 @@ class ServiceConfig(BaseModel):
     tagline: str = Field(default="", max_length=160)
     about: str = Field(default="", max_length=600)
     accent: str = "#2E7CF6"
+    # Visual register of the storefront. The mini app is one renderer, so mood is how a
+    # tutor page stops looking like an auto shop: palette and hero, not a new template.
+    mood: str = "bold"
     contacts: ServiceContacts = Field(default_factory=ServiceContacts)
     items: list[ServiceItem] = Field(default_factory=list)
-    # Human-readable slots ("Сегодня 14:00"). A real calendar is deliberately out of MVP
-    # scope: the owner confirms in the bot, which is how a one-person business works anyway.
+    # Human-readable slots ("Вт 23 сен, 16:00"). The owner's calendar parses them.
     slots: list[str] = Field(default_factory=list)
     # Blank by default on purpose: normalise() fills the wording that fits the kind, and a
     # non-empty default here would silently win over it ("Записаться" on a menu).
     cta_label: str = Field(default="", max_length=40)
     success_message: str = Field(default="", max_length=160)
+    # Placeholder on the comment field. Must match the business: "марка авто" on a tutor
+    # page is how the form starts looking copied from the demo.
+    comment_hint: str = Field(default="", max_length=80)
     ask_phone: bool = True
     ask_comment: bool = True
 
@@ -125,7 +131,15 @@ class ServiceConfig(BaseModel):
         kind = str(value or "").strip().lower()
         return kind if kind in SERVICE_KINDS else "booking"
 
-    @field_validator("title", "tagline", "about", "cta_label", "success_message", mode="before")
+    @field_validator("mood", mode="before")
+    @classmethod
+    def _mood(cls, value: object) -> str:
+        mood = str(value or "").strip().lower()
+        return mood if mood in SERVICE_MOODS else "bold"
+
+    @field_validator(
+        "title", "tagline", "about", "cta_label", "success_message", "comment_hint", mode="before"
+    )
     @classmethod
     def _text(cls, value: object) -> str:
         return str(value or "").strip()
@@ -162,6 +176,12 @@ DEFAULT_SUCCESS_BY_KIND = {
     "landing": "Заявка принята — свяжемся с вами",
 }
 
+DEFAULT_COMMENT_HINT_BY_KIND = {
+    "booking": "Пожелания к записи",
+    "menu": "Аллергии, пожелания к заказу",
+    "landing": "Что нужно обсудить",
+}
+
 
 def normalise(config: ServiceConfig) -> ServiceConfig:
     """Fill the per-kind wording the model left blank.
@@ -174,6 +194,8 @@ def normalise(config: ServiceConfig) -> ServiceConfig:
         data["cta_label"] = DEFAULT_CTA_BY_KIND.get(config.kind, "Отправить")
     if not data["success_message"]:
         data["success_message"] = DEFAULT_SUCCESS_BY_KIND.get(config.kind, "Заявка принята")
+    if not data["comment_hint"]:
+        data["comment_hint"] = DEFAULT_COMMENT_HINT_BY_KIND.get(config.kind, "Пожелания или вопрос")
     if config.kind != "booking":
         # Only a booking asks "when" - a menu order or an enquiry has no slot.
         data["slots"] = []

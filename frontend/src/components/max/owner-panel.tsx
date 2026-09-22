@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Storefront } from "@/components/max/storefront";
+import { filterLeadsForDay, OwnerCalendar } from "@/components/max/owner-calendar";
 import {
   MaxApiError,
   createService,
@@ -147,12 +148,12 @@ function pluralNew(count: number): string {
   return "новых";
 }
 
-function pluralItems(count: number): string {
+function pluralLeads(count: number): string {
   const mod10 = count % 10;
   const mod100 = count % 100;
-  if (mod10 === 1 && mod100 !== 11) return `${count} позиция`;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${count} позиции`;
-  return `${count} позиций`;
+  if (mod10 === 1 && mod100 !== 11) return `${count} заявка`;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${count} заявки`;
+  return `${count} заявок`;
 }
 
 function formatCreated(value: string | null): string {
@@ -205,6 +206,7 @@ export function OwnerPanel() {
   const [editNote, setEditNote] = useState("");
   const [confirmDeleteSlug, setConfirmDeleteSlug] = useState("");
   const [previewSlug, setPreviewSlug] = useState("");
+  const [calendarDay, setCalendarDay] = useState<string | null>(null);
 
   const apply = useCallback((result: { services: OwnerService[]; leads: Lead[] } | Error) => {
     if (!(result instanceof Error)) {
@@ -463,7 +465,7 @@ export function OwnerPanel() {
       </div>
       <p className="max-progress-title">Собираем страницу записи…</p>
       <p className="max-note" style={{ marginTop: 4 }}>
-        Обычно это около десяти секунд. Не закрывайте приложение.
+        Обычно меньше минуты. Не закрывайте приложение.
       </p>
       {brief.trim() ? <p className="max-progress-brief">«{brief.trim()}»</p> : null}
     </section>
@@ -594,6 +596,7 @@ export function OwnerPanel() {
 
   const newLeads = leads.filter((lead) => lead.status === "new");
   const rest = leads.filter((lead) => lead.status !== "new");
+  const visibleLeads = filterLeadsForDay([...newLeads, ...rest], calendarDay);
 
   return (
     <div className="max-shell">
@@ -617,10 +620,8 @@ export function OwnerPanel() {
           const editing = editingSlug === service.slug;
           const summary = [
             KIND_LABEL[service.config.kind],
-            service.config.items.length ? pluralItems(service.config.items.length) : "",
-          ]
-            .filter(Boolean)
-            .join(" · ");
+            pluralLeads(service.lead_count ?? 0),
+          ].join(" · ");
           return (
             <li
               key={service.slug}
@@ -724,14 +725,26 @@ export function OwnerPanel() {
         })}
       </ul>
 
+      <h2 className="max-section-title">Календарь</h2>
+      <OwnerCalendar leads={leads} selectedKey={calendarDay} onSelect={setCalendarDay} />
+      {calendarDay ? (
+        <button type="button" className="max-linklike" onClick={() => setCalendarDay(null)}>
+          Показать все заявки
+        </button>
+      ) : null}
+
       <h2 className="max-section-title">
-        Заявки{newLeads.length > 0 ? ` · ${newLeads.length} ${pluralNew(newLeads.length)}` : ""}
+        {calendarDay
+          ? `Заявки · ${visibleLeads.length}`
+          : `Заявки${newLeads.length > 0 ? ` · ${newLeads.length} ${pluralNew(newLeads.length)}` : ""}`}
       </h2>
       {leads.length === 0 ? (
         <p className="max-note">Заявок пока нет. Отправьте ссылку клиентам или повесьте QR-код.</p>
+      ) : visibleLeads.length === 0 ? (
+        <p className="max-note">На этот день записей нет.</p>
       ) : (
         <ul className="max-list">
-          {[...newLeads, ...rest].map((lead) => (
+          {visibleLeads.map((lead) => (
             <li key={lead.id} className="max-sheet max-lead">
               <div className="max-lead-head">
                 <span className="max-option-title">{lead.customer_name || "Без имени"}</span>

@@ -14,6 +14,7 @@ import json
 import logging
 import re
 import time
+from datetime import datetime
 from typing import Any
 from urllib.parse import quote
 
@@ -475,6 +476,22 @@ class TestGeneratorFailsLoudly:
         assert used_llm is False
         assert config.kind == "menu"
 
+    def test_a_tutor_fallback_does_not_invent_a_catalog(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def boom(*args: Any, **kwargs: Any) -> str:
+            raise RuntimeError("routerai/nope: HTTP 400")
+
+        monkeypatch.setattr(generator, "_complete", boom)
+        config, used_llm = asyncio.run(
+            generator.generate_config("Репетитор по математике, ЕГЭ, занятие 1500")
+        )
+        assert used_llm is False
+        assert config.kind == "booking"
+        assert config.mood == "calm"
+        assert len(config.items) == 1
+        assert "авто" not in config.comment_hint.lower()
+
 
 # --------------------------------------------------------------------------------------
 # Storefront schema
@@ -509,6 +526,43 @@ class TestServiceConfig:
     def test_slug_transliterates_russian_titles(self) -> None:
         assert slugify("Автосервис на Лесной") == "avtoservis-na-lesnoi"
         assert slugify("!!!") == "service"
+
+    def test_comment_hint_is_generic_not_about_cars(self) -> None:
+        config = normalise(ServiceConfig.model_validate({"kind": "booking", "title": "Репетитор"}))
+        assert config.comment_hint
+        assert "авто" not in config.comment_hint.lower()
+        assert config.mood in {"calm", "warm", "bold", "minimal"}
+
+    def test_unknown_mood_falls_back_to_bold(self) -> None:
+        config = ServiceConfig.model_validate({"title": "Студия", "mood": "neon"})
+        assert config.mood == "bold"
+
+
+class TestSlotLabels:
+    def test_today_and_tomorrow_are_relative_to_the_lead_not_now(self) -> None:
+        from src.services.max.slots import MSK, parse_slot
+
+        created = datetime(2026, 9, 22, 20, 0, tzinfo=MSK)
+        today = parse_slot("Сегодня 14:00", relative_to=created)
+        tomorrow = parse_slot("Завтра 10:00", relative_to=created)
+        assert today is not None and today.day == 22 and today.hour == 14
+        assert tomorrow is not None and tomorrow.day == 23 and tomorrow.hour == 10
+
+    def test_dated_russian_label(self) -> None:
+        from src.services.max.slots import MSK, format_slot, parse_slot
+
+        created = datetime(2026, 9, 22, 12, 0, tzinfo=MSK)
+        parsed = parse_slot("Ср 23 сен, 16:00", relative_to=created)
+        assert parsed is not None
+        assert parsed.day == 23 and parsed.month == 9 and parsed.hour == 16
+        assert "сен" in format_slot(parsed) and "16:00" in format_slot(parsed)
+
+    def test_noise_is_not_a_datetime(self) -> None:
+        from src.services.max.slots import MSK, parse_slot
+
+        created = datetime(2026, 9, 22, 12, 0, tzinfo=MSK)
+        assert parse_slot("после уроков", relative_to=created) is None
+        assert parse_slot("", relative_to=created) is None
 
 
 # --------------------------------------------------------------------------------------
@@ -662,6 +716,27 @@ class TestOwnerToCustomerFlow:
         lead = db.query(MaxLead).one()
         assert lead.max_user_id == CUSTOMER_ID
         assert lead.status == "new"
+
+        overview = client.get("/api/v1/max/miniapp/owner/overview", headers=owner_headers())
+        assert overview.status_code == 200
+        card = overview.json()["services"][0]
+        assert card["lead_count"] == 1
+        assert card["new_leads"] == 1
+
+        mine = client.get(
+            f"/api/v1/max/miniapp/service/{service['slug']}",
+            headers=customer_headers(service["slug"]),
+        )
+        assert mine.status_code == 200
+        history = mine.json()["my_leads"]
+        assert [row["item_title"] for row in history] == ["Диагностика"]
+        assert history[0]["scheduled_at"]
+
+        stranger = client.get(
+            f"/api/v1/max/miniapp/service/{service['slug']}",
+            headers=customer_headers(service["slug"], user_id=CUSTOMER_ID + 7),
+        )
+        assert stranger.json()["my_leads"] == []
 
         # The owner is told - by user id, since they have no dialog with the bot yet - with
         # one button that opens their leads in the app.

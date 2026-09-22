@@ -17,16 +17,49 @@ import {
   MaxApiError,
   createLead,
   fetchService,
+  type CustomerLead,
   type ServiceConfig,
   type ServiceItem,
 } from "@/lib/max/api";
 import { getInitDataUnsafe, requestContact } from "@/lib/max/bridge";
+import { commentHint, kindKicker, storefrontMood } from "@/lib/max/theme";
 
 type Phase = "loading" | "ready" | "submitting" | "done" | "error";
 
 function priceLabel(item: ServiceItem): string {
   if (item.price_rub === null || item.price_rub === undefined) return "";
   return `${item.price_rub.toLocaleString("ru-RU")} ₽`;
+}
+
+function historyStatus(status: CustomerLead["status"]): string {
+  if (status === "confirmed") return "подтверждена";
+  if (status === "declined") return "отклонена";
+  if (status === "done") return "выполнена";
+  return "на рассмотрении";
+}
+
+function HistoryList({ leads }: { leads: CustomerLead[] }) {
+  if (leads.length === 0) return null;
+  return (
+    <section className="max-history">
+      <h2 className="max-section-title">Ваши записи</h2>
+      <ul className="max-list">
+        {leads.map((lead) => (
+          <li key={lead.id} className="max-sheet max-history-row">
+            <div className="max-lead-head">
+              <span className="max-option-title">{lead.item_title || "Заявка"}</span>
+              <span
+                className={`max-badge ${lead.status === "confirmed" || lead.status === "done" ? "max-badge-confirmed" : lead.status === "declined" ? "max-badge-declined" : "max-badge-new"}`}
+              >
+                {historyStatus(lead.status)}
+              </span>
+            </div>
+            {lead.slot_label ? <p className="max-option-note">{lead.slot_label}</p> : null}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
 }
 
 function durationLabel(item: ServiceItem): string {
@@ -51,6 +84,7 @@ export function Storefront({ slug }: { slug: string }) {
   // dialog does not bounce them back to a button they already rejected.
   const [phoneManual, setPhoneManual] = useState(false);
   const [successText, setSuccessText] = useState("");
+  const [history, setHistory] = useState<CustomerLead[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -60,6 +94,7 @@ export function Storefront({ slug }: { slug: string }) {
       .then((response) => {
         if (cancelled) return;
         setConfig(response.config);
+        setHistory(response.my_leads || []);
         // Prefill the name from MAX so most customers only pick a time and tap once.
         const user = getInitDataUnsafe().user;
         const full = [user?.first_name, user?.last_name].filter(Boolean).join(" ").trim();
@@ -118,6 +153,17 @@ export function Storefront({ slug }: { slug: string }) {
         comment: comment.trim(),
       });
       setSuccessText(result.success_message || config.success_message);
+      setHistory((current) => [
+        {
+          id: result.id,
+          item_title: selectedItem,
+          slot_label: selectedSlot,
+          status: "new",
+          created_at: new Date().toISOString(),
+          scheduled_at: null,
+        },
+        ...current,
+      ]);
       setPhase("done");
     } catch (cause: unknown) {
       setError(cause instanceof Error ? cause.message : "Не удалось отправить заявку");
@@ -152,7 +198,7 @@ export function Storefront({ slug }: { slug: string }) {
 
   if (phase === "done") {
     return (
-      <div className="max-shell" style={accentStyle}>
+      <div className="max-shell" data-mood={storefrontMood(config)} style={accentStyle}>
         <div className="max-sheet max-success" role="status">
           <div className="max-success-mark" aria-hidden>
             ✓
@@ -164,6 +210,7 @@ export function Storefront({ slug }: { slug: string }) {
           </p>
           <p className="max-note">Ответ придёт сюда, в MAX.</p>
         </div>
+        <HistoryList leads={history} />
       </div>
     );
   }
@@ -187,14 +234,17 @@ export function Storefront({ slug }: { slug: string }) {
         : "";
 
   return (
-    <div className="max-shell" style={accentStyle}>
+    <div className="max-shell" data-mood={storefrontMood(config)} style={accentStyle}>
       <header className="max-hero">
+        <p className="max-hero-kicker">{kindKicker(config.kind)}</p>
         <h1>{config.title}</h1>
         {config.tagline ? <p>{config.tagline}</p> : null}
         {meta ? <p className="max-hero-meta">{meta}</p> : null}
       </header>
 
-      {config.about ? <p className="max-note">{config.about}</p> : null}
+      {config.about ? <p className="max-about">{config.about}</p> : null}
+
+      {history.length > 0 ? <HistoryList leads={history} /> : null}
 
       {config.items.length > 0 ? (
         <>
@@ -203,7 +253,7 @@ export function Storefront({ slug }: { slug: string }) {
             {config.items.map((item) => {
               const price = priceLabel(item);
               const duration = durationLabel(item);
-              const note = [item.description, duration].filter(Boolean).join(" · ");
+              const note = item.description;
               const active = selectedItem === item.title;
               return (
                 <li key={item.title}>
@@ -223,7 +273,10 @@ export function Storefront({ slug }: { slug: string }) {
                       <span className="max-option-title">{item.title}</span>
                       {note ? <span className="max-option-note">{note}</span> : null}
                     </span>
-                    {price ? <span className="max-option-price">{price}</span> : null}
+                    <span className="max-option-meta">
+                      {duration ? <span className="max-duration">{duration}</span> : null}
+                      {price ? <span className="max-option-price">{price}</span> : null}
+                    </span>
                   </button>
                 </li>
               );
@@ -320,7 +373,7 @@ export function Storefront({ slug }: { slug: string }) {
                   className="max-textarea"
                   value={comment}
                   onChange={(event) => setComment(event.target.value)}
-                  placeholder="Марка авто, пожелания, вопрос"
+                  placeholder={commentHint(config)}
                   disabled={busy}
                 />
               </label>

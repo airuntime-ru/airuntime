@@ -23,6 +23,7 @@ from src.services.agent.events import TextDelta, TurnFinished
 from src.services.agent.providers import get_agent_provider
 from src.services.file_context import ImageAttachment
 from src.services.max.schema import ServiceConfig, normalise
+from src.services.max.slots import fallback_slots, now_msk, russian_today
 from src.services.provider.factory import resolve_provider_and_model
 from src.services.system_settings import resolve_platform_api_key
 
@@ -55,35 +56,48 @@ _SYSTEM_PROMPT = """Ты — генератор сервисов AIRuntime дл�
   "tagline": "короткий подзаголовок, до 160 символов",
   "about": "1-3 предложения о бизнесе, до 600 символов",
   "accent": "#RRGGBB — акцентный цвет, уместный отрасли",
+  "mood": "calm" | "warm" | "bold" | "minimal",
   "contacts": {"phone": "", "address": "", "hours": ""},
   "items": [
     {"title": "название позиции", "description": "короткое пояснение или пустая строка",
      "price_rub": 1500, "duration_min": 60}
   ],
-  "slots": ["Сегодня 14:00", "Сегодня 16:00", "Завтра 10:00"],
+  "slots": ["Вт 23 сен, 16:00", "Ср 24 сен, 18:00"],
   "cta_label": "текст кнопки действия",
   "success_message": "что увидит клиент после отправки",
+  "comment_hint": "плейсхолдер поля комментария, по делу этого бизнеса",
   "ask_phone": true,
   "ask_comment": true
 }
 
 Правила:
-- kind: "booking" — если клиент записывается на время (услуги, мастера, сервис, приём); \
+- kind: "booking" — если клиент записывается на время (услуги, мастера, репетитор, приём); \
 "menu" — если выбирает позицию из каталога или меню (еда, доставка, товары); \
 "landing" — если просто оставляет заявку (консультация, презентация, сбор контактов).
-- items: 3-8 позиций. Если пользователь назвал конкретные услуги и цены — используй \
-ИМЕННО их, ничего не выдумывай и не округляй. Если цен нет — ставь price_rub: null.
+- items: только то, что владелец реально назвал. Если назвал одну услугу — верни одну. \
+Не размножай шаблонными «Услуга 2», «Пакет 3», «Консультация VIP». 3-8 позиций — только \
+когда в описании, на сайте или в прайсе действительно столько пунктов.
 - duration_min заполняй только для kind = "booking" и только если это осмысленно.
-- slots: 4-6 ближайших слотов простым текстом, только для kind = "booking". \
+- slots: 4-6 ближайших слотов, только для kind = "booking". Формат строго \
+«Вт 23 сен, 16:00» — конкретный день, без слов «сегодня» и «завтра». \
 Для остальных типов — пустой массив.
 - contacts: заполняй только тем, что пользователь реально написал. Не выдумывай телефон, \
 адрес и часы работы — оставляй пустую строку.
+- comment_hint: подсказка в поле комментария ИМЕННО для этого бизнеса. \
+Репетитор — «Класс, тема занятия, онлайн или очно». Автосервис — «Марка, год, что случилось». \
+Кафе — «Аллергии, пожелания к заказу». Никогда не ставь «марка авто», если это не про машины.
+- mood: calm — обучение, психология, медицина, репетитор; warm — еда, дети, уют; \
+bold — авто, барбер, спорт, ремонт; minimal — консультации, B2B, заявки.
+- title и tagline — как вывеска, не канцелярия. Никаких «Качественные услуги», \
+«Индивидуальный подход», «Профессионализм». about — 1-3 конкретных предложения: \
+для кого, в каком формате, что получает клиент.
+- accent: не дефолтный синий, если отрасль подсказывает другой цвет \
+(репетитор — чернила/лес, кафе — терракота, барбер — графит). Если есть фото или цвета \
+сайта — accent должен им соответствовать.
 - Весь текст — на русском языке, деловой и короткий. Без восклицательных знаков и эмодзи.
 - Никаких обещаний, гарантий, лицензий и цен, которых не было в описании, на сайте \
 или в файлах владельца.
 - Если есть сайт или прайс — услуги и цены бери оттуда, ничего не выдумывай.
-- Если есть фото или цвета сайта — accent должен им соответствовать, а не «типичному» \
-цвету отрасли.
 - Фото смотри как дизайнер: характер, палитра, настроение. В JSON картинки не вставляй."""
 
 _EDIT_SYSTEM_PROMPT = """Ты редактируешь JSON-конфигурацию сервиса AIRuntime в мессенджере MAX.
@@ -92,7 +106,8 @@ _EDIT_SYSTEM_PROMPT = """Ты редактируешь JSON-конфигурац
 JSON-объект той же схемы — полную обновлённую конфигурацию, без markdown и пояснений.
 
 Меняй только то, о чём попросил пользователь. Всё остальное оставь ровно как было, \
-включая формулировки, цены и порядок позиций."""
+включая формулировки, цены, mood, comment_hint и порядок позиций. Слоты, если их \
+трогают, пиши в формате «Вт 23 сен, 16:00»."""
 
 
 def _resolve_llm() -> tuple[str, str, str]:
@@ -166,6 +181,18 @@ def _extract_json(raw: str) -> dict:
 
 _MENU_TERMS = ("меню", "кафе", "ресторан", "кофейн", "доставк", "пицц", "суши", "бар", "пекарн")
 _LANDING_TERMS = ("лендинг", "landing", "заявк", "консультац", "презентац", "курс", "вебинар")
+_TUTOR_TERMS = ("репетитор", "урок", "егэ", "огэ", "занят", "математик", "английск", "физик")
+
+
+def _fallback_mood(prompt: str, kind: str) -> str:
+    lowered = (prompt or "").lower()
+    if any(term in lowered for term in _TUTOR_TERMS):
+        return "calm"
+    if any(term in lowered for term in _MENU_TERMS):
+        return "warm"
+    if kind == "landing":
+        return "minimal"
+    return "bold"
 
 
 def _fallback_config(prompt: str) -> ServiceConfig:
@@ -175,8 +202,10 @@ def _fallback_config(prompt: str) -> ServiceConfig:
         kind, items = "menu", ["Позиция 1", "Позиция 2", "Позиция 3"]
     elif any(term in lowered for term in _LANDING_TERMS):
         kind, items = "landing", ["Консультация"]
+    elif any(term in lowered for term in _TUTOR_TERMS):
+        kind, items = "booking", ["Занятие"]
     else:
-        kind, items = "booking", ["Услуга 1", "Услуга 2", "Услуга 3"]
+        kind, items = "booking", ["Услуга 1"]
 
     title = (prompt or "Мой сервис").strip().split("\n")[0][:60] or "Мой сервис"
     return normalise(
@@ -186,12 +215,9 @@ def _fallback_config(prompt: str) -> ServiceConfig:
                 "title": title,
                 "tagline": "Заполните описание в приложении",
                 "about": "",
+                "mood": _fallback_mood(prompt, kind),
                 "items": [{"title": item} for item in items],
-                "slots": (
-                    ["Сегодня 12:00", "Сегодня 15:00", "Завтра 11:00", "Завтра 14:00"]
-                    if kind == "booking"
-                    else []
-                ),
+                "slots": fallback_slots() if kind == "booking" else [],
             }
         )
     )
@@ -225,12 +251,20 @@ async def _config_from_model(
     return None
 
 
+def _dated_prompt(prompt: str) -> str:
+    return (
+        f"Сегодня: {russian_today(now_msk())} (Москва). "
+        "Слоты пиши только конкретными днями в формате «Вт 23 сен, 16:00».\n\n"
+        f"{prompt}"
+    )
+
+
 async def generate_config(
     prompt: str, *, images: list[ImageAttachment] | None = None
 ) -> tuple[ServiceConfig, bool]:
     """Return ``(config, used_llm)`` for a fresh storefront."""
     config = await _config_from_model(
-        _SYSTEM_PROMPT, prompt, what="max_generate_config", images=images
+        _SYSTEM_PROMPT, _dated_prompt(prompt), what="max_generate_config", images=images
     )
     if config is None:
         return _fallback_config(prompt), False

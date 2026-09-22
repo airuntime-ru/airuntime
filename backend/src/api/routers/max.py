@@ -38,6 +38,7 @@ from src.services.max import storefronts
 from src.services.max.briefing import BriefingError
 from src.services.max.init_data import InitDataError, MaxLaunchContext, verify_init_data
 from src.services.max.schema import ServiceConfig
+from src.services.max.slots import scheduled_iso
 
 logger = logging.getLogger(__name__)
 
@@ -113,12 +114,42 @@ class LeadRequest(BaseModel):
     comment: str = Field(default="", max_length=1000)
 
 
-def _service_payload(service: MaxService) -> dict:
+def _service_payload(service: MaxService, *, my_leads: list[MaxLead] | None = None) -> dict:
     config = ServiceConfig.model_validate(json.loads(service.config_json))
-    return {
+    payload = {
         "slug": service.slug,
         "status": service.status,
         "config": config.model_dump(),
+    }
+    if my_leads is not None:
+        payload["my_leads"] = [_customer_lead_payload(lead) for lead in my_leads]
+    return payload
+
+
+def _customer_lead_payload(lead: MaxLead) -> dict:
+    return {
+        "id": str(lead.id),
+        "item_title": lead.item_title,
+        "slot_label": lead.slot_label,
+        "status": lead.status,
+        "created_at": lead.created_at.isoformat() if lead.created_at else None,
+        "scheduled_at": scheduled_iso(lead.slot_label, lead.created_at),
+    }
+
+
+def _owner_lead_payload(lead: MaxLead, title: str, service_slug: str) -> dict:
+    return {
+        "id": str(lead.id),
+        "service_title": title,
+        "service_slug": service_slug,
+        "customer_name": lead.customer_name,
+        "phone": lead.phone,
+        "item_title": lead.item_title,
+        "slot_label": lead.slot_label,
+        "comment": lead.comment,
+        "status": lead.status,
+        "created_at": lead.created_at.isoformat() if lead.created_at else None,
+        "scheduled_at": scheduled_iso(lead.slot_label, lead.created_at),
     }
 
 
@@ -140,7 +171,14 @@ def get_service(
         owner = db.query(MaxOwner).filter(MaxOwner.id == service.owner_id).first()
         if owner is None or owner.max_user_id != launch.user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
-    return _service_payload(service)
+    history = (
+        db.query(MaxLead)
+        .filter(MaxLead.service_id == service.id, MaxLead.max_user_id == launch.user_id)
+        .order_by(MaxLead.created_at.desc())
+        .limit(20)
+        .all()
+    )
+    return _service_payload(service, my_leads=history)
 
 
 @router.post("/miniapp/lead", status_code=status.HTTP_201_CREATED)
@@ -214,11 +252,12 @@ def _owned_service_or_404(db: Session, owner: MaxOwner, slug: str) -> MaxService
     return service
 
 
-def _owner_service_payload(service: MaxService, new_leads: int) -> dict:
+def _owner_service_payload(service: MaxService, new_leads: int, lead_count: int) -> dict:
     return {
         **_service_payload(service),
         "link": settings.build_max_service_link(service.slug),
         "new_leads": new_leads,
+        "lead_count": lead_count,
     }
 
 
@@ -228,6 +267,10 @@ def _new_leads(db: Session, service: MaxService) -> int:
         .filter(MaxLead.service_id == service.id, MaxLead.status == LEAD_NEW)
         .count()
     )
+
+
+def _lead_count(db: Session, service: MaxService) -> int:
+    return db.query(MaxLead).filter(MaxLead.service_id == service.id).count()
 
 
 # A storefront needs something to be built from. The old chat wizard turned "привет" into
@@ -291,7 +334,7 @@ async def create_service(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         ) from exc
-    return {**_owner_service_payload(service, 0), "used_llm": used_llm}
+    return {**_owner_service_payload(service, 0, 0), "used_llm": used_llm}
 
 
 class EditServiceRequest(BaseModel):
@@ -309,7 +352,10 @@ async def edit_service(
     service = _owned_service_or_404(db, owner, slug)
     changed = await storefronts.edit_storefront(db, service, payload.instruction.strip())
     db.refresh(service)
-    return {**_owner_service_payload(service, _new_leads(db, service)), "changed": changed}
+    return {
+        **_owner_service_payload(service, _new_leads(db, service), _lead_count(db, service)),
+        "changed": changed,
+    }
 
 
 class ServiceStatusRequest(BaseModel):
@@ -365,19 +411,25 @@ def owner_overview(
     )
     service_ids = [service.id for service in services]
     new_counts: dict[uuid.UUID, int] = {}
+    total_counts: dict[uuid.UUID, int] = {}
     if service_ids:
         rows = (
             db.query(MaxLead.service_id, MaxLead.status)
-            .filter(MaxLead.service_id.in_(service_ids), MaxLead.status == LEAD_NEW)
+            .filter(MaxLead.service_id.in_(service_ids))
             .all()
         )
-        for service_id, _status in rows:
-            new_counts[service_id] = new_counts.get(service_id, 0) + 1
+        for service_id, status in rows:
+            total_counts[service_id] = total_counts.get(service_id, 0) + 1
+            if status == LEAD_NEW:
+                new_counts[service_id] = new_counts.get(service_id, 0) + 1
 
     return {
         "owner": {"name": owner.name, "username": owner.username},
         "services": [
-            _owner_service_payload(service, new_counts.get(service.id, 0)) for service in services
+            _owner_service_payload(
+                service, new_counts.get(service.id, 0), total_counts.get(service.id, 0)
+            )
+            for service in services
         ],
     }
 
@@ -400,19 +452,7 @@ def owner_leads(
 
     return {
         "leads": [
-            {
-                "id": str(lead.id),
-                "service_title": title,
-                "service_slug": service_slug,
-                "customer_name": lead.customer_name,
-                "phone": lead.phone,
-                "item_title": lead.item_title,
-                "slot_label": lead.slot_label,
-                "comment": lead.comment,
-                "status": lead.status,
-                "created_at": lead.created_at.isoformat() if lead.created_at else None,
-            }
-            for lead, title, service_slug in rows
+            _owner_lead_payload(lead, title, service_slug) for lead, title, service_slug in rows
         ]
     }
 

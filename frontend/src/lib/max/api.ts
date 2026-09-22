@@ -17,17 +17,30 @@ export type ServiceItem = {
   duration_min: number | null;
 };
 
+export type LeadStatus = "new" | "confirmed" | "declined" | "done";
+
+export type CustomerLead = {
+  id: string;
+  item_title: string;
+  slot_label: string;
+  status: LeadStatus;
+  created_at: string | null;
+  scheduled_at: string | null;
+};
+
 export type ServiceConfig = {
   kind: "booking" | "menu" | "landing";
   title: string;
   tagline: string;
   about: string;
   accent: string;
+  mood: "calm" | "warm" | "bold" | "minimal";
   contacts: { phone: string; address: string; hours: string };
   items: ServiceItem[];
   slots: string[];
   cta_label: string;
   success_message: string;
+  comment_hint: string;
   ask_phone: boolean;
   ask_comment: boolean;
 };
@@ -36,11 +49,13 @@ export type ServiceResponse = {
   slug: string;
   status: string;
   config: ServiceConfig;
+  my_leads?: CustomerLead[];
 };
 
 export type OwnerService = ServiceResponse & {
   link: string;
   new_leads: number;
+  lead_count: number;
 };
 
 export type OwnerOverview = {
@@ -57,8 +72,9 @@ export type Lead = {
   item_title: string;
   slot_label: string;
   comment: string;
-  status: "new" | "confirmed" | "declined" | "done";
+  status: LeadStatus;
   created_at: string | null;
+  scheduled_at: string | null;
 };
 
 export class MaxApiError extends Error {
