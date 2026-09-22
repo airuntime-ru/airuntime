@@ -16,8 +16,10 @@ RUN update-ca-certificates
 # bundle, so the system store update above reaches curl and openssl but never httpx.
 COPY infra/certs/russian-trusted-ca.crt /app/certs/russian-trusted-ca.crt
 
-COPY backend/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+COPY backend/requirements.txt backend/requirements.lock ./
+# The lock pins transitive dependencies too, so a rebuild months later installs the tree
+# that was tested rather than whatever is newest that day.
+RUN pip install --no-cache-dir -r requirements.txt -c requirements.lock
 
 COPY backend/alembic.ini ./alembic.ini
 COPY backend/entrypoint.sh ./entrypoint.sh
