@@ -527,6 +527,13 @@ class TestServiceConfig:
         assert slugify("Автосервис на Лесной") == "avtoservis-na-lesnoi"
         assert slugify("!!!") == "service"
 
+    def test_customer_chat_url_is_a_max_profile_link(self) -> None:
+        from src.services.max.storefronts import customer_chat_url
+
+        assert customer_chat_url(500200) == "https://max.ru/id500200"
+        assert customer_chat_url(None) == ""
+        assert customer_chat_url(0) == ""
+
     def test_comment_hint_is_generic_not_about_cars(self) -> None:
         config = normalise(ServiceConfig.model_validate({"kind": "booking", "title": "Репетитор"}))
         assert config.comment_hint
@@ -739,15 +746,20 @@ class TestOwnerToCustomerFlow:
         assert stranger.json()["my_leads"] == []
 
         # The owner is told - by user id, since they have no dialog with the bot yet - with
-        # one button that opens their leads in the app.
+        # one button into the leads and one that opens a chat with the customer.
         (notification,) = fake_api.messages
         assert notification["user_id"] == OWNER_ID
         assert "chat_id" not in notification
         assert "Новая заявка" in notification["text"]
         assert "Диагностика · Сегодня 14:00" in notification["text"]
         assert fake_api.buttons(notification) == [
-            {"type": "open_app", "text": "Открыть заявки", "web_app": "airuntime_bot"}
+            {"type": "open_app", "text": "Открыть заявки", "web_app": "airuntime_bot"},
+            {"type": "link", "text": "Написать клиенту", "url": f"https://max.ru/id{CUSTOMER_ID}"},
         ]
+
+        inbox = client.get("/api/v1/max/miniapp/owner/leads", headers=owner_headers())
+        assert inbox.status_code == 200
+        assert inbox.json()["leads"][0]["chat_url"] == f"https://max.ru/id{CUSTOMER_ID}"
 
     def test_a_lead_goes_into_the_owners_dialog_once_the_bot_knows_it(
         self, client: TestClient, db: Session, fake_api: FakeMaxApi

@@ -77,6 +77,18 @@ def service_link(service: MaxService) -> str:
     return settings.build_max_service_link(service.slug)
 
 
+def customer_chat_url(user_id: int | None) -> str:
+    """Open the customer's MAX dialog from the owner's mini app.
+
+    MAX documents ``max://user/<id>`` as the mention deeplink when the person has no
+    public username. ``openMaxLink`` only keeps ``https://max.ru/…`` inside the client,
+    so the https form is what the button uses; the scheme form is the fallback.
+    """
+    if not user_id or user_id <= 0:
+        return ""
+    return f"https://max.ru/id{int(user_id)}"
+
+
 def _compose_prompt(brief: str, site_text: str, file_notes: str) -> str:
     parts: list[str] = []
     if brief.strip():

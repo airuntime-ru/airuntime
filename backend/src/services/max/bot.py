@@ -23,8 +23,8 @@ from sqlalchemy.orm import Session
 
 from src.core.config import settings
 from src.db.models.max_platform import SERVICE_LIVE, MaxLead, MaxOwner, MaxService
-from src.services.max.client import MaxApiError, MaxBotClient, button_open_app
-from src.services.max.storefronts import ensure_owner, load_config
+from src.services.max.client import MaxApiError, MaxBotClient, button_link, button_open_app
+from src.services.max.storefronts import customer_chat_url, ensure_owner, load_config
 
 logger = logging.getLogger(__name__)
 
@@ -147,11 +147,15 @@ def notify_owner_of_lead(db: Session, lead: MaxLead) -> None:
     recipient: dict[str, Any] = (
         {"chat_id": owner.max_chat_id} if owner.max_chat_id else {"user_id": owner.max_user_id}
     )
+    rows = [[_open_app("Открыть заявки")]]
+    chat_url = customer_chat_url(lead.max_user_id)
+    if chat_url:
+        rows.append([button_link("Написать клиенту", chat_url)])
     get_client().try_send_message(
         **recipient,
         text="\n".join(lines),
         html=True,
-        buttons=[[_open_app("Открыть заявки")]],
+        buttons=rows,
     )
 
 

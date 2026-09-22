@@ -150,6 +150,7 @@ def _owner_lead_payload(lead: MaxLead, title: str, service_slug: str) -> dict:
         "status": lead.status,
         "created_at": lead.created_at.isoformat() if lead.created_at else None,
         "scheduled_at": scheduled_iso(lead.slot_label, lead.created_at),
+        "chat_url": storefronts.customer_chat_url(lead.max_user_id),
     }
 
 

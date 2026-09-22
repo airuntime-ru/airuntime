@@ -75,6 +75,7 @@ export type Lead = {
   status: LeadStatus;
   created_at: string | null;
   scheduled_at: string | null;
+  chat_url: string;
 };
 
 export class MaxApiError extends Error {

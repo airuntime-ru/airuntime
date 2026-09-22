@@ -27,7 +27,7 @@ import {
   type Lead,
   type OwnerService,
 } from "@/lib/max/api";
-import { attachHeaderBack, guardClosing, haptic, shareInMax } from "@/lib/max/bridge";
+import { attachHeaderBack, guardClosing, haptic, openMaxChat, shareInMax } from "@/lib/max/bridge";
 
 type Phase = "loading" | "ready" | "error";
 
@@ -760,6 +760,20 @@ export function OwnerPanel() {
               {lead.phone ? <p className="max-option-note">{lead.phone}</p> : null}
               {lead.comment ? <p className="max-option-note">{lead.comment}</p> : null}
               <p className="max-option-note">{formatCreated(lead.created_at)}</p>
+
+              {lead.chat_url ? (
+                <button
+                  type="button"
+                  className="max-button max-button-quiet"
+                  style={{ marginTop: 12 }}
+                  onClick={() => {
+                    haptic("tap");
+                    openMaxChat(lead.chat_url);
+                  }}
+                >
+                  Написать в MAX
+                </button>
+              ) : null}
 
               {lead.status === "new" ? (
                 <div className="max-row">

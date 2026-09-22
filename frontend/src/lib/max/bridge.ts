@@ -41,6 +41,8 @@ type MaxWebApp = {
   requestContact?: () => Promise<MaxContactResponse>;
   shareMaxContent?: (params: { text?: string; link?: string }) => unknown;
   shareContent?: (params: { text?: string; link?: string }) => unknown;
+  openMaxLink?: (url: string) => unknown;
+  openLink?: (url: string) => unknown;
   enableClosingConfirmation?: () => void;
   disableClosingConfirmation?: () => void;
   BackButton?: {
@@ -194,6 +196,33 @@ export async function shareInMax(text: string, link: string): Promise<boolean> {
     return true;
   }
   return false;
+}
+
+/**
+ * Open a MAX profile / dialog from a tap.
+ *
+ * `openMaxLink` keeps https://max.ru/… inside the client. Anything else (including the
+ * `max://user/<id>` mention scheme) goes through `openLink`, which the client still
+ * handles as a deeplink rather than dumping it in Safari.
+ */
+export function openMaxChat(url: string): boolean {
+  const target = url.trim();
+  if (!target) return false;
+  const app = webApp();
+  try {
+    if (target.startsWith("https://max.ru/") && app?.openMaxLink) {
+      void app.openMaxLink(target);
+      return true;
+    }
+    if (app?.openLink) {
+      void app.openLink(target);
+      return true;
+    }
+    window.location.assign(target);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
