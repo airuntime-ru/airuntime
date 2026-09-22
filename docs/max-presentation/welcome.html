@@ -5,14 +5,13 @@
 <title>AIRuntime — баннер приветствия бота</title>
 <!--
   The picture on the MAX bot's welcome message. Rendered to
-  frontend/public/brand/max-welcome-v2.jpg (see README), which MAX downloads itself when the
-  bot sends the message. It shows at the width of a chat bubble - about 330px on a phone -
-  so the type is set far larger than on a slide, and there is very little of it.
-  Same field as the deck's cover: AIRuntime's space lit by the MAX gradient.
+  frontend/public/brand/max-welcome-v3.jpg (see README). MAX shows it in a chat bubble
+  (~330px) and cover-crops anything wider than ~3:2, which is why the old 1200×630
+  banner lost the left of the title and the right of the phone. This canvas is 3:2
+  with a padded safe area so the crop does not eat the type.
 -->
 <style>
-  @page { size: 1200px 630px; margin: 0; }
-  html, body { margin: 0; padding: 0; }
+  html, body { margin: 0; padding: 0; width: 1200px; height: 800px; overflow: hidden; }
   body {
     font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
@@ -21,26 +20,27 @@
   }
   .banner {
     position: relative;
-    width: 1200px; height: 630px; overflow: hidden;
+    width: 1200px; height: 800px; overflow: hidden;
     background: #05070f url("bg-cover.jpg") 62% 50% / cover no-repeat;
     color: #fff;
   }
+  /* Inset so rounded-corner clip and a 16:9 cover still leave the type intact. */
   .copy {
-    position: absolute; left: 76px; top: 0; bottom: 0; width: 640px;
+    position: absolute; left: 96px; top: 0; bottom: 0; width: 620px;
     display: flex; flex-direction: column; justify-content: center;
   }
-  .lockup { display: flex; align-items: center; gap: 14px; margin-bottom: 30px; font-size: 26px; font-weight: 800; letter-spacing: .04em; }
-  .lockup img { width: 42px; height: 42px; }
+  .lockup { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; font-size: 24px; font-weight: 800; letter-spacing: .04em; }
+  .lockup img { width: 40px; height: 40px; }
   .lockup .x { font-weight: 300; color: rgba(255,255,255,.6); letter-spacing: 0; }
-  .lockup .max { display: inline-flex; align-items: center; gap: 10px; letter-spacing: -.01em; font-size: 29px; }
-  .lockup .max img { width: 42px; height: 42px; }
-  h1 { margin: 0; font-size: 108px; line-height: .92; letter-spacing: -.05em; font-weight: 800; }
-  .lead { margin: 26px 0 0; font-size: 38px; line-height: 1.25; color: rgba(234,241,255,.88); letter-spacing: -.01em; }
+  .lockup .max { display: inline-flex; align-items: center; gap: 10px; letter-spacing: -.01em; font-size: 26px; }
+  .lockup .max img { width: 40px; height: 40px; }
+  h1 { margin: 0; font-size: 84px; line-height: .95; letter-spacing: -.05em; font-weight: 800; }
+  .lead { margin: 22px 0 0; font-size: 32px; line-height: 1.28; color: rgba(234,241,255,.88); letter-spacing: -.01em; }
   .lead b { color: #fff; font-weight: 700; }
 
   .phone {
-    --pw: 272px;
-    position: absolute; left: 846px; top: 44px;
+    --pw: 236px;
+    position: absolute; right: 96px; top: 50%; transform: translateY(-50%);
     width: var(--pw);
     border-radius: calc(var(--pw) * .082); padding: calc(var(--pw) * .026);
     background: linear-gradient(160deg, #2e374c, #141a28);
