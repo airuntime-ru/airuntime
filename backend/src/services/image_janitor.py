@@ -50,8 +50,12 @@ def _container_is_temporary(container: Any) -> bool:
     role = labels.get("airuntime.role")
     if role in _TEMPORARY_ROLES:
         return True
-    tags = getattr(getattr(container, "image", None), "tags", None) or []
-    if not any(tag.startswith(_SCRATCH_PREFIX) for tag in tags):
+    # `container.image` performs a second Docker image inspect. That raises ImageNotFound for an
+    # old container after its image was pruned, aborting the entire container sweep. Config.Image
+    # is embedded in the container inspection payload and remains available in that state.
+    attrs = getattr(container, "attrs", None) or {}
+    image_ref = str((attrs.get("Config") or {}).get("Image") or "")
+    if not image_ref.startswith(_SCRATCH_PREFIX):
         return False
     # A generated app always has the deterministic name and Traefik labels. A model's ad-hoc
     # `docker run` uses a random name (the production leak was `youthful_euclid`). Never infer

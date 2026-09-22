@@ -32,7 +32,10 @@ class _FakeContainer:
         self.name = name
         self.labels = labels or {}
         self.status = status
-        self.attrs = {"Created": created or _iso(10)}
+        self.attrs = {
+            "Created": created or _iso(10),
+            "Config": {"Image": (tags or [""])[0]},
+        }
         self.removed = False
         self.stopped = False
 
@@ -168,3 +171,38 @@ def test_container_sweep_removes_old_codex_and_leaked_scratch_but_keeps_canonica
     assert leaked.stopped is True and leaked.removed is True
     assert canonical.removed is False
     assert fresh_preview.removed is False
+
+
+def test_container_sweep_does_not_inspect_a_pruned_image():
+    """A stopped container can outlive its image; Docker then raises from container.image."""
+
+    project_id = "87654321-1234-4234-8234-123456789012"
+    container = _FakeContainer(
+        "img-pruned",
+        tags=["airuntime-scratch-87654321:latest"],
+        name="old_scratch_run",
+        labels={"airuntime.managed": "true", "airuntime.project_id": project_id},
+        status="exited",
+    )
+
+    class _PrunedImageContainer:
+        name = container.name
+        labels = container.labels
+        status = container.status
+        attrs = container.attrs
+        removed = False
+
+        @property
+        def image(self):
+            raise RuntimeError("No such image")
+
+        def remove(self, force: bool = False) -> None:
+            self.removed = True
+
+    pruned = _PrunedImageContainer()
+    client = _FakeClient([], [pruned])
+
+    removed = image_janitor.sweep_temporary_containers(client)
+
+    assert removed == ["old_scratch_run"]
+    assert pruned.removed is True
