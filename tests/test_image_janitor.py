@@ -12,13 +12,36 @@ class _FakeImage:
 
 
 class _FakeImageRef:
-    def __init__(self, image_id: str) -> None:
+    def __init__(self, image_id: str, tags: list[str] | None = None) -> None:
         self.id = image_id
+        self.tags = tags or []
 
 
 class _FakeContainer:
-    def __init__(self, image_id: str) -> None:
-        self.image = _FakeImageRef(image_id)
+    def __init__(
+        self,
+        image_id: str,
+        *,
+        tags: list[str] | None = None,
+        name: str = "container",
+        labels: dict[str, str] | None = None,
+        status: str = "running",
+        created=None,
+    ) -> None:
+        self.image = _FakeImageRef(image_id, tags)
+        self.name = name
+        self.labels = labels or {}
+        self.status = status
+        self.attrs = {"Created": created or _iso(10)}
+        self.removed = False
+        self.stopped = False
+
+    def stop(self, timeout: int = 10) -> None:
+        self.stopped = True
+        self.status = "exited"
+
+    def remove(self, force: bool = False) -> None:
+        self.removed = True
 
 
 class _FakeImages:
@@ -108,3 +131,40 @@ def test_sweep_never_touches_a_running_container_error_path():
     removed = image_janitor.sweep_unrecognized_images(client)
 
     assert removed == []
+
+
+def test_container_sweep_removes_old_codex_and_leaked_scratch_but_keeps_canonical_app():
+    project_id = "12345678-1234-4234-8234-123456789012"
+    codex = _FakeContainer(
+        "img-codex",
+        name="airuntime-codex-old",
+        labels={"airuntime.role": "codex"},
+        status="exited",
+    )
+    leaked = _FakeContainer(
+        "img-scratch",
+        tags=["airuntime-scratch-12345678:latest"],
+        name="youthful_euclid",
+        labels={"airuntime.managed": "true", "airuntime.project_id": project_id},
+    )
+    canonical = _FakeContainer(
+        "img-scratch",
+        tags=["airuntime-scratch-12345678:latest"],
+        name="airuntime-12345678",
+        labels={"airuntime.managed": "true", "airuntime.project_id": project_id},
+    )
+    fresh_preview = _FakeContainer(
+        "img-preview",
+        name="preview-fresh",
+        labels={"airuntime.role": "preview"},
+        created=_iso(0.1),
+    )
+    client = _FakeClient([], [codex, leaked, canonical, fresh_preview])
+
+    removed = image_janitor.sweep_temporary_containers(client)
+
+    assert set(removed) == {"airuntime-codex-old", "youthful_euclid"}
+    assert codex.removed is True
+    assert leaked.stopped is True and leaked.removed is True
+    assert canonical.removed is False
+    assert fresh_preview.removed is False

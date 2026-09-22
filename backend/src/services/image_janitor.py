@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 _MIN_AGE_SECONDS = 2 * 3600
 _SCRATCH_PREFIX = "airuntime-scratch-"
+_TEMPORARY_ROLES = frozenset({"codex", "preview"})
 
 
 def _parse_docker_created(value: Any) -> float | None:
@@ -42,6 +43,57 @@ def _parse_docker_created(value: Any) -> float | None:
         return datetime.fromisoformat(text).timestamp()
     except ValueError:
         return None
+
+
+def _container_is_temporary(container: Any) -> bool:
+    labels = getattr(container, "labels", None) or {}
+    role = labels.get("airuntime.role")
+    if role in _TEMPORARY_ROLES:
+        return True
+    tags = getattr(getattr(container, "image", None), "tags", None) or []
+    if not any(tag.startswith(_SCRATCH_PREFIX) for tag in tags):
+        return False
+    # A generated app always has the deterministic name and Traefik labels. A model's ad-hoc
+    # `docker run` uses a random name (the production leak was `youthful_euclid`). Never infer
+    # ownership from age alone and never touch the canonical deployed app.
+    project_id = labels.get("airuntime.project_id")
+    canonical = f"airuntime-{str(project_id)[:8]}" if project_id else None
+    name = str(getattr(container, "name", "") or "").lstrip("/")
+    return bool(project_id and name != canonical and labels.get("traefik.enable") != "true")
+
+
+def sweep_temporary_containers(client: Any) -> list[str]:
+    """Remove old Codex/preview/scratch containers, including leaked running self-tests.
+
+    The two-hour age gate is four times the normal task silence timeout and longer than the
+    default orchestration task budget, so an active generation cannot be collected. Selection
+    still requires an explicit AIRuntime role or a project-owned scratch image.
+    """
+    try:
+        containers = client.containers.list(all=True)
+    except Exception:  # noqa: BLE001
+        return []
+    cutoff = time.time() - _MIN_AGE_SECONDS
+    removed: list[str] = []
+    for container in containers:
+        if not _container_is_temporary(container):
+            continue
+        created = _parse_docker_created((getattr(container, "attrs", None) or {}).get("Created"))
+        if created is None or created > cutoff:
+            continue
+        name = str(getattr(container, "name", "") or getattr(container, "id", "unknown"))
+        try:
+            if getattr(container, "status", None) == "running":
+                container.stop(timeout=10)
+            container.remove(force=True)
+        except Exception:  # noqa: BLE001 - best effort; next sweep retries
+            continue
+        removed.append(name)
+    if removed:
+        logger.info(
+            "Container janitor removed %d temporary container(s): %s", len(removed), removed
+        )
+    return removed
 
 
 def sweep_unrecognized_images(client: Any) -> list[str]:

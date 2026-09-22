@@ -194,6 +194,23 @@ def test_deploy_cleanup_does_not_remove_postgres_sidecar(monkeypatch):
     assert postgres.removed is False
 
 
+def test_app_container_status_uses_exact_canonical_name(monkeypatch):
+    client = _FakeDockerClient()
+    monkeypatch.setattr(docker_adapter.docker, "from_env", lambda: client)
+    project_id = "44444444-4444-4444-8444-444444444444"
+    sidecar = _FakeContainer(
+        name="airuntime-44444444-postgres",
+        labels={"airuntime.role": "service", "airuntime.project_id": project_id},
+    )
+    app = _FakeContainer(name="airuntime-44444444")
+    client.containers._listed = [sidecar, app]
+
+    assert DockerDeploymentAdapter().app_container_status(project_id) == "running"
+
+    client.containers._listed = [sidecar]
+    assert DockerDeploymentAdapter().app_container_status(project_id) is None
+
+
 def test_remove_project_images_matches_by_id_fragment_across_type_prefixes(monkeypatch):
     """_image_tag's prefix (site/bot/mixed/app) follows project.type, which can change over a
     project's life (reconcile_type_with_workspace/update_project_type_from_prompt) - an image

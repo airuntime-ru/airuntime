@@ -39,12 +39,13 @@ from src.services.docker_control_queue import (
 )
 from src.services.email import send_branded_email
 from src.services.email_templates import deploy_failed_email, project_deployed_email
-from src.services.image_janitor import sweep_unrecognized_images
+from src.services.image_janitor import sweep_temporary_containers, sweep_unrecognized_images
 from src.services.project_services import (
     build_connection_env,
     ensure_service_containers,
 )
 from src.services.project_subdomain import ensure_deploy_subdomain, resolve_deploy_subdomain
+from src.services.runtime_reconciler import reconcile_live_projects
 from src.services.telegram_profile import TelegramProfileError, fetch_bot_profile
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,7 @@ logger = logging.getLogger(__name__)
 BILLING_SWEEP_INTERVAL_SECONDS = 300
 STALE_SWEEP_INTERVAL_SECONDS = 60
 IMAGE_SWEEP_INTERVAL_SECONDS = 3600
+RUNTIME_SWEEP_INTERVAL_SECONDS = 300
 
 
 def process_billing_sweep() -> None:
@@ -64,7 +66,16 @@ def process_billing_sweep() -> None:
 
 def process_image_sweep() -> None:
     adapter = DockerDeploymentAdapter()
+    sweep_temporary_containers(adapter.client)
     sweep_unrecognized_images(adapter.client)
+
+
+def process_runtime_sweep() -> None:
+    db: Session = SessionLocal()
+    try:
+        reconcile_live_projects(db)
+    finally:
+        db.close()
 
 
 def _run_codex_job(job: dict) -> None:
@@ -405,10 +416,15 @@ def run() -> None:
     last_billing_sweep = 0.0
     last_stale_sweep = 0.0
     last_image_sweep = 0.0
+    last_runtime_sweep = 0.0
     try:
         reap_stale_deployments()
     except Exception:  # noqa: BLE001
         logger.exception("Initial stale-deployment sweep failed")
+    try:
+        process_runtime_sweep()
+    except Exception:  # noqa: BLE001
+        logger.exception("Initial runtime reconciliation failed")
     while True:
         control_job = pop_control_job(timeout_seconds=2)
         if control_job:
@@ -456,6 +472,12 @@ def run() -> None:
                 process_image_sweep()
             except Exception:  # noqa: BLE001 - never let a Docker hiccup kill the worker loop
                 logger.exception("Image janitor sweep failed")
+        if now - last_runtime_sweep >= RUNTIME_SWEEP_INTERVAL_SECONDS:
+            last_runtime_sweep = now
+            try:
+                process_runtime_sweep()
+            except Exception:  # noqa: BLE001 - never let Docker drift kill the worker loop
+                logger.exception("Runtime reconciliation failed")
 
 
 if __name__ == "__main__":

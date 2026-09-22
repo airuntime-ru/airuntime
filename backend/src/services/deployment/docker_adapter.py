@@ -93,6 +93,22 @@ class DockerDeploymentAdapter:
                 continue
             yield existing
 
+    def app_container_status(self, project_id: str) -> str | None:
+        """Return the canonical app container status, or ``None`` when it disappeared.
+
+        Project.status is only bookkeeping. A host reboot, manual Docker cleanup, or an old
+        deployment bug can leave a project marked ``live`` with no routable container at all.
+        Keeping this lookup beside ``_iter_app_containers`` ensures every caller uses the same
+        exact-name/role filtering as deploy and stop operations.
+        """
+        for container in self._iter_app_containers(project_id):
+            try:
+                container.reload()
+            except DockerException:
+                return None
+            return str(container.status or "unknown")
+        return None
+
     def stop_project(self, project_id: str) -> None:
         for existing in self._iter_app_containers(project_id):
             try:

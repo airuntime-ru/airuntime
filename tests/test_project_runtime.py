@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -102,6 +103,55 @@ def test_start_project_runtime_queues_deploy_when_slot_available(client, db, mon
 
     assert queued == [str(project.id)]
     assert started.status == "deploying"
+
+
+def test_runtime_reconciler_redeploys_only_missing_live_container(client, db, monkeypatch):
+    from src.services import runtime_reconciler
+
+    user = _user(db, "runtime-reconcile@test.com", client)
+    healthy = _project(db, user, name="healthy", status="live")
+    missing = _project(db, user, name="missing", status="live")
+    db.commit()
+
+    class _Adapter:
+        def app_container_status(self, project_id: str):
+            return "running" if project_id == str(healthy.id) else None
+
+    queued: list[str] = []
+
+    def fake_create(session, project, *, skip_auto_check=False):
+        queued.append(str(project.id))
+        project.status = "deploying"
+        session.add(project)
+        session.commit()
+        return SimpleNamespace(id=uuid4(), status="queued")
+
+    monkeypatch.setattr(runtime_reconciler, "create_deployment_for_project", fake_create)
+
+    repaired = runtime_reconciler.reconcile_live_projects(db, adapter=_Adapter())
+
+    assert repaired == [str(missing.id)]
+    assert queued == [str(missing.id)]
+    db.refresh(healthy)
+    db.refresh(missing)
+    assert healthy.status == "live"
+    assert missing.status == "deploying"
+    assert "Автовосстановление" in missing.logs
+
+
+def test_failed_enqueue_returns_project_to_ready(client, db, monkeypatch):
+    from src.services import deployments
+
+    user = _user(db, "enqueue-failure@test.com", client)
+    project = _project(db, user, name="queue failure", status="live")
+    db.commit()
+    monkeypatch.setattr(deployments, "enqueue_deployment", lambda **kwargs: False)
+
+    deployment = deployments.create_deployment_for_project(db, project)
+
+    db.refresh(project)
+    assert deployment.status == "failed"
+    assert project.status == "ready"
 
 
 def test_runtime_limits_endpoint(client, db):

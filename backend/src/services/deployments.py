@@ -64,6 +64,10 @@ def create_deployment_for_project(
             "Не удалось поставить задачу в очередь запуска. Повторите из вкладки «Деплои».",
         )
         deployment.finished_at = datetime.now(UTC)
+        # No worker can recover a job that never reached Redis. Keep the project restartable
+        # instead of stranding it forever in the optimistic "deploying" state.
+        project.status = "ready"
+        db.add(project)
         db.add(deployment)
         db.commit()
         db.refresh(deployment)
