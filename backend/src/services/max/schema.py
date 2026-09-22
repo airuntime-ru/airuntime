@@ -88,6 +88,13 @@ class ServiceItem(BaseModel):
     def _text(cls, value: object) -> str:
         return str(value or "").strip()
 
+    @field_validator("duration_min", mode="before")
+    @classmethod
+    def _duration(cls, value: object) -> object:
+        if value in (0, "0", "", None):
+            return None
+        return value
+
 
 class ServiceContacts(BaseModel):
     phone: str = Field(default="", max_length=32)

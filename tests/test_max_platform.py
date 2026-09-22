@@ -558,6 +558,16 @@ class TestServiceConfig:
         assert len(config.items) == 24
         assert len(config.slots) == 12
 
+    def test_zero_duration_is_treated_as_missing(self) -> None:
+        config = ServiceConfig.model_validate(
+            {
+                "kind": "menu",
+                "title": "Кофе",
+                "items": [{"title": "Капучино", "price_rub": 250, "duration_min": 0}],
+            }
+        )
+        assert config.items[0].duration_min is None
+
     def test_non_booking_kinds_carry_no_slots(self) -> None:
         config = normalise(
             ServiceConfig.model_validate(
