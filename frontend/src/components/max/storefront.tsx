@@ -70,10 +70,10 @@ export function Storefront({ slug }: { slug: string }) {
         if (cancelled) return;
         const message =
           cause instanceof MaxApiError && cause.status === 404
-            ? "Витрина не найдена или снята с публикации"
+            ? "AIRuntime не найден или снят с публикации"
             : cause instanceof Error
               ? cause.message
-              : "Не удалось загрузить витрину";
+              : "Не удалось загрузить AIRuntime";
         setError(message);
         setPhase("error");
       });
@@ -135,7 +135,7 @@ export function Storefront({ slug }: { slug: string }) {
           <div className="max-skeleton" style={{ height: 66 }} />
           <div className="max-skeleton" style={{ height: 66 }} />
         </div>
-        <p className="max-note">Загружаем витрину…</p>
+        <p className="max-note">Загружаем AIRuntime…</p>
       </div>
     );
   }
@@ -144,7 +144,7 @@ export function Storefront({ slug }: { slug: string }) {
     return (
       <div className="max-shell">
         <div className="max-error" role="alert">
-          {error || "Не удалось загрузить витрину"}
+          {error || "Не удалось загрузить AIRuntime"}
         </div>
       </div>
     );

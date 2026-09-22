@@ -269,3 +269,19 @@ class MaxBotClient:
         except MaxApiError:
             # A stale callback id is normal (the user tapped an old message); never surface it.
             logger.debug("max_answer_callback_failed", exc_info=True)
+
+    def send_action(self, chat_id: int, action: str) -> None:
+        self._request("POST", f"/chats/{chat_id}/actions", json={"action": action})
+
+    def mark_seen(self, chat_id: int) -> None:
+        """Turn the user's ticks from sent to read.
+
+        ``mark_seen`` is a SenderAction on ``POST /chats/{chatId}/actions``. The
+        published docs title that method as a group-chat action, but the OpenAPI
+        schema lists it and dialogs use it the same way. Fail-soft: a grey tick is
+        worse than none, but never worse than a 500 webhook.
+        """
+        try:
+            self.send_action(chat_id, "mark_seen")
+        except MaxApiError:
+            logger.debug("max_mark_seen_failed chat_id=%s", chat_id, exc_info=True)

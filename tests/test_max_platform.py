@@ -78,6 +78,7 @@ class FakeMaxApi:
     def __init__(self) -> None:
         self.messages: list[dict[str, Any]] = []
         self.callbacks: list[str] = []
+        self.actions: list[dict[str, Any]] = []
         # Set to a MaxApiError to make the next send with a picture fail with it.
         self.refuse_images_with: Exception | None = None
 
@@ -94,8 +95,12 @@ class FakeMaxApi:
         ) -> None:
             outer.callbacks.append(notification)
 
+        def mark_seen(self: MaxBotClient, chat_id: int) -> None:
+            outer.actions.append({"chat_id": chat_id, "action": "mark_seen"})
+
         monkeypatch.setattr(MaxBotClient, "send_message", send_message)
         monkeypatch.setattr(MaxBotClient, "answer_callback", answer_callback)
+        monkeypatch.setattr(MaxBotClient, "mark_seen", mark_seen)
 
     @property
     def texts(self) -> list[str]:
@@ -169,7 +174,7 @@ BRIEF = "Автосервис на Лесной: диагностика 1500, з
 
 
 def create_storefront(client: TestClient, user_id: int = OWNER_ID, brief: str = BRIEF) -> dict:
-    """What the owner's "Собрать витрину" button does."""
+    """What the owner's "Собрать AIRuntime" button does."""
     response = client.post(
         "/api/v1/max/miniapp/owner/services", json={"brief": brief}, headers=owner_headers(user_id)
     )
@@ -344,6 +349,26 @@ class TestConnectRetry:
             self._client().get_me()
         assert len(calls) == 1
 
+    def test_mark_seen_posts_the_chat_action(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        captured: dict[str, Any] = {}
+
+        def request(method: str, url: str, **kwargs: Any) -> httpx.Response:
+            captured.update(method=method, url=url, json=kwargs.get("json"))
+            return httpx.Response(200, json={"success": True})
+
+        monkeypatch.setattr(httpx, "request", request)
+        self._client().mark_seen(777001)
+        assert captured["method"] == "POST"
+        assert captured["url"] == "https://platform-api2.max.ru/chats/777001/actions"
+        assert captured["json"] == {"action": "mark_seen"}
+
+    def test_mark_seen_swallows_api_errors(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def request(method: str, url: str, **kwargs: Any) -> httpx.Response:
+            return httpx.Response(500, text="nope")
+
+        monkeypatch.setattr(httpx, "request", request)
+        self._client().mark_seen(1)
+
 
 class TestOpenAppButtonShape:
     """The button that opens the mini app is the product's main CTA. Its shape comes from
@@ -353,11 +378,11 @@ class TestOpenAppButtonShape:
 
     def test_web_app_names_the_bot_and_payload_carries_the_slug(self) -> None:
         button = button_open_app(
-            "Открыть витрину", "t403_hakaton_max_bot", "avtoservis", contact_id=395683755
+            "Открыть AIRuntime", "t403_hakaton_max_bot", "avtoservis", contact_id=395683755
         )
         assert button == {
             "type": "open_app",
-            "text": "Открыть витрину",
+            "text": "Открыть AIRuntime",
             "web_app": "t403_hakaton_max_bot",
             "contact_id": 395683755,
             "payload": "avtoservis",
@@ -500,11 +525,12 @@ class TestTheBotIsAFrontDoor:
         assert welcome["chat_id"] == 777001
         assert welcome["html"] is True
         assert welcome["image_url"].endswith("/brand/max-welcome.jpg")
-        assert "Витрина" in welcome["text"]
+        assert "AIRuntime" in welcome["text"]
         # One button, and it opens the owner's side of the app: no payload.
         assert fake_api.buttons(welcome) == [
-            {"type": "open_app", "text": "Открыть Витрину", "web_app": "airuntime_bot"}
+            {"type": "open_app", "text": "Открыть AIRuntime", "web_app": "airuntime_bot"}
         ]
+        assert fake_api.actions == [{"chat_id": 777001, "action": "mark_seen"}]
         # The dialog is remembered: it is where this person's leads will arrive.
         assert db.query(MaxOwner).one().max_chat_id == 777001
 
@@ -515,18 +541,24 @@ class TestTheBotIsAFrontDoor:
         webhook(client, _message("привет"))
         webhook(client, _message("Автосервис на Лесной, диагностика 1500"))
         assert len(fake_api.messages) == 2
-        assert all("Витрина" in text for text in fake_api.texts)
+        assert all("AIRuntime" in text for text in fake_api.texts)
+        assert fake_api.actions == [
+            {"chat_id": 777001, "action": "mark_seen"},
+            {"chat_id": 777001, "action": "mark_seen"},
+        ]
         assert db.query(MaxService).count() == 0
 
     def test_group_chats_are_left_alone(self, client: TestClient, fake_api: FakeMaxApi) -> None:
         webhook(client, _message("всем привет", chat_type="chat"))
         assert fake_api.messages == []
+        assert fake_api.actions == []
 
     def test_messages_from_bots_are_ignored(self, client: TestClient, fake_api: FakeMaxApi) -> None:
         update = _message("эхо")
         update["message"]["sender"]["is_bot"] = True
         webhook(client, update)
         assert fake_api.messages == []
+        assert fake_api.actions == []
 
     def test_a_start_from_a_storefront_link_opens_that_storefront(
         self, client: TestClient, fake_api: FakeMaxApi
@@ -545,6 +577,7 @@ class TestTheBotIsAFrontDoor:
         assert "Автосервис на Лесной" in invite["text"]
         (button,) = fake_api.buttons(invite)
         assert button["payload"] == service["slug"]
+        assert fake_api.actions == [{"chat_id": 777002, "action": "mark_seen"}]
 
     def test_old_buttons_are_pointed_at_the_app(
         self, client: TestClient, fake_api: FakeMaxApi
@@ -558,7 +591,7 @@ class TestTheBotIsAFrontDoor:
             },
         )
         assert fake_api.callbacks == ["Всё управление теперь в приложении"]
-        assert "Витрина" in fake_api.texts[-1]
+        assert "AIRuntime" in fake_api.texts[-1]
 
     def test_the_banner_is_dropped_only_when_max_refuses_it(
         self, client: TestClient, fake_api: FakeMaxApi
@@ -573,6 +606,8 @@ class TestTheBotIsAFrontDoor:
         fake_api.refuse_images_with = MaxApiError("MAX API request failed: ReadTimeout")
         webhook(client, _message("привет"))
         assert fake_api.messages == []
+        # The message was still read even though we did not answer.
+        assert fake_api.actions == [{"chat_id": 777001, "action": "mark_seen"}]
 
 
 def _message(text: str, *, chat_type: str = "dialog") -> dict[str, Any]:

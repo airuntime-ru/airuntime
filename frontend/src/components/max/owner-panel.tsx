@@ -199,7 +199,7 @@ export function OwnerPanel() {
       setComposerOpen(false);
       haptic("success");
     } catch (cause: unknown) {
-      setCreateError(messageOf(cause, "Не удалось собрать витрину. Попробуйте ещё раз."));
+      setCreateError(messageOf(cause, "Не удалось собрать AIRuntime. Попробуйте ещё раз."));
       haptic("error");
     } finally {
       guardClosing(false);
@@ -227,7 +227,7 @@ export function OwnerPanel() {
           setEditNote("Не получилось применить правку\u00a0— переформулируйте, пожалуйста.");
         }
       } catch (cause: unknown) {
-        setEditNote(messageOf(cause, "Не удалось изменить витрину"));
+        setEditNote(messageOf(cause, "Не удалось изменить AIRuntime"));
       } finally {
         guardClosing(false);
         setBusySlug("");
@@ -245,7 +245,7 @@ export function OwnerPanel() {
         current.map((row) => (row.slug === service.slug ? { ...row, status: updated.status } : row))
       );
     } catch (cause: unknown) {
-      setError(messageOf(cause, "Не удалось обновить витрину"));
+      setError(messageOf(cause, "Не удалось обновить AIRuntime"));
     } finally {
       setBusySlug("");
     }
@@ -264,7 +264,7 @@ export function OwnerPanel() {
         setServices((current) => current.filter((row) => row.slug !== service.slug));
         setLeads((current) => current.filter((lead) => lead.service_slug !== service.slug));
       } catch (cause: unknown) {
-        setError(messageOf(cause, "Не удалось удалить витрину"));
+        setError(messageOf(cause, "Не удалось удалить AIRuntime"));
       } finally {
         setBusySlug("");
       }
@@ -351,7 +351,7 @@ export function OwnerPanel() {
       <div className="max-preview">
         <div className="max-preview-bar">
           <button type="button" className="max-preview-back" onClick={() => setPreviewSlug("")}>
-            ← К моим витринам
+            ← К моим сервисам
           </button>
           <span>Так её видят клиенты</span>
         </div>
@@ -365,7 +365,7 @@ export function OwnerPanel() {
       <div className="max-progress-track" aria-hidden>
         <i />
       </div>
-      <p className="max-progress-title">Собираем витрину…</p>
+      <p className="max-progress-title">Собираем AIRuntime…</p>
       <p className="max-note" style={{ marginTop: 4 }}>
         Обычно это около десяти секунд. Не закрывайте приложение.
       </p>
@@ -399,7 +399,7 @@ export function OwnerPanel() {
         ))}
       </div>
       <p className="max-hint">
-        Названия, цены, адрес и часы работы&nbsp;— всё, что напишете, попадёт на витрину.
+        Названия, цены, адрес и часы работы&nbsp;— всё, что напишете, попадёт в AIRuntime.
       </p>
       {createError ? (
         <div className="max-error" role="alert" style={{ marginTop: 12 }}>
@@ -413,7 +413,7 @@ export function OwnerPanel() {
         disabled={brief.trim().length < MIN_BRIEF}
         onClick={() => void onCreate()}
       >
-        Собрать витрину
+        Собрать AIRuntime
       </button>
       {services.length > 0 ? (
         <button
@@ -434,10 +434,10 @@ export function OwnerPanel() {
     return (
       <div className="max-shell">
         <header className="max-hero max-welcome">
-          <h1>Витрина за одно сообщение</h1>
+          <h1>AIRuntime за одно сообщение</h1>
           <p>
-            Опишите бизнес&nbsp;— соберём витрину с услугами, ценами и онлайн-записью. Клиенты
-            откроют её прямо в MAX.
+            Опишите бизнес&nbsp;— соберём AIRuntime с услугами, ценами и онлайн-записью. Клиенты
+            откроют его прямо в MAX.
           </p>
         </header>
         <div style={{ marginTop: 12 }}>{composer}</div>
@@ -468,7 +468,7 @@ export function OwnerPanel() {
     <div className="max-shell">
       <div className="max-toolbar">
         <h2 className="max-section-title" style={{ margin: 0 }}>
-          Мои витрины
+          Мои сервисы
         </h2>
         {!composerOpen && !creating ? (
           <button type="button" className="max-toolbar-add" onClick={() => setComposerOpen(true)}>
@@ -496,7 +496,7 @@ export function OwnerPanel() {
               className={`max-sheet max-card${freshSlug === service.slug ? " max-card-fresh" : ""}`}
             >
               {freshSlug === service.slug ? (
-                <p className="max-card-flag">✓ Витрина готова&nbsp;— ссылку уже можно отправлять</p>
+                <p className="max-card-flag">✓ AIRuntime готов&nbsp;— ссылку уже можно отправлять</p>
               ) : null}
               <div className="max-lead-head">
                 <span className="max-option-title">{service.config.title}</span>

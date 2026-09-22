@@ -5,7 +5,7 @@ import "./max.css";
 
 export const metadata: Metadata = {
   title: "AIRuntime для MAX",
-  description: "Витрина и заявки прямо в мессенджере MAX.",
+  description: "AIRuntime и заявки прямо в мессенджере MAX.",
   // A mini app is opened from inside MAX, never found in search.
   robots: { index: false, follow: false },
 };

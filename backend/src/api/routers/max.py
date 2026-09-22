@@ -268,7 +268,7 @@ async def create_service(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                f"Можно держать до {storefronts.MAX_SERVICES_PER_OWNER} витрин — "
+                f"Можно держать до {storefronts.MAX_SERVICES_PER_OWNER} сервисов — "
                 "удалите ненужную, чтобы создать новую"
             ),
         )

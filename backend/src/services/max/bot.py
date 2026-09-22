@@ -30,16 +30,16 @@ logger = logging.getLogger(__name__)
 
 # One command: the bot has nothing else to offer, and a menu of commands that all answer
 # "open the app" would be noise.
-BOT_COMMANDS = [{"name": "start", "description": "Открыть Витрину"}]
+BOT_COMMANDS = [{"name": "start", "description": "Открыть AIRuntime"}]
 
-OPEN_APP = "Открыть Витрину"
+OPEN_APP = "Открыть AIRuntime"
 
 # A no-break space before every em dash: otherwise it wraps to the start of a line on a
 # phone, which in Russian typography reads as a mistake.
 WELCOME = (
-    "<h1>Витрина</h1>\n"
+    "<h1>AIRuntime</h1>\n"
     "Запись к вам — прямо в MAX.\n\n"
-    "Опишите бизнес одним сообщением, и через десять секунд у клиентов будет витрина: "
+    "Опишите бизнес одним сообщением, и через десять секунд у клиентов будет AIRuntime: "
     "услуги, цены, свободное время и кнопка записи.\n\n"
     "<b>Что вы получите</b>\n"
     "— ссылку и QR-код для клиентов\n"
@@ -166,7 +166,7 @@ def notify_customer_of_decision(db: Session, lead: MaxLead, *, confirmed: bool) 
         lines = ["<b>Запись подтверждена</b>", _e(service.title)]
         if when:
             lines.append(when)
-        button = _open_app("Открыть витрину", service.slug)
+        button = _open_app("Открыть AIRuntime", service.slug)
     else:
         slot = f" на {_e(lead.slot_label)}" if lead.slot_label else ""
         lines = [
@@ -221,6 +221,7 @@ def _on_started(db: Session, update: dict[str, Any]) -> None:
     chat_id = _chat_id(update)
     if not chat_id:
         return
+    get_client().mark_seen(chat_id)
     _remember(db, update.get("user") or {}, chat_id)
 
     # max.ru/<bot>?start=<slug> arrives here with the slug as payload: that visitor wants
@@ -246,6 +247,7 @@ def _on_message(db: Session, update: dict[str, Any]) -> None:
     chat_id = _chat_id(update)
     if not chat_id:
         return
+    get_client().mark_seen(chat_id)
     _remember(db, sender, chat_id)
     send_welcome(chat_id=chat_id)
 
