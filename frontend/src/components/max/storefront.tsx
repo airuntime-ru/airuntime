@@ -22,12 +22,13 @@ import {
   type ServiceItem,
 } from "@/lib/max/api";
 import { getInitDataUnsafe, requestContact } from "@/lib/max/bridge";
-import { commentHint, kindKicker, readableAccentText, storefrontMood } from "@/lib/max/theme";
+import { commentHint, kindKicker, storefrontDesign } from "@/lib/max/theme";
 
 type Phase = "loading" | "ready" | "submitting" | "done" | "error";
 
 function priceLabel(item: ServiceItem): string {
   if (item.price_rub === null || item.price_rub === undefined) return "";
+  if (item.price_rub === 0) return "Бесплатно";
   return `${item.price_rub.toLocaleString("ru-RU")} ₽`;
 }
 
@@ -95,6 +96,8 @@ export function Storefront({ slug }: { slug: string }) {
       .then((response) => {
         if (cancelled) return;
         setConfig(response.config);
+        // One offer means there is nothing to choose: open straight on the form.
+        if (response.config.items.length === 1) setSelectedItem(response.config.items[0].title);
         setHistory(response.my_leads || []);
         // Prefill the name from MAX so most customers only pick a time and tap once.
         const user = getInitDataUnsafe().user;
@@ -118,16 +121,7 @@ export function Storefront({ slug }: { slug: string }) {
     };
   }, [slug]);
 
-  const accentStyle = useMemo(
-    () =>
-      config
-        ? ({
-            "--max-accent": config.accent,
-            "--max-on-accent": readableAccentText(config.accent),
-          } as React.CSSProperties)
-        : undefined,
-    [config]
-  );
+  const design = useMemo(() => (config ? storefrontDesign(config) : null), [config]);
 
   const categories = useMemo(
     () =>
@@ -215,19 +209,7 @@ export function Storefront({ slug }: { slug: string }) {
 
   if (phase === "done") {
     return (
-      <div
-        className="max-shell"
-        data-mood={storefrontMood(config)}
-        data-scheme={config.color_scheme || "light"}
-        data-layout={config.layout || "classic"}
-        data-heading={config.heading_style || "sans"}
-        data-nav={config.nav_style || "none"}
-        data-hero={config.hero_style || "split"}
-        data-card={config.card_style || "minimal"}
-        data-radius={config.radius_style || "soft"}
-        data-density={config.density || "balanced"}
-        style={accentStyle}
-      >
+      <div className="max-shell" {...design?.attrs} style={design?.style}>
         <div className="max-sheet max-success" role="status">
           <div className="max-success-mark" aria-hidden>
             ✓
@@ -262,6 +244,14 @@ export function Storefront({ slug }: { slug: string }) {
   const meta = [config.contacts.address, config.contacts.hours, config.contacts.phone]
     .filter(Boolean)
     .join(" · ");
+  const highlights = config.highlights || [];
+  // The ticker repeats what is actually on offer - categories when there are several,
+  // otherwise the positions themselves - so it never needs copy the owner did not write.
+  const tickerWords = config.marquee
+    ? categories.length > 2
+      ? categories
+      : config.items.map((item) => item.title).slice(0, 8)
+    : [];
   // Contacts only appear once there is something to book. On a phone, opening straight
   // into three empty fields reads as paperwork rather than as a two-tap booking.
   const showContacts = config.items.length === 0 || Boolean(selectedItem);
@@ -274,38 +264,67 @@ export function Storefront({ slug }: { slug: string }) {
       : !name.trim()
         ? "Укажите имя"
         : "";
+  const withMedia =
+    config.card_style === "image-top" ||
+    config.card_style === "overlay" ||
+    config.card_style === "horizontal";
 
   return (
-    <div
-      className="max-shell"
-      data-mood={storefrontMood(config)}
-      data-scheme={config.color_scheme || "light"}
-      data-layout={config.layout || "classic"}
-      data-heading={config.heading_style || "sans"}
-      data-nav={config.nav_style || "none"}
-      data-hero={config.hero_style || "split"}
-      data-card={config.card_style || "minimal"}
-      data-radius={config.radius_style || "soft"}
-      data-density={config.density || "balanced"}
-      style={accentStyle}
-    >
-      <header className="max-hero" style={{ order: sectionRank("hero") }}>
+    <div className="max-shell" {...design?.attrs} style={design?.style}>
+      <header
+        className="max-hero"
+        data-has-image={heroImages.length > 0 ? "yes" : "no"}
+        style={{ order: sectionRank("hero") }}
+      >
         {heroImages.length > 0 ? (
-          <div className="max-hero-media" aria-hidden="true">
+          <div className="max-hero-media" aria-hidden="true" data-count={heroImages.length}>
             {heroImages.map((image, index) => (
               // Source images come from the owner's site and keep their original URL.
               // eslint-disable-next-line @next/next/no-img-element
-              <img key={image} className="max-hero-image" src={image} alt="" data-index={index} />
+              <img
+                key={image}
+                className="max-hero-image"
+                src={image}
+                alt=""
+                data-index={index}
+                referrerPolicy="no-referrer"
+              />
             ))}
           </div>
         ) : null}
         <div className="max-hero-copy">
-          <p className="max-hero-kicker">{kindKicker(config.kind)}</p>
+          <p className="max-hero-kicker">{config.kicker || kindKicker(config.kind)}</p>
           <h1>{config.title}</h1>
-          {config.tagline ? <p>{config.tagline}</p> : null}
+          {config.tagline ? <p className="max-hero-tagline">{config.tagline}</p> : null}
+          {highlights.length > 0 ? (
+            <dl className="max-highlights" data-count={highlights.length}>
+              {highlights.map((fact) => (
+                <div key={fact.value + fact.label} className="max-highlight">
+                  <dt>{fact.value}</dt>
+                  {fact.label ? <dd>{fact.label}</dd> : null}
+                </div>
+              ))}
+            </dl>
+          ) : null}
           {meta ? <p className="max-hero-meta">{meta}</p> : null}
         </div>
       </header>
+
+      {tickerWords.length > 0 ? (
+        <div className="max-marquee" aria-hidden="true" style={{ order: sectionRank("hero") }}>
+          <div className="max-marquee-track">
+            {[0, 1].map((copy) => (
+              <span key={copy} className="max-marquee-run">
+                {tickerWords.map((word) => (
+                  <span key={word} className="max-marquee-word">
+                    {word}
+                  </span>
+                ))}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {config.about ? (
         <p className="max-about" style={{ order: sectionRank("story") }}>
@@ -317,7 +336,9 @@ export function Storefront({ slug }: { slug: string }) {
 
       {config.items.length > 0 ? (
         <section className="max-catalog-section" style={{ order: sectionRank("catalog") }}>
-          <h2 className="max-section-title">{config.kind === "menu" ? "Меню" : "Услуги"}</h2>
+          <h2 className="max-section-title max-catalog-title">
+            {config.catalog_title || (config.kind === "menu" ? "Меню" : "Услуги")}
+          </h2>
           {categories.length > 1 && config.nav_style !== "none" ? (
             <nav className="max-category-nav" aria-label="Категории">
               <button
@@ -342,7 +363,7 @@ export function Storefront({ slug }: { slug: string }) {
             </nav>
           ) : null}
           <ul className="max-list">
-            {visibleItems.map((item) => {
+            {visibleItems.map((item, index) => {
               const price = priceLabel(item);
               const duration = durationLabel(item);
               const note = item.description;
@@ -353,6 +374,7 @@ export function Storefront({ slug }: { slug: string }) {
                     type="button"
                     className="max-option"
                     aria-pressed={active}
+                    data-photo={item.image_url ? "yes" : "no"}
                     onClick={() => setSelectedItem(item.title)}
                     disabled={busy}
                   >
@@ -362,14 +384,29 @@ export function Storefront({ slug }: { slug: string }) {
                         <img src={item.image_url} alt="" loading="lazy" referrerPolicy="no-referrer" />
                         {item.badge ? <span className="max-product-badge">{item.badge}</span> : null}
                       </span>
+                    ) : withMedia ? (
+                      // No photo: a tile in the storefront's own colours with the initial,
+                      // instead of a grey box that reads as "image failed to load".
+                      <span className="max-option-media max-option-tile" aria-hidden="true">
+                        <span className="max-option-initial">{item.title.trim().charAt(0)}</span>
+                        {item.badge ? <span className="max-product-badge">{item.badge}</span> : null}
+                      </span>
                     ) : null}
+                    <span className="max-option-index" aria-hidden="true">
+                      {String(index + 1).padStart(2, "0")}
+                    </span>
                     {/* A check mark, not just a border: on a small screen the selected row
                         has to be obvious at a glance. */}
                     <span className="max-radio" aria-hidden>
                       {active ? "✓" : ""}
                     </span>
                     <span className="max-option-label">
-                      <span className="max-option-title">{item.title}</span>
+                      <span className="max-option-title">
+                        {item.title}
+                        {item.badge && !withMedia ? (
+                          <span className="max-inline-badge">{item.badge}</span>
+                        ) : null}
+                      </span>
                       {note ? <span className="max-option-note">{note}</span> : null}
                     </span>
                     <span className="max-option-meta">

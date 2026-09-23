@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 import unicodedata
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 # Three storefront shapes cover the services micro-business actually asks for. They differ
 # in wording and in whether a time slot is part of the request, not in structure.
@@ -25,9 +25,25 @@ SERVICE_COLOR_SCHEMES = ("light", "dark")
 SERVICE_HEADING_STYLES = ("sans", "serif", "display")
 SERVICE_NAV_STYLES = ("tabs", "pills", "rail", "none")
 SERVICE_HERO_STYLES = ("split", "fullbleed", "editorial", "typographic", "collage")
-SERVICE_CARD_STYLES = ("image-top", "horizontal", "overlay", "minimal")
+SERVICE_CARD_STYLES = ("image-top", "horizontal", "overlay", "minimal", "numbered", "menu")
 SERVICE_RADIUS_STYLES = ("sharp", "soft", "round")
 SERVICE_DENSITIES = ("airy", "balanced", "compact")
+# Cyrillic-capable families the mini app actually ships. A name outside this list would
+# silently fall back to the system font, so it is dropped here instead.
+SERVICE_FONTS = (
+    "inter",
+    "manrope",
+    "rubik",
+    "unbounded",
+    "oswald",
+    "playfair",
+    "cormorant",
+    "lora",
+    "comfortaa",
+)
+SERVICE_PATTERNS = ("none", "grain", "dots", "grid", "rings", "stripes", "glow")
+SERVICE_HERO_TONES = ("accent", "tint", "plain", "ink")
+MAX_HIGHLIGHTS = 3
 
 MAX_ITEMS = 24
 MAX_SLOTS = 12
@@ -113,6 +129,67 @@ class ServiceItem(BaseModel):
         return value
 
 
+def _hex_rgb(value: str) -> tuple[float, float, float]:
+    raw = value.lstrip("#")
+    if len(raw) == 3:
+        raw = "".join(part * 2 for part in raw)
+    return tuple(int(raw[i : i + 2], 16) / 255 for i in (0, 2, 4))  # type: ignore[return-value]
+
+
+def relative_luminance(value: str) -> float:
+    def linear(channel: float) -> float:
+        return channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4
+
+    r, g, b = (linear(channel) for channel in _hex_rgb(value))
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def contrast_ratio(first: str, second: str) -> float:
+    a, b = sorted((relative_luminance(first), relative_luminance(second)), reverse=True)
+    return (a + 0.05) / (b + 0.05)
+
+
+class ServicePalette(BaseModel):
+    """The storefront's own colours. Empty means "use the mood preset".
+
+    The model is free to pick any colours - that freedom is most of what makes two
+    storefronts look unrelated - but a palette that would make the text unreadable is
+    dropped as a whole rather than half-applied.
+    """
+
+    bg: str = ""
+    surface: str = ""
+    ink: str = ""
+    accent2: str = ""
+
+    @field_validator("bg", "surface", "ink", "accent2", mode="before")
+    @classmethod
+    def _hex(cls, value: object) -> str:
+        colour = str(value or "").strip()
+        return colour if _HEX_COLOR_RE.match(colour) else ""
+
+    @model_validator(mode="after")
+    def _readable(self) -> ServicePalette:
+        if not (self.bg and self.ink) or contrast_ratio(self.ink, self.bg) < 7:
+            self.bg = self.surface = self.ink = ""
+            return self
+        if self.surface and contrast_ratio(self.ink, self.surface) < 6:
+            self.surface = ""
+        return self
+
+
+class ServiceHighlight(BaseModel):
+    """A short fact shown large in the hero: "45 мин" / "стрижка"."""
+
+    value: str = Field(min_length=1, max_length=16)
+    label: str = Field(default="", max_length=40)
+
+    @field_validator("value", "label", mode="before")
+    @classmethod
+    def _text(cls, value: object) -> str:
+        return str(value or "").strip()
+
+
 class ServiceContacts(BaseModel):
     phone: str = Field(default="", max_length=32)
     address: str = Field(default="", max_length=200)
@@ -122,6 +199,17 @@ class ServiceContacts(BaseModel):
     @classmethod
     def _text(cls, value: object) -> str:
         return str(value or "").strip()
+
+
+_TEXT_LIMITS = {
+    "title": 120,
+    "tagline": 160,
+    "about": 600,
+    "cta_label": 40,
+    "success_message": 160,
+    "comment_hint": 80,
+    "design_concept": 100,
+}
 
 
 class ServiceConfig(BaseModel):
@@ -152,6 +240,17 @@ class ServiceConfig(BaseModel):
     radius_style: str = "soft"
     density: str = "balanced"
     section_order: list[str] = Field(default_factory=lambda: ["hero", "story", "catalog"])
+    # Empty = derived from heading_style/mood on the client, so storefronts generated
+    # before these fields existed keep rendering as they did.
+    heading_font: str = ""
+    palette: ServicePalette = Field(default_factory=ServicePalette)
+    pattern: str = "none"
+    hero_tone: str = ""
+    # The line above the title ("Барбершоп с 2016"). Empty = the generic kind label.
+    kicker: str = Field(default="", max_length=48)
+    catalog_title: str = Field(default="", max_length=40)
+    highlights: list[ServiceHighlight] = Field(default_factory=list)
+    marquee: bool = False
     contacts: ServiceContacts = Field(default_factory=ServiceContacts)
     items: list[ServiceItem] = Field(default_factory=list)
     # Human-readable slots ("Вт 23 сен, 16:00"). The owner's calendar parses them.
@@ -234,6 +333,49 @@ class ServiceConfig(BaseModel):
         density = str(value or "").strip().lower()
         return density if density in SERVICE_DENSITIES else "balanced"
 
+    @field_validator("kicker", "catalog_title", mode="before")
+    @classmethod
+    def _short_label(cls, value: object) -> str:
+        # Decorative labels: an over-long one is trimmed, not a reason to reject the reply.
+        return str(value or "").strip()[:40]
+
+    @field_validator("heading_font", mode="before")
+    @classmethod
+    def _heading_font(cls, value: object) -> str:
+        font = str(value or "").strip().lower()
+        return font if font in SERVICE_FONTS else ""
+
+    @field_validator("pattern", mode="before")
+    @classmethod
+    def _pattern(cls, value: object) -> str:
+        pattern = str(value or "").strip().lower()
+        return pattern if pattern in SERVICE_PATTERNS else "none"
+
+    @field_validator("hero_tone", mode="before")
+    @classmethod
+    def _hero_tone(cls, value: object) -> str:
+        tone = str(value or "").strip().lower()
+        return tone if tone in SERVICE_HERO_TONES else ""
+
+    @field_validator("palette", mode="before")
+    @classmethod
+    def _palette(cls, value: object) -> object:
+        return value if isinstance(value, dict | ServicePalette) else {}
+
+    @field_validator("highlights", mode="before")
+    @classmethod
+    def _highlights(cls, value: object) -> list[object]:
+        if not isinstance(value, list):
+            return []
+        # One malformed fact must not cost the whole storefront its validation.
+        kept: list[object] = []
+        for entry in value:
+            try:
+                kept.append(ServiceHighlight.model_validate(entry))
+            except Exception:
+                continue
+        return kept[:MAX_HIGHLIGHTS]
+
     @field_validator("section_order", mode="before")
     @classmethod
     def _section_order(cls, value: object) -> list[str]:
@@ -259,8 +401,14 @@ class ServiceConfig(BaseModel):
         mode="before",
     )
     @classmethod
-    def _text(cls, value: object) -> str:
-        return str(value or "").strip()
+    def _text(cls, value: object, info: ValidationInfo) -> str:
+        text = str(value or "").strip()
+        # A richer prompt means longer copy; one sentence over the limit is trimmed at a
+        # word boundary instead of failing the whole storefront into a retry.
+        limit = _TEXT_LIMITS.get(info.field_name or "", 0)
+        if limit and len(text) > limit:
+            text = text[:limit].rsplit(" ", 1)[0].rstrip(" ,;:—-") or text[:limit]
+        return text
 
     @field_validator("accent", mode="before")
     @classmethod

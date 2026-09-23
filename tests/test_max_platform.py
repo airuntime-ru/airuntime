@@ -684,6 +684,82 @@ class TestServiceConfig:
         assert config.layout == "cards"
         assert config.heading_style == "serif"
 
+    def test_unreadable_palette_is_dropped_as_a_whole(self) -> None:
+        readable = ServiceConfig.model_validate(
+            {
+                "title": "Бар",
+                "palette": {
+                    "bg": "#0E0E0F",
+                    "surface": "#18181A",
+                    "ink": "#F2EFE8",
+                    "accent2": "#C98B1C",
+                },
+            }
+        )
+        assert readable.palette.bg == "#0E0E0F"
+        assert readable.palette.surface == "#18181A"
+        # Dark text on a dark green hero was the exact failure the old renderer shipped.
+        unreadable = ServiceConfig.model_validate(
+            {
+                "title": "Репетитор",
+                "palette": {"bg": "#1F4D3A", "ink": "#111111", "accent2": "#88AA99"},
+            }
+        )
+        assert (unreadable.palette.bg, unreadable.palette.ink) == ("", "")
+        assert unreadable.palette.accent2 == "#88AA99"
+        injected = ServiceConfig.model_validate(
+            {"title": "Студия", "palette": {"bg": "red;background:url(x)", "ink": "#000"}}
+        )
+        assert injected.palette.bg == ""
+
+    def test_design_vocabulary_is_closed(self) -> None:
+        config = ServiceConfig.model_validate(
+            {
+                "title": "Студия",
+                "heading_font": "Comic Sans",
+                "pattern": "url(x)",
+                "hero_tone": "neon",
+                "card_style": "numbered",
+            }
+        )
+        assert config.heading_font == ""
+        assert config.pattern == "none"
+        assert config.hero_tone == ""
+        assert config.card_style == "numbered"
+
+    def test_one_bad_highlight_does_not_cost_the_storefront(self) -> None:
+        config = ServiceConfig.model_validate(
+            {
+                "title": "Барбершоп",
+                "highlights": [
+                    {"value": "45 мин", "label": "стрижка"},
+                    {"value": "x" * 40},
+                    "not a fact",
+                    {"value": "10–22", "label": "каждый день"},
+                    {"value": "5", "label": "мастеров"},
+                ],
+            }
+        )
+        assert [fact.value for fact in config.highlights] == ["45 мин", "10–22", "5"]
+
+    def test_long_copy_is_trimmed_not_rejected(self) -> None:
+        config = ServiceConfig.model_validate(
+            {
+                "title": "Кофейня",
+                "tagline": "очень " * 60,
+                "cta_label": "Записаться на мужскую стрижку и бритьё прямо сейчас",
+                "kicker": "к" * 90,
+            }
+        )
+        assert 0 < len(config.tagline) <= 160
+        assert config.cta_label == "Записаться на мужскую стрижку и бритьё"
+        assert len(config.kicker) == 40
+
+    def test_barbershop_is_not_a_bar(self) -> None:
+        config = generator._fallback_config("Барбершоп на Лиговском")
+        assert config.kind == "booking"
+        assert config.heading_font == "oswald"
+
 
 class TestSlotLabels:
     def test_today_and_tomorrow_are_relative_to_the_lead_not_now(self) -> None:

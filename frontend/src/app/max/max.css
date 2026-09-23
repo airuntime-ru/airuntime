@@ -956,396 +956,540 @@
   visibility: hidden;
 }
 
-.max-shell[data-mood="calm"] {
-  --max-bg: #f3efe6;
-  --max-sheet: #fffcf6;
-  --max-ink: #1b1712;
-  --max-muted: #6d6558;
-  --max-line: rgba(27, 23, 18, 0.08);
+/* --- storefront design system --------------------------------------------------------
+   Colours arrive as variables resolved in lib/max/theme.ts (that is where contrast is
+   checked against the real palette). Everything below is composition: independent
+   primitives - typeface, hero, tone, texture, card, navigation, geometry, density - that
+   the generator combines per brief. None of them may assume a particular palette.
+
+   Mobile only: MAX opens mini apps in a phone-width webview, so every rule is written for
+   320-430px first and merely tolerates wider. */
+
+.max-shell {
+  --max-display: var(--font-inter), system-ui, sans-serif;
+  --max-display-weight: 750;
+  --max-display-tracking: -0.035em;
+  --max-display-case: none;
+  --max-display-scale: 1;
+  /* Average glyph width of the face, in em - what caps a headline to its longest word. */
+  --max-display-width: 0.6;
+  --max-radius: 16px;
+  --max-gutter: 16px;
+  padding-inline: var(--max-gutter);
 }
 
-.max-shell[data-mood="calm"] .max-hero {
-  background: color-mix(in srgb, var(--max-accent) 16%, #fffcf6);
-  color: var(--max-ink);
+.max-shell[data-body="manrope"] {
+  font-family: var(--max-font-manrope), system-ui, -apple-system, sans-serif;
 }
 
-.max-shell[data-mood="calm"] .max-hero p,
-.max-shell[data-mood="calm"] .max-hero-kicker,
-.max-shell[data-mood="calm"] .max-hero-meta {
-  color: var(--max-muted) !important;
+.max-shell[data-font="manrope"] { --max-display-width: 0.64; --max-display: var(--max-font-manrope), sans-serif; --max-display-weight: 800; }
+.max-shell[data-font="rubik"] { --max-display-width: 0.62; --max-display: var(--max-font-rubik), sans-serif; --max-display-weight: 700; --max-display-tracking: -0.025em; }
+.max-shell[data-font="unbounded"] { --max-display-width: 0.8; --max-display: var(--max-font-unbounded), sans-serif; --max-display-weight: 700; --max-display-tracking: -0.03em; --max-display-scale: 0.86; }
+.max-shell[data-font="oswald"] { --max-display-width: 0.46; --max-display: var(--max-font-oswald), sans-serif; --max-display-weight: 600; --max-display-tracking: 0; --max-display-case: uppercase; --max-display-scale: 1.12; }
+.max-shell[data-font="playfair"] { --max-display-width: 0.6; --max-display: var(--max-font-playfair), Georgia, serif; --max-display-weight: 600; --max-display-tracking: -0.02em; }
+.max-shell[data-font="cormorant"] { --max-display-width: 0.5; --max-display: var(--max-font-cormorant), Georgia, serif; --max-display-weight: 600; --max-display-tracking: -0.01em; --max-display-scale: 1.18; }
+.max-shell[data-font="lora"] { --max-display-width: 0.6; --max-display: var(--max-font-lora), Georgia, serif; --max-display-weight: 600; --max-display-tracking: -0.02em; }
+.max-shell[data-font="comfortaa"] { --max-display-width: 0.66; --max-display: var(--max-font-comfortaa), sans-serif; --max-display-weight: 700; --max-display-tracking: -0.02em; --max-display-scale: 0.94; }
+
+.max-shell[data-radius="sharp"] { --max-radius: 3px; }
+.max-shell[data-radius="soft"] { --max-radius: 16px; }
+.max-shell[data-radius="round"] { --max-radius: 26px; }
+
+/* --- hero ------------------------------------------------------------------------------ */
+
+.max-shell .max-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 22px 20px 20px;
+  border-radius: var(--max-radius);
+  background: var(--max-hero-bg);
+  color: var(--max-hero-ink);
 }
 
-.max-shell[data-mood="warm"] {
-  --max-bg: #f7eee6;
-  --max-sheet: #fffaf5;
-}
-
-.max-shell[data-mood="warm"] .max-hero {
-  background: linear-gradient(
-    145deg,
-    var(--max-accent),
-    color-mix(in srgb, var(--max-accent) 55%, #c45c26)
-  );
-}
-
-.max-shell[data-mood="minimal"] {
-  --max-bg: #f6f6f4;
-  --max-sheet: #ffffff;
-}
-
-.max-shell[data-mood="minimal"] .max-hero {
-  background: var(--max-sheet);
-  color: var(--max-ink);
+.max-shell[data-tone="plain"] .max-hero {
   border: 1px solid var(--max-line);
 }
 
-.max-shell[data-mood="minimal"] .max-hero p,
-.max-shell[data-mood="minimal"] .max-hero-kicker,
-.max-shell[data-mood="minimal"] .max-hero-meta {
-  color: var(--max-muted) !important;
+.max-shell .max-hero h1 {
+  margin: 0;
+  font-family: var(--max-display);
+  font-weight: var(--max-display-weight);
+  font-size: min(calc(clamp(1.95rem, 9.5vw, 2.7rem) * var(--max-display-scale)), var(--max-title-fit));
+  line-height: 1.02;
+  letter-spacing: var(--max-display-tracking);
+  text-transform: var(--max-display-case);
+  text-wrap: balance;
+  overflow-wrap: break-word;
+  hyphens: manual;
+  /* The hero's text box is the viewport minus gutters and hero padding (~80px). */
+  --max-title-fit: calc((min(100vw, 560px) - 84px) / (var(--max-title-chars, 8) * var(--max-display-width)));
 }
 
-/* Explicit, complete palettes. A scheme always sets every semantic colour together, so
-   host/browser dark mode can never leave a light card with light text. */
-.max-shell[data-scheme="light"] {
-  color-scheme: light;
+.max-shell .max-hero p,
+.max-shell .max-hero-kicker,
+.max-shell .max-hero-meta {
+  color: color-mix(in srgb, var(--max-hero-ink) 76%, transparent) !important;
 }
 
-.max-shell[data-scheme="dark"] {
-  color-scheme: dark;
-  --max-bg: #0d1015;
-  --max-sheet: #171b22;
-  --max-ink: #f4f6f9;
-  --max-muted: #a6afbd;
-  --max-line: rgba(255, 255, 255, 0.12);
-}
-
-.max-shell[data-scheme="dark"][data-mood="calm"] {
-  --max-bg: #12130f;
-  --max-sheet: #1c1e18;
-  --max-ink: #f3f0e6;
-  --max-muted: #b4ad9b;
-  --max-line: rgba(243, 240, 230, 0.13);
-}
-
-.max-shell[data-scheme="dark"][data-mood="warm"] {
-  --max-bg: #160f0b;
-  --max-sheet: #241a14;
-  --max-ink: #fff5eb;
-  --max-muted: #c9ad9a;
-  --max-line: rgba(255, 245, 235, 0.13);
-}
-
-.max-shell[data-scheme="dark"][data-mood="minimal"] {
-  --max-bg: #101112;
-  --max-sheet: #191a1c;
-  --max-ink: #f4f4f2;
-  --max-muted: #aaaead;
-  --max-line: rgba(255, 255, 255, 0.12);
-}
-
-.max-shell[data-scheme="dark"][data-mood="calm"] .max-hero,
-.max-shell[data-scheme="dark"][data-mood="minimal"] .max-hero {
-  background: color-mix(in srgb, var(--max-accent) 20%, var(--max-sheet));
-}
-
-.max-shell[data-heading="serif"] .max-hero h1,
-.max-shell[data-heading="serif"] .max-section-title {
-  font-family: Georgia, "Times New Roman", serif;
-}
-
-.max-shell[data-heading="serif"] .max-hero h1 {
-  font-weight: 500;
-  letter-spacing: -0.035em;
-}
-
-.max-shell[data-heading="display"] .max-hero h1 {
-  font-size: clamp(1.7rem, 8vw, 2.6rem);
-  line-height: 0.98;
-  font-weight: 800;
-  letter-spacing: -0.055em;
+.max-shell .max-hero-kicker {
+  margin: 0 0 12px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
-/* Editorial is spacious and typographic, not the same stack wearing another colour. */
-.max-shell[data-layout="editorial"] {
-  --max-radius: 4px;
-  padding-inline: 20px;
+.max-shell .max-hero-tagline {
+  margin: 10px 0 0;
+  max-width: 34ch;
+  font-size: 1rem;
+  line-height: 1.42;
 }
 
-.max-shell[data-layout="editorial"] .max-hero {
-  min-height: 260px;
-  display: flex;
-  align-items: flex-end;
-  padding: 24px;
+.max-shell .max-hero-meta {
+  margin-top: 14px !important;
+  font-size: 0.8rem !important;
 }
 
-.max-shell[data-layout="editorial"] .max-hero h1 {
-  font-size: clamp(2rem, 9vw, 3.1rem);
-  line-height: 0.98;
-}
-
-.max-shell[data-layout="editorial"] .max-hero-image {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  max-height: none;
-  margin: 0;
-  opacity: 0.44;
-}
-
-.max-shell[data-layout="editorial"] .max-hero:has(.max-hero-image)::after,
-.max-shell[data-layout="poster"] .max-hero:has(.max-hero-image)::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(180deg, transparent 10%, rgba(0, 0, 0, 0.72));
-}
-
-.max-shell[data-layout="editorial"] .max-about {
-  padding: 20px 0;
-  border-width: 0 0 1px;
-  background: transparent;
-  font-size: 1.05rem;
-}
-
-/* Catalog cards use two columns when there is room and move price under the copy. */
-.max-shell[data-layout="cards"] .max-list {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.max-shell[data-layout="cards"] .max-option {
-  min-height: 132px;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  padding: 16px;
-}
-
-.max-shell[data-layout="cards"] .max-option-label {
-  flex-basis: calc(100% - 38px);
-}
-
-.max-shell[data-layout="cards"] .max-option-meta {
-  width: 100%;
-  padding-left: 34px;
-  align-self: flex-end;
-}
-
-/* Poster makes the identity dominant, suitable for events and bold brands. */
-.max-shell[data-layout="poster"] {
-  padding: 0 14px;
-}
-
-.max-shell[data-layout="poster"] .max-hero {
-  min-height: min(68vh, 520px);
-  margin-inline: -14px;
-  border-radius: 0 0 28px 28px;
-  display: flex;
-  align-items: flex-end;
-  padding: 28px 22px;
-}
-
-.max-shell[data-layout="poster"] .max-hero-image {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  max-height: none;
-  margin: 0;
-  opacity: 0.72;
-}
-
-.max-shell[data-layout="poster"] .max-hero:has(.max-hero-image) {
-  color: #ffffff;
-  --max-on-accent: #ffffff;
-}
-
-.max-shell[data-layout="editorial"] .max-hero:has(.max-hero-image) {
-  color: #ffffff;
-  --max-on-accent: #ffffff;
-}
-
-/* --- generated visual language -------------------------------------------------------
-   These are composition primitives, not templates. The design model chooses a hero,
-   navigation, card treatment, density and geometry independently for every brief. */
-
-.max-shell[data-radius="sharp"] { --max-radius: 2px; }
-.max-shell[data-radius="soft"] { --max-radius: 16px; }
-.max-shell[data-radius="round"] { --max-radius: 28px; }
-.max-shell[data-density="airy"] .max-list { gap: 16px; }
-.max-shell[data-density="airy"] .max-section-title { margin-top: 32px; }
-.max-shell[data-density="compact"] .max-list { gap: 5px; }
-.max-shell[data-density="compact"] .max-option { padding: 10px 12px; }
-
-.max-category-nav {
-  display: flex;
-  gap: 8px;
-  margin: 0 -16px 13px;
-  padding: 2px 16px 5px;
-  overflow-x: auto;
-  overscroll-behavior-inline: contain;
-  scrollbar-width: none;
-}
-
-.max-category-nav::-webkit-scrollbar { display: none; }
-
-.max-category {
-  flex: 0 0 auto;
-  min-height: 38px;
-  padding: 8px 14px;
-  border: 1px solid var(--max-line);
-  border-radius: 999px;
-  background: var(--max-sheet);
-  color: var(--max-muted);
-  font: inherit;
-  font-size: 0.85rem;
-  cursor: pointer;
-}
-
-.max-category[aria-pressed="true"] {
-  border-color: var(--max-accent);
-  background: var(--max-accent);
-  color: var(--max-on-accent);
-  font-weight: 650;
-}
-
-.max-shell[data-nav="tabs"] .max-category-nav {
-  gap: 18px;
-  border-bottom: 1px solid var(--max-line);
-}
-
-.max-shell[data-nav="tabs"] .max-category {
-  min-height: 42px;
-  padding: 8px 0;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  border-radius: 0;
-  background: transparent;
-}
-
-.max-shell[data-nav="tabs"] .max-category[aria-pressed="true"] {
-  border-bottom-color: var(--max-accent);
-  color: var(--max-accent);
-}
-
-.max-shell[data-nav="rail"] .max-category-nav {
-  padding-block: 8px;
-  background: color-mix(in srgb, var(--max-accent) 7%, var(--max-bg));
-}
-
-.max-hero-media {
+.max-shell .max-hero-media {
   position: relative;
   z-index: 0;
   overflow: hidden;
-  width: calc(100% + 36px);
-  height: 230px;
-  margin: -16px -18px 18px;
+  width: calc(100% + 40px);
+  height: 224px;
+  margin: -22px -20px 20px;
 }
 
-.max-hero-media .max-hero-image {
+.max-shell .max-hero-media .max-hero-image {
+  display: block;
   width: 100%;
   height: 100%;
   max-height: none;
   margin: 0;
   object-fit: cover;
+  opacity: 1;
 }
 
-.max-shell[data-hero="fullbleed"] .max-hero,
-.max-shell[data-hero="editorial"] .max-hero {
-  min-height: min(72vh, 560px);
-  display: flex;
-  align-items: flex-end;
-  padding: 28px 22px;
-  color: #ffffff;
-  --max-on-accent: #ffffff;
+/* Facts in the hero: large numbers read at a glance, which a paragraph never does. */
+.max-highlights {
+  display: grid;
+  grid-template-columns: repeat(var(--count, 3), minmax(0, 1fr));
+  gap: 10px;
+  margin: 20px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid color-mix(in srgb, var(--max-hero-ink) 22%, transparent);
 }
 
-.max-shell[data-hero="fullbleed"] .max-hero-media,
-.max-shell[data-hero="editorial"] .max-hero-media {
+.max-highlights[data-count="1"] { --count: 1; }
+.max-highlights[data-count="2"] { --count: 2; }
+
+.max-highlight dt {
+  font-family: var(--max-display);
+  font-weight: var(--max-display-weight);
+  font-size: calc(1.3rem * var(--max-display-scale));
+  line-height: 1.05;
+  letter-spacing: var(--max-display-tracking);
+  overflow-wrap: anywhere;
+}
+
+.max-highlight dd {
+  margin: 4px 0 0;
+  font-size: 0.74rem;
+  line-height: 1.3;
+  color: color-mix(in srgb, var(--max-hero-ink) 70%, transparent);
+}
+
+/* Full bleed: the brand owns the first screen, edge to edge. */
+.max-shell[data-hero="fullbleed"] .max-hero {
+  justify-content: flex-end;
+  min-height: min(48svh, 400px);
+  margin: -16px calc(-1 * var(--max-gutter)) 0;
+  padding: 30px var(--max-gutter) 24px;
+  border-radius: 0 0 calc(var(--max-radius) + 10px) calc(var(--max-radius) + 10px);
+  border: 0;
+}
+
+.max-shell[data-hero="fullbleed"] .max-hero[data-has-image="yes"] {
+  min-height: min(62svh, 540px);
+}
+
+.max-shell[data-hero="fullbleed"] .max-hero h1 {
+  font-size: min(calc(clamp(2.3rem, 12vw, 3.5rem) * var(--max-display-scale)), var(--max-title-fit));
+  line-height: 0.96;
+}
+
+/* Photo behind text: the text is always white on a scrim, whatever the palette says. */
+.max-shell[data-hero="fullbleed"] .max-hero[data-has-image="yes"],
+.max-shell[data-hero="split"][data-layout="poster"] .max-hero[data-has-image="yes"] {
+  --max-hero-ink: #ffffff;
+}
+
+.max-shell[data-hero="fullbleed"] .max-hero[data-has-image="yes"] .max-hero-media {
   position: absolute;
   inset: 0;
+  z-index: -2;
   width: 100%;
   height: 100%;
   margin: 0;
 }
 
-.max-shell[data-hero="fullbleed"] .max-hero::after,
-.max-shell[data-hero="editorial"] .max-hero::after {
+.max-shell[data-hero="fullbleed"] .max-hero[data-has-image="yes"]::after {
   content: "";
   position: absolute;
   inset: 0;
-  z-index: 0;
-  background: linear-gradient(180deg, rgba(0, 0, 0, 0.04) 20%, rgba(0, 0, 0, 0.78) 100%);
+  z-index: -1;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.05) 18%, rgba(0, 0, 0, 0.78) 100%);
+}
+
+/* Editorial: no box at all - a magazine opening with a framed photo under the headline. */
+.max-shell[data-hero="editorial"] .max-hero {
+  padding: 18px 2px 6px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--max-ink);
+  --max-hero-ink: var(--max-ink);
+  overflow: visible;
 }
 
 .max-shell[data-hero="editorial"] .max-hero h1 {
-  max-width: 10ch;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(2.25rem, 11vw, 4rem);
-  font-weight: 500;
-  line-height: 0.93;
+  font-size: min(calc(clamp(2.4rem, 12.5vw, 3.7rem) * var(--max-display-scale)), var(--max-title-fit));
+  line-height: 0.95;
 }
 
-.max-shell[data-hero="typographic"] .max-hero {
-  min-height: 300px;
+.max-shell[data-hero="editorial"] .max-hero-kicker {
   display: flex;
-  align-items: flex-end;
-  background: var(--max-accent);
+  align-items: center;
+  gap: 10px;
+  color: var(--max-accent-ink) !important;
+}
+
+.max-shell[data-hero="editorial"] .max-hero-kicker::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.45;
+}
+
+.max-shell[data-hero="editorial"] .max-hero-media {
+  order: 2;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 4 / 3;
+  margin: 20px 0 0;
+  border-radius: var(--max-radius);
+}
+
+/* Typographic: the name is the picture. */
+.max-shell[data-hero="typographic"] .max-hero {
+  justify-content: flex-end;
+  min-height: min(52svh, 440px);
+  margin-inline: calc(-1 * var(--max-gutter) + 6px);
+  padding: 26px 20px 22px;
 }
 
 .max-shell[data-hero="typographic"] .max-hero h1 {
-  max-width: 9ch;
-  font-size: clamp(2.3rem, 12vw, 4.4rem);
-  font-weight: 800;
-  line-height: 0.86;
-  letter-spacing: -0.065em;
+  max-width: 11ch;
+  font-size: min(calc(clamp(2.7rem, 15vw, 4.8rem) * var(--max-display-scale)), var(--max-title-fit));
+  line-height: 0.9;
 }
 
 .max-shell[data-hero="typographic"] .max-hero-media {
   position: absolute;
-  inset: 0 0 auto auto;
-  width: 58%;
-  height: 62%;
+  top: 18px;
+  right: 18px;
+  z-index: 0;
+  width: 38%;
+  height: auto;
+  aspect-ratio: 1;
   margin: 0;
-  opacity: 0.35;
-  border-radius: 0 0 0 100%;
+  border-radius: 999px;
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--max-hero-ink) 16%, transparent);
 }
 
-.max-shell[data-hero="collage"] .max-hero {
-  padding-top: 16px;
-  background: color-mix(in srgb, var(--max-accent) 12%, var(--max-sheet));
-  color: var(--max-ink);
-}
-
-.max-shell[data-hero="collage"] .max-hero p,
-.max-shell[data-hero="collage"] .max-hero-kicker,
-.max-shell[data-hero="collage"] .max-hero-meta { color: var(--max-muted) !important; }
-
+/* Collage: copy first, then a mosaic of real photos from the catalogue. */
 .max-shell[data-hero="collage"] .max-hero-media {
+  order: 2;
   display: grid;
-  grid-template-columns: 1.35fr 0.65fr;
+  grid-template-columns: 1.4fr 1fr;
   grid-template-rows: 1fr 1fr;
-  gap: 5px;
-  height: 260px;
+  gap: 6px;
+  width: 100%;
+  height: 250px;
+  margin: 20px 0 0;
+  background: transparent;
+}
+
+.max-shell[data-hero="collage"] .max-hero-image {
+  border-radius: calc(var(--max-radius) * 0.6);
 }
 
 .max-shell[data-hero="collage"] .max-hero-image:first-child { grid-row: 1 / 3; }
+.max-shell[data-hero="collage"] .max-hero-media[data-count="1"] .max-hero-image { grid-column: 1 / 3; }
+.max-shell[data-hero="collage"] .max-hero-media[data-count="2"] .max-hero-image:nth-child(2) { grid-row: 1 / 3; }
 
-.max-shell[data-hero="collage"] .max-hero-image:only-child {
-  grid-column: 1 / 3;
+/* Texture for heroes without a photo. Pure CSS; ink-coloured so it works on any tone. */
+.max-shell .max-hero[data-has-image="no"]::before,
+.max-shell[data-hero="collage"] .max-hero::before,
+.max-shell[data-hero="editorial"] .max-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  --max-texture: color-mix(in srgb, var(--max-hero-ink) 20%, transparent);
 }
 
-.max-option-media {
+.max-shell[data-hero="editorial"] .max-hero::before { display: none; }
+
+.max-shell[data-pattern="dots"] .max-hero::before {
+  background-image: radial-gradient(var(--max-texture) 1.3px, transparent 1.7px);
+  background-size: 15px 15px;
+  mask-image: linear-gradient(205deg, #000 5%, transparent 62%);
+}
+
+.max-shell[data-pattern="grid"] .max-hero::before {
+  background-image:
+    linear-gradient(var(--max-texture) 1px, transparent 1px),
+    linear-gradient(90deg, var(--max-texture) 1px, transparent 1px);
+  background-size: 24px 24px;
+  mask-image: radial-gradient(120% 90% at 100% 0%, #000 10%, transparent 70%);
+}
+
+.max-shell[data-pattern="rings"] .max-hero::before {
+  background: repeating-radial-gradient(
+    circle at 105% -5%,
+    transparent 0 22px,
+    var(--max-texture) 22px 23.5px
+  );
+  mask-image: radial-gradient(90% 80% at 100% 0%, #000 20%, transparent 75%);
+}
+
+.max-shell[data-pattern="stripes"] .max-hero::before {
+  background: repeating-linear-gradient(-55deg, var(--max-texture) 0 2px, transparent 2px 14px);
+  mask-image: linear-gradient(200deg, #000 0%, transparent 55%);
+}
+
+.max-shell[data-pattern="glow"] .max-hero::before {
+  background:
+    radial-gradient(60% 55% at 92% 8%, color-mix(in srgb, var(--max-accent-2) 85%, transparent), transparent 70%),
+    radial-gradient(55% 50% at 0% 100%, color-mix(in srgb, var(--max-hero-ink) 16%, transparent), transparent 70%);
+  filter: blur(6px);
+}
+
+.max-shell[data-pattern="grain"] .max-hero::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 .55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  mix-blend-mode: overlay;
+  opacity: 0.7;
+}
+
+/* --- ticker ------------------------------------------------------------------------------ */
+
+.max-marquee {
+  overflow: hidden;
+  margin: 14px calc(-1 * var(--max-gutter)) 0;
+  padding: 11px 0;
+  background: var(--max-accent);
+  color: var(--max-on-accent);
+  font-family: var(--max-display);
+  font-weight: var(--max-display-weight);
+  font-size: 0.92rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.max-shell[data-hero="fullbleed"] .max-marquee {
+  margin-top: 0;
+}
+
+.max-marquee-track {
+  display: flex;
+  width: max-content;
+  animation: max-marquee 26s linear infinite;
+}
+
+.max-marquee-run {
+  display: flex;
+}
+
+.max-marquee-word::after {
+  content: "✦";
+  margin: 0 16px;
+  opacity: 0.65;
+}
+
+@keyframes max-marquee {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .max-marquee-track {
+    animation: none;
+  }
+}
+
+/* --- story ------------------------------------------------------------------------------- */
+
+.max-shell .max-about {
+  margin-top: 14px;
+  padding: 16px 18px;
+  font-size: 0.98rem;
+  line-height: 1.5;
+}
+
+.max-shell[data-hero="editorial"] .max-about,
+.max-shell[data-hero="typographic"] .max-about,
+.max-shell[data-hero="fullbleed"] .max-about {
+  padding: 18px 2px 2px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 1.06rem;
+}
+
+.max-shell[data-hero="editorial"] .max-about {
+  border-top: 1px solid var(--max-line);
+  margin-top: 20px;
+}
+
+/* --- catalogue ----------------------------------------------------------------------------- */
+
+.max-shell .max-catalog-title {
+  margin: 30px 0 14px;
+  font-family: var(--max-display);
+  font-weight: var(--max-display-weight);
+  font-size: calc(1.5rem * var(--max-display-scale));
+  line-height: 1.1;
+  letter-spacing: var(--max-display-tracking);
+  text-transform: var(--max-display-case);
+  color: var(--max-ink);
+}
+
+/* Categories stay on screen while the customer scrolls a long menu. */
+.max-shell .max-category-nav {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  gap: 8px;
+  margin: 0 calc(-1 * var(--max-gutter)) 14px;
+  padding: 8px var(--max-gutter);
+  background: color-mix(in srgb, var(--max-bg) 92%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: none;
+}
+
+.max-shell .max-category {
+  flex: 0 0 auto;
+  min-height: 40px;
+  padding: 8px 16px;
+  border: 1px solid var(--max-line);
+  border-radius: 999px;
+  background: var(--max-sheet);
+  color: var(--max-ink);
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.max-shell .max-category[aria-pressed="true"] {
+  border-color: var(--max-accent);
+  background: var(--max-accent);
+  color: var(--max-on-accent);
+  font-weight: 700;
+}
+
+.max-shell[data-nav="tabs"] .max-category-nav {
+  gap: 22px;
+  padding-bottom: 0;
+  box-shadow: inset 0 -1px 0 var(--max-line);
+}
+
+.max-shell[data-nav="tabs"] .max-category {
+  min-height: 44px;
+  padding: 8px 0;
+  border: 0;
+  border-bottom: 2.5px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--max-muted);
+}
+
+.max-shell[data-nav="tabs"] .max-category[aria-pressed="true"] {
+  border-bottom-color: var(--max-accent-ink);
+  background: transparent;
+  color: var(--max-ink);
+}
+
+/* Rail: a segmented control, one pill-shaped track. */
+.max-shell[data-nav="rail"] .max-category-nav {
+  gap: 0;
+}
+
+.max-shell[data-nav="rail"] .max-category {
+  border-radius: 0;
+  border-width: 1px 0 1px 1px;
+}
+
+.max-shell[data-nav="rail"] .max-category:first-child {
+  border-radius: var(--max-radius) 0 0 var(--max-radius);
+}
+
+.max-shell[data-nav="rail"] .max-category:last-child {
+  border-right-width: 1px;
+  border-radius: 0 var(--max-radius) var(--max-radius) 0;
+}
+
+.max-shell .max-option {
+  border-radius: var(--max-radius);
+}
+
+.max-shell .max-option-price {
+  font-weight: 750;
+}
+
+.max-shell .max-option[aria-pressed="true"] .max-option-price {
+  color: var(--max-accent-ink);
+}
+
+.max-option-index {
+  display: none;
+}
+
+.max-inline-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--max-accent) 16%, transparent);
+  color: var(--max-accent-ink);
+  font-size: 0.64rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: 2px;
+}
+
+.max-shell .max-option-media {
   position: relative;
   flex: 0 0 auto;
   display: block;
   overflow: hidden;
   width: 84px;
   height: 84px;
-  border-radius: calc(var(--max-radius) - 4px);
-  background: color-mix(in srgb, var(--max-accent) 8%, var(--max-bg));
+  border-radius: calc(var(--max-radius) * 0.7);
+  background: color-mix(in srgb, var(--max-accent) 10%, var(--max-bg));
 }
 
 .max-option-media img {
@@ -1355,24 +1499,55 @@
   object-fit: cover;
 }
 
+/* The stand-in for a missing photo: the storefront's own gradient and an initial. */
+.max-shell .max-option-tile {
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(80% 70% at 85% 10%, color-mix(in srgb, var(--max-on-accent) 22%, transparent), transparent 60%),
+    linear-gradient(145deg, var(--max-accent), var(--max-accent-2));
+  color: var(--max-on-accent);
+}
+
+.max-option-initial {
+  font-family: var(--max-display);
+  font-weight: var(--max-display-weight);
+  font-size: 2.2rem;
+  line-height: 1;
+  text-transform: uppercase;
+  opacity: 0.92;
+}
+
 .max-product-badge {
   position: absolute;
-  left: 7px;
-  top: 7px;
-  padding: 4px 7px;
+  left: 8px;
+  top: 8px;
+  padding: 4px 8px;
   border-radius: 999px;
   background: var(--max-accent);
   color: var(--max-on-accent);
   font-size: 0.62rem;
-  font-weight: 700;
+  font-weight: 750;
   line-height: 1;
   text-transform: uppercase;
 }
 
-.max-shell[data-card="horizontal"] .max-list { grid-template-columns: 1fr; }
-.max-shell[data-card="horizontal"] .max-option { padding: 8px; flex-wrap: nowrap; }
-.max-shell[data-card="horizontal"] .max-option-media { width: 112px; height: 106px; }
+.max-option-tile .max-product-badge {
+  background: var(--max-sheet);
+  color: var(--max-ink);
+}
 
+/* Horizontal: photo (or tile) on the left, copy on the right. */
+.max-shell[data-card="horizontal"] .max-option {
+  padding: 8px 14px 8px 8px;
+}
+
+.max-shell[data-card="horizontal"] .max-option-media {
+  width: 92px;
+  height: 92px;
+}
+
+/* Image-top: a two-column product grid. */
 .max-shell[data-card="image-top"] .max-list,
 .max-shell[data-card="overlay"] .max-list {
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1384,8 +1559,7 @@
   height: 100%;
   flex-direction: column;
   align-items: stretch;
-  flex-wrap: nowrap;
-  gap: 10px;
+  gap: 8px;
   padding: 0 0 14px;
   overflow: hidden;
 }
@@ -1393,34 +1567,53 @@
 .max-shell[data-card="image-top"] .max-option-media {
   width: 100%;
   height: auto;
-  aspect-ratio: 1 / 0.78;
+  aspect-ratio: 1 / 0.82;
   border-radius: 0;
 }
 
 .max-shell[data-card="image-top"] .max-option-label,
 .max-shell[data-card="image-top"] .max-option-meta {
-  flex: 0 0 auto;
   width: 100%;
   padding-inline: 12px;
   align-items: flex-start;
 }
 
-.max-shell[data-card="image-top"] .max-radio {
+.max-shell[data-card="image-top"] .max-option-meta {
+  margin-top: auto;
+}
+
+.max-shell[data-card="image-top"] .max-radio,
+.max-shell[data-card="overlay"] .max-radio {
   position: absolute;
   top: 10px;
   right: 10px;
   z-index: 2;
-  background: color-mix(in srgb, var(--max-sheet) 88%, transparent);
+  background: color-mix(in srgb, var(--max-sheet) 85%, transparent);
+  border-color: transparent;
 }
 
+.max-shell[data-card="image-top"] .max-option[aria-pressed="true"] .max-radio,
+.max-shell[data-card="overlay"] .max-option[aria-pressed="true"] .max-radio {
+  background: var(--max-accent);
+}
+
+/* Overlay: tall tiles with the copy set on the picture. */
 .max-shell[data-card="overlay"] .max-option {
   position: relative;
-  min-height: 220px;
-  overflow: hidden;
-  align-items: flex-end;
+  min-height: 214px;
+  height: 100%;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-end;
+  gap: 6px;
   padding: 14px;
+  overflow: hidden;
   border: 0;
   color: #ffffff;
+}
+
+.max-shell[data-card="overlay"] .max-option[data-photo="no"] {
+  color: var(--max-on-accent);
 }
 
 .max-shell[data-card="overlay"] .max-option-media {
@@ -1431,40 +1624,167 @@
   border-radius: 0;
 }
 
-.max-shell[data-card="overlay"] .max-option::after {
+.max-shell[data-card="overlay"] .max-option-tile .max-option-initial {
+  position: absolute;
+  top: 12px;
+  left: 14px;
+  font-size: 3.4rem;
+  opacity: 0.34;
+}
+
+.max-shell[data-card="overlay"] .max-option[data-photo="yes"]::after {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, transparent 28%, rgba(0, 0, 0, 0.8));
+  background: linear-gradient(180deg, transparent 30%, rgba(0, 0, 0, 0.82));
 }
 
 .max-shell[data-card="overlay"] .max-option-label,
-.max-shell[data-card="overlay"] .max-option-meta,
-.max-shell[data-card="overlay"] .max-radio { position: relative; z-index: 1; }
-
-.max-shell[data-card="overlay"] .max-option-label { flex-basis: auto; }
+.max-shell[data-card="overlay"] .max-option-meta {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
+  align-items: flex-start;
+}
 
 .max-shell[data-card="overlay"] .max-option-note,
-.max-shell[data-card="overlay"] .max-duration { color: rgba(255, 255, 255, 0.78); }
-
-.max-shell[data-card="overlay"] .max-radio {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  border-color: rgba(255, 255, 255, 0.7);
+.max-shell[data-card="overlay"] .max-duration {
+  color: color-mix(in srgb, currentColor 78%, transparent);
 }
 
-.max-shell[data-card="overlay"] .max-option-meta {
-  position: absolute;
-  right: 13px;
-  bottom: 13px;
-  color: #ffffff;
+.max-shell[data-card="overlay"] .max-option[aria-pressed="true"] {
+  box-shadow: 0 0 0 3px var(--max-accent), 0 0 0 5px var(--max-bg);
 }
 
-.max-shell[data-card="minimal"] .max-option-media { width: 60px; height: 60px; }
+.max-shell[data-card="overlay"] .max-option[aria-pressed="true"] .max-option-price {
+  color: inherit;
+}
 
-@media (max-width: 380px) {
-  .max-shell[data-layout="cards"] .max-list,
+/* Numbered: an open list with large indices - reads like a considered programme. */
+.max-shell[data-card="numbered"] .max-list,
+.max-shell[data-card="menu"] .max-list {
+  gap: 0;
+  border-top: 1px solid var(--max-line);
+}
+
+.max-shell[data-card="numbered"] .max-option,
+.max-shell[data-card="menu"] .max-option {
+  padding: 16px 6px;
+  border: 0;
+  border-bottom: 1px solid var(--max-line);
+  border-radius: 0;
+  background: transparent;
+}
+
+.max-shell[data-card="numbered"] .max-option[aria-pressed="true"],
+.max-shell[data-card="menu"] .max-option[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--max-accent) 10%, transparent);
+  box-shadow: inset 3px 0 0 var(--max-accent);
+}
+
+.max-shell[data-card="numbered"] .max-option-index {
+  display: block;
+  flex: 0 0 auto;
+  min-width: 2.1em;
+  font-family: var(--max-display);
+  font-weight: var(--max-display-weight);
+  font-size: calc(1.5rem * var(--max-display-scale));
+  line-height: 1;
+  color: var(--max-accent-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.max-shell[data-card="numbered"] .max-radio,
+.max-shell[data-card="menu"] .max-radio {
+  display: none;
+}
+
+.max-shell[data-card="numbered"] .max-option[aria-pressed="true"] .max-radio,
+.max-shell[data-card="menu"] .max-option[aria-pressed="true"] .max-radio {
+  display: grid;
+  order: 9;
+}
+
+.max-shell[data-card="numbered"] .max-option-title {
+  font-size: 1.04rem;
+  font-weight: 650;
+}
+
+/* Menu: title, dotted leader, price - the way a printed menu sets a price list. */
+.max-shell[data-card="menu"] .max-option {
+  align-items: baseline;
+  flex-wrap: nowrap;
+}
+
+.max-shell[data-card="menu"] .max-option-label {
+  flex: 0 1 auto;
+}
+
+.max-shell[data-card="menu"] .max-option-meta {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 5.5em;
+}
+
+.max-shell[data-card="menu"] .max-option-meta::before {
+  content: "";
+  flex: 1;
+  min-width: 14px;
+  border-bottom: 2px dotted var(--max-line);
+  transform: translateY(-4px);
+}
+
+.max-shell[data-card="menu"] .max-option-title {
+  font-family: var(--max-display);
+  font-weight: calc(var(--max-display-weight) - 100);
+  font-size: calc(1.06rem * var(--max-display-scale));
+}
+
+/* --- density ------------------------------------------------------------------------------- */
+
+.max-shell[data-density="airy"] .max-list { gap: 16px; }
+.max-shell[data-density="airy"] .max-catalog-title { margin-top: 38px; }
+.max-shell[data-density="compact"] .max-list { gap: 6px; }
+.max-shell[data-density="compact"] .max-option { padding-block: 10px; }
+.max-shell[data-density="airy"][data-card="numbered"] .max-list,
+.max-shell[data-density="airy"][data-card="menu"] .max-list,
+.max-shell[data-density="compact"][data-card="numbered"] .max-list,
+.max-shell[data-density="compact"][data-card="menu"] .max-list { gap: 0; }
+
+/* --- action bar ------------------------------------------------------------------------------ */
+
+.max-shell .max-submit-bar {
+  margin-inline: calc(-1 * var(--max-gutter));
+  padding: 12px var(--max-gutter) max(12px, env(safe-area-inset-bottom));
+  background: color-mix(in srgb, var(--max-bg) 86%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 -1px 0 var(--max-line);
+}
+
+.max-shell .max-button {
+  min-height: 54px;
+  border-radius: min(var(--max-radius), 18px);
+  font-weight: 750;
+  font-size: 1.02rem;
+}
+
+.max-shell .max-chip {
+  border-radius: min(var(--max-radius), 999px);
+}
+
+.max-shell .max-success h1 {
+  font-family: var(--max-display);
+  font-weight: var(--max-display-weight) !important;
+  letter-spacing: var(--max-display-tracking);
+}
+
+/* Two columns stay down to the narrowest phones MAX runs on; one column only below. */
+@media (max-width: 330px) {
   .max-shell[data-card="image-top"] .max-list,
   .max-shell[data-card="overlay"] .max-list {
     grid-template-columns: 1fr;
@@ -1698,4 +2018,16 @@
   white-space: nowrap;
   font-size: 0.75rem;
   opacity: 0.75;
+}
+
+/* Accent as text must use the contrast-checked variant (a pale gold accent is a fine button
+   and an unreadable label). */
+.max-shell .max-button-quiet,
+.max-shell .max-button-secondary {
+  color: var(--max-accent-ink);
+}
+
+.max-shell[data-card="overlay"] .max-option[aria-pressed="true"] .max-radio {
+  background: var(--max-sheet);
+  color: var(--max-accent-ink);
 }
