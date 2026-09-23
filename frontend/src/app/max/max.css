@@ -171,6 +171,111 @@
   border-color: var(--max-accent);
 }
 
+.max-product-row {
+  min-width: 0;
+}
+
+.max-quantity {
+  display: grid;
+  grid-template-columns: 40px minmax(34px, auto) 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: 7px 6px 0;
+  padding: 4px;
+  border: 1px solid var(--max-line);
+  border-radius: 999px;
+  background: var(--max-sheet);
+  color: var(--max-ink);
+  box-shadow: 0 5px 18px color-mix(in srgb, var(--max-ink) 7%, transparent);
+}
+
+.max-quantity button {
+  width: 40px;
+  height: 36px;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--max-accent) 12%, var(--max-sheet));
+  color: var(--max-accent-ink);
+  font: inherit;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.max-quantity button:disabled {
+  opacity: 0.45;
+}
+
+.max-quantity > span {
+  min-width: 34px;
+  text-align: center;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+
+.max-cart {
+  margin-top: 24px;
+  padding: 18px;
+  border: 1px solid var(--max-line);
+  border-radius: var(--max-radius);
+  background: var(--max-sheet);
+}
+
+.max-cart-head,
+.max-cart-total,
+.max-cart li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.max-cart-head .max-section-title {
+  margin: 0;
+}
+
+.max-cart-head > span {
+  color: var(--max-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.max-cart ul {
+  display: grid;
+  gap: 9px;
+  margin: 15px 0 0;
+  padding: 15px 0 0;
+  border-top: 1px solid var(--max-line);
+  list-style: none;
+}
+
+.max-cart li {
+  font-size: 0.88rem;
+}
+
+.max-cart li span:first-child {
+  min-width: 0;
+  font-weight: 650;
+}
+
+.max-cart li span:last-child {
+  flex: 0 0 auto;
+  color: var(--max-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.max-cart-total {
+  margin-top: 15px;
+  padding-top: 13px;
+  border-top: 1px solid var(--max-line);
+}
+
+.max-cart-total strong {
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .max-option-label {
   flex: 1 1 auto;
   min-width: 0;
@@ -1597,6 +1702,21 @@
   background: var(--max-accent);
 }
 
+/* A quantity stepper is a sibling of the product button. Let it participate in the grid
+   row height: `height: 100%` on the old single-select card made the next row cover it. */
+.max-shell[data-card="image-top"] .max-product-row,
+.max-shell[data-card="overlay"] .max-product-row {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.max-shell[data-card="image-top"] .max-product-row > .max-option,
+.max-shell[data-card="overlay"] .max-product-row > .max-option {
+  height: auto;
+  flex: 1 1 auto;
+}
+
 /* Overlay: tall tiles with the copy set on the picture. */
 .max-shell[data-card="overlay"] .max-option {
   position: relative;
@@ -1758,9 +1878,12 @@
 /* --- action bar ------------------------------------------------------------------------------ */
 
 .max-shell .max-submit-bar {
+  /* Above the sticky category bar and the overlay cards, whose z-indexed copy would
+     otherwise paint over the order button while the list scrolls under it. */
+  z-index: 10;
   margin-inline: calc(-1 * var(--max-gutter));
   padding: 12px var(--max-gutter) max(12px, env(safe-area-inset-bottom));
-  background: color-mix(in srgb, var(--max-bg) 86%, transparent);
+  background: color-mix(in srgb, var(--max-bg) 94%, transparent);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   box-shadow: 0 -1px 0 var(--max-line);
@@ -2314,6 +2437,7 @@
 
 .max-sample-c {
   right: 0;
+  z-index: 2;
   top: 10px;
   transform: rotate(5deg);
   background: #f5f3ec;
@@ -2797,6 +2921,42 @@
   font-size: 0.92rem;
   font-weight: 700;
   cursor: pointer;
+}
+
+.max-selection-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 12px 0 16px;
+  padding: 14px;
+  border: 1px solid var(--max-line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--max-accent) 5%, var(--max-sheet));
+  cursor: pointer;
+}
+
+.max-selection-toggle input {
+  width: 22px;
+  height: 22px;
+  margin: 1px 0 0;
+  accent-color: var(--max-accent);
+  flex: 0 0 auto;
+}
+
+.max-selection-toggle-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.max-selection-toggle-copy strong {
+  font-size: 0.94rem;
+}
+
+.max-selection-toggle-copy small {
+  color: var(--max-muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
 }
 
 .max-owner-quiet-actions {

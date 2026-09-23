@@ -89,7 +89,8 @@ _SYSTEM_PROMPT = """Ты — арт-директор и редактор AIRunti
   "success_message": "что увидит клиент после отправки",
   "comment_hint": "плейсхолдер поля комментария, по делу этого бизнеса",
   "ask_phone": true,
-  "ask_comment": true
+  "ask_comment": true,
+  "allow_multiple_items": true
 }
 
 ДИЗАЙН. Порядок работы: сначала пойми характер бренда и клиента, придумай design_concept \
@@ -165,6 +166,9 @@ round+airy — мягко и воздушно.
 - Если источник дал `Фото: https://...` под позицией, скопируй точный URL в image_url этой \
 позиции. Никогда не придумывай URL. Сохрани категории из источника в category.
 - duration_min заполняй только для kind = "booking" и только если это осмысленно.
+- allow_multiple_items: true, если позиции естественно складываются в один заказ (еда, \
+товары, допуслуги автосервиса или салона); false, если клиент выбирает один взаимоисключающий \
+вариант записи. Владелец сможет поменять это в кабинете.
 - slots: 4-6 ближайших слотов, только для kind = "booking". Формат строго \
 «Вт 23 сен, 16:00» — конкретный день, без слов «сегодня» и «завтра». \
 Для остальных типов — пустой массив.
@@ -506,6 +510,7 @@ def _fallback_config(prompt: str) -> ServiceConfig:
         "heading_style": heading_style,
         **_FALLBACK_LOOK.get(kind if kind == "menu" else mood, {}),
         "items": items,
+        "allow_multiple_items": kind == "menu",
         "slots": fallback_slots() if kind == "booking" else [],
     }
     accent = _fallback_accent(prompt)
@@ -632,4 +637,12 @@ async def apply_edit(config: ServiceConfig, instruction: str) -> tuple[ServiceCo
         item if item.image_url in trusted_images else item.model_copy(update={"image_url": ""})
         for item in updated.items
     ]
-    return updated.model_copy(update={"hero_image": config.hero_image, "items": items}), True
+    return updated.model_copy(
+        update={
+            "hero_image": config.hero_image,
+            "items": items,
+            # A visual/content edit must not silently change checkout semantics selected
+            # explicitly by the owner in the cabinet.
+            "allow_multiple_items": config.allow_multiple_items,
+        }
+    ), True

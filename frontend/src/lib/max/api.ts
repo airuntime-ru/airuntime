@@ -65,6 +65,7 @@ export type ServiceConfig = {
   comment_hint: string;
   ask_phone: boolean;
   ask_comment: boolean;
+  allow_multiple_items: boolean;
 };
 
 export type ServiceResponse = {
@@ -210,6 +211,7 @@ export function patchService(
     tagline?: string;
     about?: string;
     items?: Array<{ title: string; description?: string; price_rub: number | null }>;
+    allow_multiple_items?: boolean;
   }
 ): Promise<OwnerService> {
   return request(`/max/miniapp/owner/services/${encodeURIComponent(slug)}`, {
@@ -237,6 +239,7 @@ export function deleteService(slug: string): Promise<void> {
 export type CreateLeadInput = {
   slug: string;
   item_title?: string;
+  items?: Array<{ title: string; quantity: number }>;
   slot_label?: string;
   customer_name?: string;
   phone?: string;
@@ -245,7 +248,7 @@ export type CreateLeadInput = {
 
 export function createLead(
   input: CreateLeadInput
-): Promise<{ id: string; status: string; success_message: string }> {
+): Promise<{ id: string; status: string; success_message: string; item_title: string }> {
   return request("/max/miniapp/lead", {
     method: "POST",
     body: JSON.stringify(input),

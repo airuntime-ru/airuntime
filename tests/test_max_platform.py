@@ -555,7 +555,9 @@ class TestGeneratorFailsLoudly:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         image = "data:image/jpeg;base64,YWJj"
-        original = ServiceConfig.model_validate({"title": "Кафе", "hero_image": image})
+        original = ServiceConfig.model_validate(
+            {"title": "Кафе", "hero_image": image, "allow_multiple_items": True}
+        )
         seen = ""
 
         async def fake_config(system_prompt: str, user_text: str, **_: Any) -> ServiceConfig:
@@ -568,6 +570,7 @@ class TestGeneratorFailsLoudly:
         assert changed is True
         assert updated.title == "Новое кафе"
         assert updated.hero_image == image
+        assert updated.allow_multiple_items is True
         assert image not in seen
 
 
@@ -610,6 +613,12 @@ class TestServiceConfig:
         )
         assert config.slots == []
         assert config.cta_label == "Заказать"
+
+    def test_existing_storefronts_keep_single_selection_by_default(self) -> None:
+        config = ServiceConfig.model_validate({"title": "Кафе", "kind": "menu"})
+        assert config.allow_multiple_items is False
+        fallback = generator._fallback_config("Кофейня с меню")
+        assert fallback.allow_multiple_items is True
 
     def test_slug_transliterates_russian_titles(self) -> None:
         assert slugify("Автосервис на Лесной") == "avtoservis-na-lesnoi"
@@ -1065,6 +1074,7 @@ class TestOwnerToCustomerFlow:
             json={
                 "title": "Кофемания Чкаловская",
                 "items": [{"title": "Капучино", "price_rub": 250}],
+                "allow_multiple_items": True,
             },
             headers=owner_headers(),
         )
@@ -1074,6 +1084,49 @@ class TestOwnerToCustomerFlow:
         assert body["config"]["title"] == "Кофемания Чкаловская"
         assert body["config"]["items"][0]["title"] == "Капучино"
         assert body["config"]["items"][0]["price_rub"] == 250
+        assert body["config"]["allow_multiple_items"] is True
+
+    def test_cart_accepts_multiple_catalog_items_and_quantities(
+        self, client: TestClient, db: Session, fake_api: FakeMaxApi
+    ) -> None:
+        service = create_storefront(client)
+        client.patch(
+            f"/api/v1/max/miniapp/owner/services/{service['slug']}",
+            json={"allow_multiple_items": True},
+            headers=owner_headers(),
+        )
+        response = client.post(
+            "/api/v1/max/miniapp/lead",
+            json={
+                "slug": service["slug"],
+                "items": [
+                    {"title": "Диагностика", "quantity": 2},
+                    {"title": "Замена масла", "quantity": 1},
+                ],
+                "customer_name": "Пётр",
+            },
+            headers=customer_headers(service["slug"]),
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["item_title"] == "2× Диагностика, 1× Замена масла"
+        assert db.query(MaxLead).one().item_title == "2× Диагностика, 1× Замена масла"
+        assert "2× Диагностика, 1× Замена масла" in fake_api.messages[-1]["text"]
+
+    def test_single_selection_storefront_rejects_a_cart(self, client: TestClient) -> None:
+        service = create_storefront(client)
+        response = client.post(
+            "/api/v1/max/miniapp/lead",
+            json={
+                "slug": service["slug"],
+                "items": [
+                    {"title": "Диагностика", "quantity": 1},
+                    {"title": "Замена масла", "quantity": 1},
+                ],
+                "customer_name": "Пётр",
+            },
+            headers=customer_headers(service["slug"]),
+        )
+        assert response.status_code == 422
 
     def test_unpublished_storefront_is_hidden_from_customers_but_not_its_owner(
         self, client: TestClient

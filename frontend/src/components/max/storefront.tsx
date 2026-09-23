@@ -75,7 +75,7 @@ export function Storefront({ slug }: { slug: string }) {
   const [config, setConfig] = useState<ServiceConfig | null>(null);
   const [error, setError] = useState("");
 
-  const [selectedItem, setSelectedItem] = useState("");
+  const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [selectedSlot, setSelectedSlot] = useState("");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -97,7 +97,9 @@ export function Storefront({ slug }: { slug: string }) {
         if (cancelled) return;
         setConfig(response.config);
         // One offer means there is nothing to choose: open straight on the form.
-        if (response.config.items.length === 1) setSelectedItem(response.config.items[0].title);
+        if (response.config.items.length === 1) {
+          setQuantities({ [response.config.items[0].title]: 1 });
+        }
         setHistory(response.my_leads || []);
         // Prefill the name from MAX so most customers only pick a time and tap once.
         const user = getInitDataUnsafe().user;
@@ -133,11 +135,31 @@ export function Storefront({ slug }: { slug: string }) {
 
   const effectiveCategory = categories.includes(activeCategory) ? activeCategory : "";
 
+  const selectedEntries = useMemo(
+    () =>
+      (config?.items || [])
+        .map((item) => ({ item, quantity: quantities[item.title] || 0 }))
+        .filter((entry) => entry.quantity > 0),
+    [config, quantities]
+  );
+  const selectedItem = selectedEntries[0]?.item.title ?? "";
+  const selectedCount = selectedEntries.reduce((sum, entry) => sum + entry.quantity, 0);
+  const selectedTotal = selectedEntries.reduce(
+    (sum, entry) => sum + (entry.item.price_rub ?? 0) * entry.quantity,
+    0
+  );
+  const hasPricedSelection = selectedEntries.some((entry) => entry.item.price_rub != null);
+  const selectionLabel = selectedEntries
+    .map(({ item, quantity }) =>
+      config?.allow_multiple_items ? `${quantity}× ${item.title}` : item.title
+    )
+    .join(", ");
+
   const needsSlot = Boolean(config && config.kind === "booking" && config.slots.length > 0);
   const canSubmit =
     phase === "ready" &&
     Boolean(config) &&
-    (config!.items.length === 0 || Boolean(selectedItem)) &&
+    (config!.items.length === 0 || selectedEntries.length > 0) &&
     (!needsSlot || Boolean(selectedSlot)) &&
     name.trim().length > 0;
 
@@ -150,6 +172,28 @@ export function Storefront({ slug }: { slug: string }) {
     setPhoneVerified(true);
   }, []);
 
+  const chooseItem = useCallback(
+    (title: string) => {
+      setQuantities((current) => {
+        if (!config?.allow_multiple_items) return { [title]: 1 };
+        return current[title] ? current : { ...current, [title]: 1 };
+      });
+    },
+    [config?.allow_multiple_items]
+  );
+
+  const changeQuantity = useCallback((title: string, delta: number) => {
+    setQuantities((current) => {
+      const next = Math.max(0, Math.min(20, (current[title] || 0) + delta));
+      if (next === 0) {
+        const rest = { ...current };
+        delete rest[title];
+        return rest;
+      }
+      return { ...current, [title]: next };
+    });
+  }, []);
+
   const onSubmit = useCallback(async () => {
     if (!config || !canSubmit) return;
     setPhase("submitting");
@@ -157,7 +201,8 @@ export function Storefront({ slug }: { slug: string }) {
     try {
       const result = await createLead({
         slug,
-        item_title: selectedItem,
+        item_title: config.allow_multiple_items ? "" : selectedItem,
+        items: selectedEntries.map(({ item, quantity }) => ({ title: item.title, quantity })),
         slot_label: selectedSlot,
         customer_name: name.trim(),
         phone: phone.trim(),
@@ -167,7 +212,7 @@ export function Storefront({ slug }: { slug: string }) {
       setHistory((current) => [
         {
           id: result.id,
-          item_title: selectedItem,
+          item_title: result.item_title,
           slot_label: selectedSlot,
           status: "new",
           created_at: new Date().toISOString(),
@@ -180,7 +225,7 @@ export function Storefront({ slug }: { slug: string }) {
       setError(cause instanceof Error ? cause.message : "Не удалось отправить заявку");
       setPhase("ready");
     }
-  }, [canSubmit, comment, config, name, phone, selectedItem, selectedSlot, slug]);
+  }, [canSubmit, comment, config, name, phone, selectedEntries, selectedItem, selectedSlot, slug]);
 
   if (phase === "loading") {
     return (
@@ -216,7 +261,7 @@ export function Storefront({ slug }: { slug: string }) {
           </div>
           <h1 style={{ margin: 0, fontSize: "1.2rem", fontWeight: 650 }}>{successText}</h1>
           <p className="max-note">
-            {selectedItem}
+            {selectionLabel}
             {selectedSlot ? ` · ${selectedSlot}` : ""}
           </p>
           <p className="max-note">Ответ придёт сюда, в MAX.</p>
@@ -227,7 +272,6 @@ export function Storefront({ slug }: { slug: string }) {
   }
 
   const busy = phase === "submitting";
-  const chosen = config.items.find((item) => item.title === selectedItem) ?? null;
   const visibleItems = effectiveCategory
     ? config.items.filter((item) => item.category === effectiveCategory)
     : config.items;
@@ -254,11 +298,15 @@ export function Storefront({ slug }: { slug: string }) {
     : [];
   // Contacts only appear once there is something to book. On a phone, opening straight
   // into three empty fields reads as paperwork rather than as a two-tap booking.
-  const showContacts = config.items.length === 0 || Boolean(selectedItem);
-  const missing = !selectedItem
+  const showContacts = config.items.length === 0 || selectedEntries.length > 0;
+  const missing = selectedEntries.length === 0
     ? config.kind === "menu"
-      ? "Выберите позицию"
-      : "Выберите услугу"
+      ? config.allow_multiple_items
+        ? "Добавьте позиции"
+        : "Выберите позицию"
+      : config.allow_multiple_items
+        ? "Добавьте услуги"
+        : "Выберите услугу"
     : needsSlot && !selectedSlot
       ? "Выберите время"
       : !name.trim()
@@ -367,15 +415,16 @@ export function Storefront({ slug }: { slug: string }) {
               const price = priceLabel(item);
               const duration = durationLabel(item);
               const note = item.description;
-              const active = selectedItem === item.title;
+              const quantity = quantities[item.title] || 0;
+              const active = quantity > 0;
               return (
-                <li key={item.title}>
+                <li key={item.title} className="max-product-row">
                   <button
                     type="button"
                     className="max-option"
                     aria-pressed={active}
                     data-photo={item.image_url ? "yes" : "no"}
-                    onClick={() => setSelectedItem(item.title)}
+                    onClick={() => chooseItem(item.title)}
                     disabled={busy}
                   >
                     {item.image_url ? (
@@ -398,7 +447,7 @@ export function Storefront({ slug }: { slug: string }) {
                     {/* A check mark, not just a border: on a small screen the selected row
                         has to be obvious at a glance. */}
                     <span className="max-radio" aria-hidden>
-                      {active ? "✓" : ""}
+                      {active ? (config.allow_multiple_items ? quantity : "✓") : ""}
                     </span>
                     <span className="max-option-label">
                       <span className="max-option-title">
@@ -414,6 +463,27 @@ export function Storefront({ slug }: { slug: string }) {
                       {price ? <span className="max-option-price">{price}</span> : null}
                     </span>
                   </button>
+                  {config.allow_multiple_items && active ? (
+                    <div className="max-quantity" aria-label={`Количество: ${item.title}`}>
+                      <button
+                        type="button"
+                        onClick={() => changeQuantity(item.title, -1)}
+                        disabled={busy}
+                        aria-label={`Уменьшить количество: ${item.title}`}
+                      >
+                        −
+                      </button>
+                      <span aria-live="polite">{quantity}</span>
+                      <button
+                        type="button"
+                        onClick={() => changeQuantity(item.title, 1)}
+                        disabled={busy || quantity >= 20}
+                        aria-label={`Увеличить количество: ${item.title}`}
+                      >
+                        +
+                      </button>
+                    </div>
+                  ) : null}
                 </li>
               );
             })}
@@ -421,7 +491,32 @@ export function Storefront({ slug }: { slug: string }) {
         </section>
       ) : null}
 
-      {needsSlot && selectedItem ? (
+      {config.allow_multiple_items && selectedEntries.length > 0 ? (
+        <section className="max-cart" aria-label="Корзина">
+          <div className="max-cart-head">
+            <h2 className="max-section-title">Ваш заказ</h2>
+            <span>{selectedCount} шт.</span>
+          </div>
+          <ul>
+            {selectedEntries.map(({ item, quantity }) => (
+              <li key={item.title}>
+                <span>{item.title}</span>
+                <span>
+                  {quantity} × {priceLabel(item) || "по запросу"}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {hasPricedSelection ? (
+            <div className="max-cart-total">
+              <span>Итого</span>
+              <strong>{selectedTotal.toLocaleString("ru-RU")} ₽</strong>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {needsSlot && selectedEntries.length > 0 ? (
         <>
           <h2 className="max-section-title">Когда удобно</h2>
           <div className="max-chips">
@@ -527,14 +622,18 @@ export function Storefront({ slug }: { slug: string }) {
       <div className="max-submit-bar">
         {/* What exactly is being confirmed, right above the button - so the last tap is a
             confirmation rather than a leap of faith. */}
-        {chosen ? (
+        {selectedEntries.length > 0 ? (
           <div className="max-summary">
             <span className="max-summary-text">
-              {chosen.title}
+              {config.allow_multiple_items
+                ? `${selectedCount} шт. · ${selectedEntries.length} поз.`
+                : selectedItem}
               {selectedSlot ? ` · ${selectedSlot}` : ""}
             </span>
-            {priceLabel(chosen) ? (
-              <span className="max-summary-price">{priceLabel(chosen)}</span>
+            {config.allow_multiple_items && hasPricedSelection ? (
+              <span className="max-summary-price">{selectedTotal.toLocaleString("ru-RU")} ₽</span>
+            ) : selectedEntries[0] && priceLabel(selectedEntries[0].item) ? (
+              <span className="max-summary-price">{priceLabel(selectedEntries[0].item)}</span>
             ) : null}
           </div>
         ) : null}

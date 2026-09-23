@@ -442,6 +442,27 @@ export function OwnerPanel() {
     [catalog]
   );
 
+  const onSetMultipleItems = useCallback(
+    async (service: OwnerService, allow: boolean) => {
+      if (service.config.allow_multiple_items === allow) return;
+      setBusySlug(service.slug);
+      setCatalogNote("");
+      try {
+        const updated = await patchService(service.slug, { allow_multiple_items: allow });
+        setServices((current) =>
+          current.map((row) => (row.slug === service.slug ? { ...row, ...updated } : row))
+        );
+        haptic("success");
+        setCatalogNote(allow ? "Корзина включена" : "Можно выбрать только одну позицию");
+      } catch (cause: unknown) {
+        setCatalogNote(messageOf(cause, "Не удалось изменить режим выбора"));
+      } finally {
+        setBusySlug("");
+      }
+    },
+    []
+  );
+
   const onToggle = useCallback(async (service: OwnerService) => {
     setBusySlug(service.slug);
     try {
@@ -1024,6 +1045,22 @@ export function OwnerPanel() {
 
           <section className="max-owner-card max-catalog">
             <h2 className="max-owner-h2">{selected.config.kind === "menu" ? "Меню" : "Услуги и цены"}</h2>
+            <label className="max-selection-toggle">
+              <input
+                type="checkbox"
+                checked={selected.config.allow_multiple_items}
+                onChange={(event) => void onSetMultipleItems(selected, event.target.checked)}
+                disabled={busy}
+              />
+              <span className="max-selection-toggle-copy">
+                <strong>Разрешить несколько позиций</strong>
+                <small>
+                  {selected.config.allow_multiple_items
+                    ? "Клиент собирает корзину и меняет количество"
+                    : "Клиент выбирает только один товар или услугу"}
+                </small>
+              </span>
+            </label>
             {catalog.map((row, index) => (
               <div className="max-catalog-row" key={`${selected.slug}-${index}`}>
                 <input

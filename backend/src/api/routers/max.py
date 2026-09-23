@@ -105,9 +105,15 @@ async def max_webhook(secret: str, request: Request, db: Session = Depends(get_d
 # --------------------------------------------------------------------------------------
 
 
+class LeadItemIn(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    quantity: int = Field(default=1, ge=1, le=20)
+
+
 class LeadRequest(BaseModel):
     slug: str = Field(min_length=1, max_length=64)
     item_title: str = Field(default="", max_length=255)
+    items: list[LeadItemIn] = Field(default_factory=list, max_length=12)
     slot_label: str = Field(default="", max_length=64)
     customer_name: str = Field(default="", max_length=255)
     phone: str = Field(default="", max_length=32)
@@ -196,8 +202,36 @@ def create_lead(
     # The item and slot must be ones this storefront actually offers: otherwise the owner's
     # chat becomes a place anyone can write arbitrary text into.
     titles = {item.title for item in config.items}
-    if payload.item_title and payload.item_title not in titles:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unknown item")
+    requested = payload.items or (
+        [LeadItemIn(title=payload.item_title)] if payload.item_title else []
+    )
+    quantities: dict[str, int] = {}
+    for item in requested:
+        if item.title not in titles:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unknown item"
+            )
+        quantities[item.title] = quantities.get(item.title, 0) + item.quantity
+        if quantities[item.title] > 20:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Too many items"
+            )
+    if not config.allow_multiple_items and (
+        len(quantities) > 1 or any(quantity != 1 for quantity in quantities.values())
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="This storefront accepts one item at a time",
+        )
+    item_title = ", ".join(
+        f"{quantity}× {title}" if config.allow_multiple_items else title
+        for title, quantity in quantities.items()
+    )
+    if len(item_title) > 255:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Слишком много позиций в одном заказе",
+        )
     if payload.slot_label and payload.slot_label not in set(config.slots):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unknown slot")
 
@@ -206,7 +240,7 @@ def create_lead(
         max_user_id=launch.user_id,
         customer_name=(payload.customer_name or launch.display_name)[:255],
         phone=payload.phone.strip() or None,
-        item_title=payload.item_title[:255],
+        item_title=item_title,
         slot_label=payload.slot_label[:64],
         comment=payload.comment.strip(),
         status=LEAD_NEW,
@@ -226,6 +260,7 @@ def create_lead(
         "id": str(lead.id),
         "status": lead.status,
         "success_message": config.success_message,
+        "item_title": lead.item_title,
     }
 
 
@@ -353,6 +388,7 @@ class PatchServiceRequest(BaseModel):
     tagline: str | None = Field(default=None, max_length=160)
     about: str | None = Field(default=None, max_length=600)
     items: list[CatalogItemIn] | None = Field(default=None, max_length=24)
+    allow_multiple_items: bool | None = None
 
 
 @router.post("/miniapp/owner/services/{slug}/edit")
@@ -388,6 +424,7 @@ def patch_service(
         tagline=payload.tagline,
         about=payload.about,
         items=None if payload.items is None else [item.model_dump() for item in payload.items],
+        allow_multiple_items=payload.allow_multiple_items,
     )
     db.refresh(service)
     return _owner_service_payload(service, _new_leads(db, service), _lead_count(db, service))

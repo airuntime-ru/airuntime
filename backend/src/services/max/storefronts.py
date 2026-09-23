@@ -194,6 +194,7 @@ def update_catalog(
     tagline: str | None = None,
     about: str | None = None,
     items: list[dict[str, object]] | None = None,
+    allow_multiple_items: bool | None = None,
 ) -> ServiceConfig:
     """Edit the catalog in place - title, tagline, about, items - without calling the model.
 
@@ -211,6 +212,8 @@ def update_catalog(
         data["about"] = about.strip()[:600]
     if items is not None:
         data["items"] = items
+    if allow_multiple_items is not None:
+        data["allow_multiple_items"] = allow_multiple_items
     updated = normalise(ServiceConfig.model_validate(data))
     store_config(service, updated)
     db.commit()

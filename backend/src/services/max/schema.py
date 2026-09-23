@@ -264,6 +264,9 @@ class ServiceConfig(BaseModel):
     comment_hint: str = Field(default="", max_length=80)
     ask_phone: bool = True
     ask_comment: bool = True
+    # False keeps every existing storefront's behaviour. Owners can enable a real cart
+    # for menus and combinable services from their cabinet.
+    allow_multiple_items: bool = False
 
     @field_validator("kind", mode="before")
     @classmethod
