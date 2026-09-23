@@ -437,6 +437,18 @@ class TestSiteBriefing:
         assert "Фото: https://img.example/raf.jpg" in text
         assert "+74951201203" in text
 
+    def test_owner_request_frames_a_broader_site_catalog(self) -> None:
+        prompt = storefronts._compose_prompt(
+            "Кофейня у метро Чкаловская",
+            "Сайт владельца: example.test\n- Стейк — 2500 ₽\n- Раф — 400 ₽",
+            "",
+        )
+        assert prompt.startswith("ГЛАВНЫЙ ЗАПРОС ВЛАДЕЛЬЦА")
+        assert "источник фактов, цен, фото и языка бренда" in prompt
+        assert prompt.count("Кофейня у метро Чкаловская") == 2
+        assert "не добавляй соседние категории ради разнообразия" in prompt
+        assert prompt.endswith("Свободу проявляй в арт-дирекции, композиции и тексте.")
+
 
 class TestGeneratorFailsLoudly:
     """A provider adapter signals a failed turn with an event, not an exception. Collecting

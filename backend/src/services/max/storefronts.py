@@ -91,13 +91,28 @@ def customer_chat_url(user_id: int | None) -> str:
 
 
 def _compose_prompt(brief: str, site_text: str, file_notes: str) -> str:
+    owner_brief = brief.strip()
     parts: list[str] = []
-    if brief.strip():
-        parts.append(brief.strip())
+    if owner_brief:
+        parts.append(f"ГЛАВНЫЙ ЗАПРОС ВЛАДЕЛЬЦА — задача и фокус витрины:\n{owner_brief}")
     if site_text:
-        parts.append(site_text)
+        parts.append(
+            "МАТЕРИАЛЫ САЙТА — источник фактов, цен, фото и языка бренда; "
+            "они не расширяют задачу владельца сами по себе:\n"
+            f"{site_text}"
+        )
     if file_notes:
-        parts.append(file_notes)
+        parts.append(f"ПРИЛОЖЕННЫЕ МАТЕРИАЛЫ ВЛАДЕЛЬЦА:\n{file_notes}")
+    # Long restaurant and marketplace pages can be thousands of tokens. Repeating the
+    # actual request at the end keeps a broad source catalogue from silently becoming the
+    # task. This constrains *what* the storefront sells, not how the art director designs it.
+    if owner_brief and (site_text or file_notes):
+        parts.append(
+            "ФИНАЛЬНАЯ ПРОВЕРКА ФОКУСА:\n"
+            f"Собери именно «{owner_brief}». Если материалы шире этого запроса, выбери "
+            "только релевантные позиции; не добавляй соседние категории ради разнообразия. "
+            "Свободу проявляй в арт-дирекции, композиции и тексте."
+        )
     return "\n\n".join(parts)
 
 
