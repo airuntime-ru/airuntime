@@ -30,6 +30,7 @@ import {
   type OwnerService,
 } from "@/lib/max/api";
 import { attachHeaderBack, guardClosing, haptic, openMaxChat, shareInMax } from "@/lib/max/bridge";
+import { storefrontDesign } from "@/lib/max/theme";
 
 type Phase = "loading" | "ready" | "error";
 
@@ -125,6 +126,15 @@ const EXAMPLES: { label: string; brief: string }[] = [
     brief:
       "Репетитор по математике, ЕГЭ и ОГЭ. Занятие 60 минут\u00a0— 1500, пробный урок 500. Онлайн, по будням с 16 до 21.",
   },
+];
+
+// Tapped into the edit box as-is. Design requests lead because restyling in words is what
+// owners do not expect to be possible - and it is the one edit a form could not offer.
+const EDIT_IDEAS = [
+  "Сделай тёмную тему",
+  "Сделай ярче и смелее",
+  "Шрифт построже",
+  "Спокойнее и светлее",
 ];
 
 const STATUS_LABEL: Record<Lead["status"], string> = {
@@ -240,6 +250,7 @@ export function OwnerPanel() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [catalog, setCatalog] = useState<CatalogRow[]>([]);
   const [catalogNote, setCatalogNote] = useState("");
+  const [tab, setTab] = useState<"leads" | "storefront">("leads");
 
   const apply = useCallback((result: { services: OwnerService[]; leads: Lead[] } | Error) => {
     if (!(result instanceof Error)) {
@@ -565,20 +576,22 @@ export function OwnerPanel() {
     brief.trim().length >= MIN_BRIEF || looksLikeUrl(siteUrl) || attachments.length > 0;
 
   const composer = creating ? (
-    <section className="max-sheet max-progress" role="status" aria-live="polite">
-      <div className="max-progress-track" aria-hidden>
+    <section className="max-owner-card max-progress" role="status" aria-live="polite">
+      <div className="max-progress-orb" aria-hidden>
+        <i />
+        <i />
         <i />
       </div>
-      <p className="max-progress-title">Собираем страницу записи…</p>
+      <p className="max-progress-title">Придумываем дизайн и собираем витрину…</p>
       <p className="max-note" style={{ marginTop: 4 }}>
-        Обычно меньше минуты. Не закрывайте приложение.
+        Обычно около минуты. Не закрывайте приложение.
       </p>
       {brief.trim() ? <p className="max-progress-brief">«{brief.trim()}»</p> : null}
     </section>
   ) : (
-    <section className="max-sheet max-composer">
-      <label className="max-field-label" htmlFor="max-brief">
-        Что предлагаете клиентам
+    <section className="max-owner-card max-composer">
+      <label className="max-owner-label" htmlFor="max-brief">
+        Расскажите о бизнесе
       </label>
       <textarea
         id="max-brief"
@@ -587,14 +600,15 @@ export function OwnerPanel() {
         maxLength={2000}
         value={brief}
         onChange={(event) => setBrief(event.target.value)}
-        placeholder="Барбершоп на Садовой. Стрижка 1200, борода 700. Каждый день с 10 до 21."
+        placeholder="Барбершоп на Садовой. Стрижка 1200, борода 700. Каждый день с 10 до 21. Хочу тёмный дерзкий стиль."
       />
-      <div className="max-chips max-examples" role="group" aria-label="Примеры">
+      <div className="max-examples" role="group" aria-label="Примеры">
+        <span className="max-examples-label">Пример:</span>
         {EXAMPLES.map((example) => (
           <button
             key={example.label}
             type="button"
-            className="max-chip"
+            className="max-owner-chip"
             aria-pressed={brief === example.brief}
             onClick={() => setBrief(example.brief)}
           >
@@ -603,24 +617,31 @@ export function OwnerPanel() {
         ))}
       </div>
 
-      <label className="max-field-label" htmlFor="max-site" style={{ marginTop: 16 }}>
-        Сайт <span className="max-optional">необязательно</span>
+      <label className="max-owner-label" htmlFor="max-site" style={{ marginTop: 18 }}>
+        Сайт <span className="max-optional">если есть</span>
       </label>
-      <input
-        id="max-site"
-        className="max-input"
-        type="url"
-        inputMode="url"
-        autoComplete="url"
-        placeholder="https://yoursite.ru"
-        value={siteUrl}
-        onChange={(event) => setSiteUrl(event.target.value)}
-      />
-      <p className="max-hint">Подтянем услуги, цены и цвета, если они есть на странице.</p>
+      <div className="max-input-icon">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <path
+            d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+          />
+        </svg>
+        <input
+          id="max-site"
+          className="max-input"
+          type="url"
+          inputMode="url"
+          autoComplete="url"
+          placeholder="yoursite.ru"
+          value={siteUrl}
+          onChange={(event) => setSiteUrl(event.target.value)}
+        />
+      </div>
+      <p className="max-hint">Заберём услуги, цены, фото и фирменные цвета.</p>
 
-      <p className="max-field-label" style={{ marginTop: 16 }}>
-        Файлы <span className="max-optional">необязательно</span>
-      </p>
       <input
         ref={fileInput}
         type="file"
@@ -648,16 +669,16 @@ export function OwnerPanel() {
         </ul>
       ) : null}
       {attachments.length < MAX_ATTACHMENTS ? (
-        <button
-          type="button"
-          className="max-button max-button-secondary max-button-compact"
-          style={{ marginTop: 8 }}
-          onClick={() => fileInput.current?.click()}
-        >
-          Прикрепить логотип, прайс или референс
+        <button type="button" className="max-dropzone" onClick={() => fileInput.current?.click()}>
+          <span className="max-dropzone-plus" aria-hidden>
+            +
+          </span>
+          <span>
+            <strong>Логотип, фото или прайс</strong>
+            <small>Фото задают стиль, PDF и текст — услуги и цены</small>
+          </span>
         </button>
       ) : null}
-      <p className="max-hint">Фото смотрим как образец стиля. PDF и текст — как прайс и описание.</p>
 
       {createError ? (
         <div className="max-error" role="alert" style={{ marginTop: 12 }}>
@@ -666,12 +687,12 @@ export function OwnerPanel() {
       ) : null}
       <button
         type="button"
-        className="max-button"
-        style={{ marginTop: 14 }}
+        className="max-owner-primary"
+        style={{ marginTop: 18 }}
         disabled={!canCreate}
         onClick={() => void onCreate()}
       >
-        Собрать страницу записи
+        Собрать витрину
       </button>
       {services.length > 0 ? (
         <button
@@ -690,10 +711,24 @@ export function OwnerPanel() {
 
   if (services.length === 0) {
     return (
-      <div className="max-shell">
-        <header className="max-intro">
-          <h1>Страница записи в MAX</h1>
-          <p>Опишите бизнес, при желании добавьте сайт или файлы. Клиенты запишутся здесь, заявки придут вам в чат.</p>
+      <div className="max-shell max-owner">
+        <header className="max-welcome">
+          <div className="max-welcome-samples" aria-hidden>
+            <span className="max-sample max-sample-a">BLADE</span>
+            <span className="max-sample max-sample-b">Кофейня</span>
+            <span className="max-sample max-sample-c">Анна</span>
+          </div>
+          <p className="max-welcome-kicker">AIRuntime · MAX</p>
+          <h1>Витрина вашего бизнеса прямо в MAX</h1>
+          <p>
+            Опишите, что предлагаете,&nbsp;— соберём страницу со своим дизайном. Клиенты
+            записываются в пару касаний, заявки приходят вам в чат.
+          </p>
+          <ol className="max-welcome-steps">
+            <li>Опишите</li>
+            <li>Проверьте</li>
+            <li>Поделитесь</li>
+          </ol>
         </header>
         {composer}
       </div>
@@ -708,24 +743,15 @@ export function OwnerPanel() {
   const busy = busySlug === selected.slug;
   const live = selected.status === "live";
   const editing = editingSlug === selected.slug;
-  const summary = [
-    KIND_LABEL[selected.config.kind],
-    pluralLeads(selected.lead_count ?? 0),
-    selected.new_leads > 0
-      ? `${selected.new_leads} ${pluralNew(selected.new_leads)}`
-      : live
-        ? ""
-        : "скрыт",
-    services.length > 1 ? pluralServices(services.length) : "",
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const cover = storefrontDesign(selected.config);
 
   return (
-    <div className="max-shell">
+    <div className="max-shell max-owner">
       <button
         type="button"
-        className="max-switcher"
+        className="max-cover"
+        {...cover.attrs}
+        style={cover.style}
         aria-haspopup="dialog"
         aria-expanded={pickerOpen}
         onClick={() => {
@@ -733,70 +759,270 @@ export function OwnerPanel() {
           setPickerOpen(true);
         }}
       >
-        <span className="max-switcher-icon" aria-hidden>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-            <path
-              d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5.5v-6h-3v6H5a1 1 0 0 1-1-1v-9.5Z"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinejoin="round"
-            />
-          </svg>
+        <span className="max-cover-top">
+          <span className={`max-cover-status${live ? " is-live" : ""}`}>
+            {live ? "Опубликована" : "Скрыта"}
+          </span>
+          <span className="max-cover-switch">
+            {services.length > 1 ? pluralServices(services.length) : "Мои витрины"} ▾
+          </span>
         </span>
-        <span className="max-switcher-body">
-          <span className="max-switcher-kicker">Сервис</span>
-          <span className="max-switcher-title">{selected.config.title}</span>
-          <span className="max-switcher-note">{summary}</span>
+        <span className="max-cover-kicker">
+          {selected.config.kicker || KIND_LABEL[selected.config.kind]}
         </span>
-        <span className="max-switcher-chevron" aria-hidden>
-          ▾
-        </span>
+        <span className="max-cover-title">{selected.config.title}</span>
+        {selected.config.tagline ? (
+          <span className="max-cover-tagline">{selected.config.tagline}</span>
+        ) : null}
       </button>
 
-      {composerOpen || creating ? <div style={{ marginBottom: 10 }}>{composer}</div> : null}
+      {freshSlug === selected.slug ? (
+        <p className="max-fresh">Витрина готова — откройте её и отправьте ссылку клиентам.</p>
+      ) : null}
+      {looksLikeStub(selected) ? (
+        <p className="max-fresh max-fresh-warn">
+          Черновик: модель не собрала страницу. Проверьте меню во вкладке «Витрина».
+        </p>
+      ) : null}
 
-      {!composerOpen && !creating ? (
-        <article
-          className={`max-sheet max-card${freshSlug === selected.slug ? " max-card-fresh" : ""}`}
-          style={{ marginBottom: 14 }}
+      <div className="max-stats">
+        <div className={`max-stat${selected.new_leads > 0 ? " is-hot" : ""}`}>
+          <strong>{selected.new_leads}</strong>
+          <span>{pluralNew(selected.new_leads)}</span>
+        </div>
+        <div className="max-stat">
+          <strong>{selected.lead_count ?? 0}</strong>
+          <span>{pluralLeads(selected.lead_count ?? 0).replace(/^\d+\s/, "")}</span>
+        </div>
+        <div className="max-stat">
+          <strong>{selected.config.items.length}</strong>
+          <span>в каталоге</span>
+        </div>
+      </div>
+
+      {selected.link ? (
+        <div className="max-share">
+          <div className="max-share-row">
+            <button
+              type="button"
+              className="max-owner-primary"
+              onClick={() => void onShare(selected)}
+              disabled={!live}
+            >
+              Поделиться
+            </button>
+            <button
+              type="button"
+              className="max-owner-secondary"
+              onClick={() => setPreviewSlug(selected.slug)}
+            >
+              Открыть
+            </button>
+            <button
+              type="button"
+              className="max-owner-icon"
+              aria-label="Скопировать ссылку"
+              onClick={() => void onCopy(selected)}
+            >
+              {copiedSlug === selected.slug ? (
+                "✓"
+              ) : (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <rect x="8" y="8" width="12" height="12" rx="3" stroke="currentColor" strokeWidth="1.8" />
+                  <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" stroke="currentColor" strokeWidth="1.8" />
+                </svg>
+              )}
+            </button>
+          </div>
+          <p className="max-share-link">
+            {copiedSlug === selected.slug ? "Ссылка скопирована" : selected.link.replace(/^https?:\/\//, "")}
+          </p>
+        </div>
+      ) : (
+        <p className="max-note">Ссылка появится после настройки имени бота.</p>
+      )}
+
+      {composerOpen || creating ? <div style={{ marginTop: 14 }}>{composer}</div> : null}
+
+      <div className="max-tabs" role="tablist" aria-label="Разделы">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "leads"}
+          onClick={() => setTab("leads")}
         >
-          {freshSlug === selected.slug ? (
-            <p className="max-card-flag">✓ AIRuntime готов&nbsp;— ссылку уже можно отправлять</p>
+          Заявки
+          {newLeads.length > 0 ? <span className="max-tab-count">{newLeads.length}</span> : null}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "storefront"}
+          onClick={() => setTab("storefront")}
+        >
+          Витрина
+        </button>
+      </div>
+
+      {tab === "leads" ? (
+        <>
+          <OwnerCalendar leads={scopedLeads} selectedKey={calendarDay} onSelect={setCalendarDay} />
+          {calendarDay ? (
+            <button type="button" className="max-linklike" onClick={() => setCalendarDay(null)}>
+              Показать все заявки
+            </button>
           ) : null}
 
-          {looksLikeStub(selected) ? (
-            <p className="max-card-flag" style={{ color: "#b45309" }}>
-              Черновик: модель не собрала страницу. Проверьте меню ниже.
-            </p>
-          ) : null}
-
-          {selected.link ? (
-            <>
-              <div className="max-link-box">{selected.link}</div>
-              <div className="max-row" style={{ marginTop: 10 }}>
-                <button
-                  type="button"
-                  className="max-button max-button-compact"
-                  onClick={() => void onShare(selected)}
-                  disabled={!live}
-                >
-                  Поделиться
-                </button>
-                <button
-                  type="button"
-                  className="max-button max-button-secondary max-button-compact"
-                  onClick={() => void onCopy(selected)}
-                >
-                  {copiedSlug === selected.slug ? "Скопировано" : "Скопировать"}
-                </button>
-              </div>
-            </>
+          {scopedLeads.length === 0 ? (
+            <div className="max-empty">
+              <strong>Заявок пока нет</strong>
+              <span>Отправьте ссылку клиентам или повесьте QR-код у кассы.</span>
+            </div>
+          ) : visibleLeads.length === 0 ? (
+            <div className="max-empty">
+              <strong>На этот день записей нет</strong>
+            </div>
           ) : (
-            <p className="max-note">Ссылка появится после настройки имени бота.</p>
+            <ul className="max-lead-list">
+              {visibleLeads.map((lead) => (
+                <li key={lead.id} className={`max-owner-card max-lead-card is-${lead.status}`}>
+                  <div className="max-lead-head">
+                    <span className="max-lead-avatar" aria-hidden>
+                      {(lead.customer_name || "?").trim().charAt(0).toUpperCase()}
+                    </span>
+                    <span className="max-lead-who">
+                      <strong>{lead.customer_name || "Без имени"}</strong>
+                      <span>{formatCreated(lead.created_at)}</span>
+                    </span>
+                    <span
+                      className={`max-badge max-badge-${lead.status === "new" ? "new" : lead.status === "declined" ? "declined" : "confirmed"}`}
+                    >
+                      {STATUS_LABEL[lead.status]}
+                    </span>
+                  </div>
+                  <p className="max-lead-what">
+                    {lead.item_title || "Заявка"}
+                    {lead.slot_label ? <span> · {lead.slot_label}</span> : null}
+                  </p>
+                  {lead.comment ? <p className="max-lead-comment">{lead.comment}</p> : null}
+                  <div className="max-lead-actions">
+                    {lead.status === "new" ? (
+                      <>
+                        <button
+                          type="button"
+                          className="max-owner-primary"
+                          onClick={() => void onResolve(lead, "confirmed")}
+                          disabled={pendingLeadId === lead.id}
+                        >
+                          Принять
+                        </button>
+                        <button
+                          type="button"
+                          className="max-owner-secondary"
+                          onClick={() => void onResolve(lead, "declined")}
+                          disabled={pendingLeadId === lead.id}
+                        >
+                          Отклонить
+                        </button>
+                      </>
+                    ) : null}
+                    {lead.phone ? (
+                      <a className="max-owner-icon" href={`tel:${lead.phone.replace(/[^\d+]/g, "")}`} aria-label={`Позвонить ${lead.phone}`}>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+                          <path
+                            d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2Z"
+                            stroke="currentColor"
+                            strokeWidth="1.8"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </a>
+                    ) : null}
+                    {lead.chat_url ? (
+                      <button
+                        type="button"
+                        className="max-owner-icon"
+                        aria-label="Написать в MAX"
+                        onClick={() => {
+                          haptic("tap");
+                          openMaxChat(lead.chat_url);
+                        }}
+                      >
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+                          <path
+                            d="M4 5h16v11H9l-5 4V5Z"
+                            stroke="currentColor"
+                            strokeWidth="1.8"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </button>
+                    ) : null}
+                  </div>
+                  {lead.phone ? <p className="max-lead-phone">{lead.phone}</p> : null}
+                </li>
+              ))}
+            </ul>
           )}
+        </>
+      ) : (
+        <>
+          <section className="max-owner-card">
+            <h2 className="max-owner-h2">Изменить словами</h2>
+            <p className="max-note" style={{ marginTop: 2 }}>
+              Цены, позиции, тексты или весь стиль — как попросили бы дизайнера.
+            </p>
+            <textarea
+              className="max-textarea"
+              style={{ marginTop: 12 }}
+              rows={3}
+              maxLength={1000}
+              value={editing ? editText : ""}
+              onFocus={() => {
+                if (!editing) {
+                  setEditingSlug(selected.slug);
+                  setEditText("");
+                  setEditNote("");
+                }
+              }}
+              onChange={(event) => {
+                setEditingSlug(selected.slug);
+                setEditText(event.target.value);
+              }}
+              placeholder="Например: сделай тёмную тему и шрифт построже"
+              disabled={busy}
+            />
+            <div className="max-examples">
+              {EDIT_IDEAS.map((idea) => (
+                <button
+                  key={idea}
+                  type="button"
+                  className="max-owner-chip"
+                  onClick={() => {
+                    setEditingSlug(selected.slug);
+                    setEditText(idea);
+                    setEditNote("");
+                  }}
+                  disabled={busy}
+                >
+                  {idea}
+                </button>
+              ))}
+            </div>
+            {editing && editNote ? <p className="max-hint">{editNote}</p> : null}
+            <button
+              type="button"
+              className="max-owner-primary"
+              style={{ marginTop: 12 }}
+              onClick={() => void onEdit(selected)}
+              disabled={busy || !editing || editText.trim().length < 3}
+            >
+              {busy && editing ? "Меняем…" : "Применить"}
+            </button>
+          </section>
 
-          <div className="max-catalog">
-            <p className="max-field-label">Меню</p>
+          <section className="max-owner-card max-catalog">
+            <h2 className="max-owner-h2">{selected.config.kind === "menu" ? "Меню" : "Услуги и цены"}</h2>
             {catalog.map((row, index) => (
               <div className="max-catalog-row" key={`${selected.slug}-${index}`}>
                 <input
@@ -836,43 +1062,28 @@ export function OwnerPanel() {
                 </button>
               </div>
             ))}
-            <div className="max-row" style={{ marginTop: 8 }}>
-              <button
-                type="button"
-                className="max-button max-button-secondary max-button-compact"
-                onClick={() => setCatalog((current) => [...current, { title: "", price: "" }])}
-              >
-                + Позиция
-              </button>
-              <button
-                type="button"
-                className="max-button max-button-compact"
-                onClick={() => void onSaveCatalog(selected)}
-                disabled={busy}
-              >
-                Сохранить меню
-              </button>
-            </div>
-            {catalogNote ? <p className="max-hint">{catalogNote}</p> : null}
-          </div>
-
-          <div className="max-card-actions">
-            <button type="button" onClick={() => setPreviewSlug(selected.slug)} disabled={busy}>
-              Посмотреть
+            <button
+              type="button"
+              className="max-catalog-add"
+              onClick={() => setCatalog((current) => [...current, { title: "", price: "" }])}
+            >
+              + Добавить позицию
             </button>
             <button
               type="button"
-              onClick={() => {
-                setEditingSlug(editing ? "" : selected.slug);
-                setEditText("");
-                setEditNote("");
-              }}
+              className="max-owner-primary"
+              style={{ marginTop: 12 }}
+              onClick={() => void onSaveCatalog(selected)}
               disabled={busy}
             >
-                  Изменить словами
+              Сохранить
             </button>
+            {catalogNote ? <p className="max-hint">{catalogNote}</p> : null}
+          </section>
+
+          <div className="max-owner-quiet-actions">
             <button type="button" onClick={() => void onToggle(selected)} disabled={busy}>
-              {live ? "Скрыть" : "Опубликовать"}
+              {live ? "Скрыть от клиентов" : "Опубликовать"}
             </button>
             <button
               type="button"
@@ -880,109 +1091,10 @@ export function OwnerPanel() {
               onClick={() => void onDelete(selected)}
               disabled={busy}
             >
-              {confirmDeleteSlug === selected.slug ? "Точно удалить?" : "Удалить"}
+              {confirmDeleteSlug === selected.slug ? "Точно удалить?" : "Удалить витрину"}
             </button>
           </div>
-
-          {editing ? (
-            <div className="max-edit">
-              <textarea
-                className="max-textarea"
-                rows={3}
-                maxLength={1000}
-                value={editText}
-                onChange={(event) => setEditText(event.target.value)}
-                placeholder="Что поменять? Например: добавь развал-схождение 3000, убери субботу"
-                disabled={busy}
-              />
-              {editNote ? <p className="max-hint">{editNote}</p> : null}
-              <button
-                type="button"
-                className="max-button max-button-compact"
-                style={{ marginTop: 8 }}
-                onClick={() => void onEdit(selected)}
-                disabled={busy || editText.trim().length < 3}
-              >
-                {busy ? "Меняем…" : "Применить"}
-              </button>
-            </div>
-          ) : null}
-        </article>
-      ) : null}
-
-      <h2 className="max-section-title">Календарь</h2>
-      <OwnerCalendar leads={scopedLeads} selectedKey={calendarDay} onSelect={setCalendarDay} />
-      {calendarDay ? (
-        <button type="button" className="max-linklike" onClick={() => setCalendarDay(null)}>
-          Показать все заявки
-        </button>
-      ) : null}
-
-      <h2 className="max-section-title">
-        {calendarDay
-          ? `Заявки · ${visibleLeads.length}`
-          : `Заявки${newLeads.length > 0 ? ` · ${newLeads.length} ${pluralNew(newLeads.length)}` : ""}`}
-      </h2>
-      {scopedLeads.length === 0 ? (
-        <p className="max-note">Заявок пока нет. Отправьте ссылку клиентам или повесьте QR-код.</p>
-      ) : visibleLeads.length === 0 ? (
-        <p className="max-note">На этот день записей нет.</p>
-      ) : (
-        <ul className="max-list">
-          {visibleLeads.map((lead) => (
-            <li key={lead.id} className="max-sheet max-lead">
-              <div className="max-lead-head">
-                <span className="max-option-title">{lead.customer_name || "Без имени"}</span>
-                <span
-                  className={`max-badge max-badge-${lead.status === "new" ? "new" : lead.status === "confirmed" ? "confirmed" : "declined"}`}
-                >
-                  {STATUS_LABEL[lead.status]}
-                </span>
-              </div>
-              <p className="max-option-note">
-                {[lead.item_title, lead.slot_label].filter(Boolean).join(" · ")}
-              </p>
-              {lead.phone ? <p className="max-option-note">{lead.phone}</p> : null}
-              {lead.comment ? <p className="max-option-note">{lead.comment}</p> : null}
-              <p className="max-option-note">{formatCreated(lead.created_at)}</p>
-
-              {lead.chat_url ? (
-                <button
-                  type="button"
-                  className="max-button max-button-quiet"
-                  style={{ marginTop: 12 }}
-                  onClick={() => {
-                    haptic("tap");
-                    openMaxChat(lead.chat_url);
-                  }}
-                >
-                  Написать в MAX
-                </button>
-              ) : null}
-
-              {lead.status === "new" ? (
-                <div className="max-row">
-                  <button
-                    type="button"
-                    className="max-button"
-                    onClick={() => void onResolve(lead, "confirmed")}
-                    disabled={pendingLeadId === lead.id}
-                  >
-                    Подтвердить
-                  </button>
-                  <button
-                    type="button"
-                    className="max-button max-button-secondary"
-                    onClick={() => void onResolve(lead, "declined")}
-                    disabled={pendingLeadId === lead.id}
-                  >
-                    Отклонить
-                  </button>
-                </div>
-              ) : null}
-            </li>
-          ))}
-        </ul>
+        </>
       )}
 
       {error ? (
