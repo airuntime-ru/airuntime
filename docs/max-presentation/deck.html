@@ -154,6 +154,12 @@
     box-shadow: 0 34px 70px -26px rgba(0,0,0,.9), inset 0 0 0 1px rgba(255,255,255,.08);
   }
   .shot-caption { margin: 14px auto 0; max-width: 330px; text-align: center; }
+  .gallery { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; }
+  .gallery .shot-caption { margin-top: 10px; }
+  .gallery .shot-caption span { font-size: 12px; }
+  .niche { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .niche span { padding: 5px 10px; border-radius: 999px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); font-size: 13.5px; color: #eaf1ff; }
+  .fill { color: #d31169; font-weight: 700; border-bottom: 1px dashed currentColor; }
   .shot-caption b { display: block; font-size: 15px; font-weight: 700; color: var(--ink); margin-bottom: 3px; }
   .shot-caption span { font-size: 13px; line-height: 1.38; color: var(--ink-3); }
 
@@ -411,12 +417,12 @@
         <h3>Порядок прохождения основного сценария</h3>
         <ul style="margin-top:10px;">
           <li>Открыть <code>max.ru/t403_hakaton_max_bot</code>, нажать «Начать», затем «Открыть AIRuntime»</li>
-          <li>Описать бизнес <strong>одним сообщением</strong>: «Автосервис на Лесной. Диагностика 1500, замена масла 900, шиномонтаж 2400. Работаем с 9 до 20» — и нажать «Собрать страницу записи»</li>
-          <li>Через несколько секунд страница опубликована: ссылка, «Поделиться», «Посмотреть»</li>
+          <li>Описать бизнес <strong>одним сообщением</strong>: «Автосервис на Лесной. Диагностика 1500, замена масла 900, шиномонтаж 2400. Работаем с 9 до 20» — и нажать «Собрать витрину»</li>
+          <li>Когда индикатор сборки сменится обложкой, витрина опубликована: «Поделиться», «Открыть», ссылка</li>
           <li>Открыть ссылку <strong>со второго аккаунта MAX</strong> — это роль клиента</li>
           <li>Выбрать услугу и время, указать имя, нажать «Записаться»</li>
           <li>Владельцу в чат с ботом придёт заявка с кнопкой «Открыть заявки»</li>
-          <li>Нажать «Подтвердить» — клиенту придёт ответ в MAX</li>
+          <li>Нажать «Принять» — клиенту придёт ответ в MAX</li>
         </ul>
       </div>
     </div>
@@ -441,7 +447,7 @@
 
     <span class="eyebrow">Трек «Эффективный бизнес»</span>
     <h1>AIRuntime</h1>
-    <p class="lead">Рабочий сервис записи в MAX из одного сообщения — без разработчика, без подрядчика, без ожидания.</p>
+    <p class="lead">Витрина с онлайн-записью и заказами в MAX из одного сообщения — со своим дизайном, без разработчика и без ожидания.</p>
 
     <dl class="cover-meta">
       <div>
@@ -460,7 +466,7 @@
   <div class="bubble-label" aria-hidden="true">Владелец описывает бизнес</div>
   <div class="bubble">Автосервис на Лесной пр. 12. Диагностика подвески 1500, замена масла 900, шиномонтаж 2400. С&nbsp;9&nbsp;до&nbsp;20, +7&nbsp;812&nbsp;000-00-00</div>
   <div class="reply">
-    <div class="reply-head"><span class="reply-ok">✓</span>AIRuntime готов</div>
+    <div class="reply-head"><span class="reply-ok">✓</span>Витрина готова</div>
     <p>Клиенты записываются по ссылке, заявки приходят в чат с ботом.</p>
     <div class="reply-btn">Поделиться ссылкой</div>
   </div>
@@ -481,9 +487,10 @@
   </div>
   <div class="body">
     <p class="lead" style="max-width:1080px; margin-bottom:18px;">
-      Владелец микробизнеса услуг описывает бизнес одним сообщением в мини-приложении MAX&nbsp;— через
-      ~10 секунд у него опубликованный сервис с онлайн-записью. Клиенты записываются, не выходя из MAX,
-      заявки приходят владельцу в чат.
+      Владелец микробизнеса описывает бизнес одним сообщением в мини-приложении MAX&nbsp;— и получает
+      опубликованную витрину со своим дизайном и онлайн-записью или заказом. Клиенты записываются, не
+      выходя из MAX, заявки приходят владельцу в чат. Сейчас&nbsp;— запись и заказы; та же механика
+      подходит десяткам ниш (слайд 17).
     </p>
     <div class="cols c4" style="gap:14px;">
       <div class="card accent"><h3>Для кого</h3><p style="font-size:15px;">Самозанятые и микро-ИП в услугах с записью на время: автосервис, барбершоп, маникюр, репетитор. 1–5 человек, без сайта и CRM.</p></div>
@@ -493,7 +500,7 @@
     </div>
     <div class="cols c4" style="margin-top:14px; gap:14px;">
       <div class="tile"><div class="value">1</div><div class="label">сообщение от владельца до готового сервиса</div></div>
-      <div class="tile"><div class="value">~10<span class="unit">сек</span></div><div class="label">до ссылки для клиентов (замер на проде)</div></div>
+      <div class="tile"><div class="value">84</div><div class="label">автотеста, включая подделку подписи и сквозной сценарий</div></div>
       <div class="tile"><div class="value">2</div><div class="label">касания клиента: выбрать услугу и время</div></div>
       <div class="tile"><div class="value">0</div><div class="label">строк кода и сторонних сервисов у предпринимателя</div></div>
     </div>
@@ -501,31 +508,7 @@
   <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">03</span></div>
 </section>
 
-<!-- ======================= 4. CRITERIA MAP =============================== -->
-<!-- The jury scores criterion by criterion; this is the index to every answer. -->
-<section class="slide">
-  <div class="slide-head">
-    <span class="eyebrow">Навигация по критериям</span>
-    <h2>Где в презентации ответ на каждый критерий</h2>
-    <p>Критерии и веса — из задания трека. Справа — номера слайдов, где на критерий отвечаем прямо.</p>
-  </div>
-  <div class="body">
-    <div class="crit">
-      <div class="crit-row"><h3>Потенциал масштабирования<span class="w">35%</span></h3><div class="crit-n">17–19</div><p>Контексты и регионы помимо пилота, что переносится и что адаптируется, условия, риски, порядок тиражирования по шагам</p></div>
-      <div class="crit-row tech"><h3>Работоспособность, интеграция, архитектура<span class="w">30 + 20 + 20%</span></h3><div class="crit-n">1, 13, 16</div><p>Порядок проверки, состав и связи компонентов, реальные интеграции с MAX Bot API и MAX Bridge</p></div>
-      <div class="crit-row"><h3>Пользовательская ценность<span class="w">25%</span></h3><div class="crit-n">5–7</div><p>Приоритетный сегмент, проблема по формуле, факты отдельно от допущений, сравнение с тем, как запись ведут сейчас</p></div>
-      <div class="crit-row tech"><h3>Стабильность, безопасность, документация<span class="w">10 + 10 + 10%</span></h3><div class="crit-n">14</div><p>Обработка ошибок и повторов, модель доверия, зафиксированные зависимости, README по пунктам задания</p></div>
-      <div class="crit-row"><h3>UX/UI и удобство<span class="w">20%</span></h3><div class="crit-n">8–10</div><p>Путь владельца и клиента на реальных экранах; как интерфейс сообщает о загрузке, результате и ошибке</p></div>
-      <div class="crit-row tech"><h3>Платформенный бонус<span class="w">+0,15</span></h3><div class="crit-n">15</div><p>Возможности MAX сверх минимума: контакт из аккаунта, «Поделиться» в чаты, кнопки с переходом на нужный экран</p></div>
-      <div class="crit-row"><h3>Обоснованность и целостность<span class="w">15%</span></h3><div class="crit-n">6, 11–13</div><p>Гипотеза, ожидаемый эффект с метриками, границы MVP по MoSCoW, почему продукт устроен именно так</p></div>
-      <div class="crit-row tech"><h3>Сценарий запуска (финал)<span class="w">15%</span></h3><div class="crit-n">19</div><p>Первый район, каналы привлечения, участники, сроки, метрики и следующий шаг после пилота</p></div>
-    </div>
-    <p class="crit-legend">Слева — продуктовая оценка, справа (с оттенком) — техническая оценка, бонус и финал. Ограничения и допущения — слайд 20, источники — слайд 21.</p>
-  </div>
-  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">04</span></div>
-</section>
-
-<!-- ======================= 5. AUDIENCE & PROBLEM ========================= -->
+<!-- ======================= 4. AUDIENCE & PROBLEM ========================= -->
 <section class="slide">
   <div class="slide-head">
     <span class="eyebrow">Пользовательская ценность · аудитория и проблема</span>
@@ -559,14 +542,14 @@
         <div class="card plain" style="margin-top:12px; padding:13px 16px;">
           <p style="font-size:14.5px;"><strong>Задача названа в задании трека:</strong> ценность цифрового решения&nbsp;— во взаимодействии с клиентами, «например, оформления заказа, записи на услугу, бронирования… непосредственно в MAX».</p>
         </div>
-        <p class="small" style="margin-top:12px;"><span class="pill pill-guess">Допущение</span>&nbsp; доля микросервисов, которые ведут запись вручную и считают это проблемой, исследованием не подтверждена. Её проверяет пилот (слайд 19), допущения собраны на слайде 20.</p>
+        <p class="small" style="margin-top:12px;"><span class="pill pill-guess">Допущение</span>&nbsp; доля микросервисов, которые ведут запись вручную и считают это проблемой, исследованием не подтверждена. Её проверяет пилот (слайд 20), допущения собраны на слайде 21.</p>
       </div>
     </div>
   </div>
-  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">05</span></div>
+  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">04</span></div>
 </section>
 
-<!-- ======================= 6. AS IS / TO BE ============================== -->
+<!-- ======================= 5. AS IS / TO BE ============================== -->
 <section class="slide">
   <div class="slide-head">
     <span class="eyebrow">Пользовательская ценность · участок процесса</span>
@@ -607,10 +590,10 @@
       </p>
     </div>
   </div>
-  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">06</span></div>
+  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">05</span></div>
 </section>
 
-<!-- ======================= 7. VERSUS TODAY =============================== -->
+<!-- ======================= 6. VERSUS TODAY =============================== -->
 <section class="slide">
   <div class="slide-head">
     <span class="eyebrow">Пользовательская ценность · преимущество</span>
@@ -623,7 +606,8 @@
         <tr><th></th><th>Переписка в личных сообщениях</th><th>Сервис онлайн-записи или CRM</th><th>Сайт или бот на заказ</th><th class="ours">AIRuntime в MAX</th></tr>
       </thead>
       <tbody>
-        <tr><td>Запуск</td><td>уже есть</td><td>регистрация, настройка услуг и расписания</td><td>задание, подрядчик, ожидание</td><td class="ours">одно сообщение, ~10 секунд</td></tr>
+        <tr><td>Запуск</td><td>уже есть</td><td>регистрация, настройка услуг и расписания</td><td>задание, подрядчик, ожидание</td><td class="ours">одно сообщение — готовая витрина</td></tr>
+        <tr><td>Внешний вид</td><td>—</td><td>типовой шаблон сервиса</td><td>свой дизайн, но недели работы</td><td class="ours">свой дизайн под бренд, сразу</td></tr>
         <tr><td>Кто нужен</td><td>никто</td><td>владелец разбирается в настройках</td><td>разработчик</td><td class="ours">никто: описание обычными словами</td></tr>
         <tr><td>Где записывается клиент</td><td>в переписке</td><td>на отдельной странице или в приложении сервиса</td><td>на сайте или в отдельном боте</td><td class="ours">внутри MAX, по ссылке или QR-коду</td></tr>
         <tr><td>Заявка ночью</td><td>ждёт ответа до утра</td><td>принимается</td><td>принимается</td><td class="ours">принимается и сразу приходит в чат</td></tr>
@@ -633,14 +617,14 @@
     </table>
     <p class="small" style="margin-top:12px;">Где мы сознательно слабее: нет онлайн-оплаты и календаря занятости — это границы MVP, а не упущение (слайд 12).</p>
   </div>
-  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">07</span></div>
+  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">06</span></div>
 </section>
 
-<!-- ======================= 8. SCENARIO: OWNER ============================ -->
+<!-- ======================= 7. SCENARIO: OWNER ============================ -->
 <section class="slide">
   <div class="slide-head">
     <span class="eyebrow">UX · основной сценарий, часть 1</span>
-    <h2>Владелец: одно сообщение → опубликованный сервис</h2>
+    <h2>Владелец: одно сообщение → опубликованная витрина</h2>
     <p>Вход — «Начать» в чат-боте, затем «Открыть AIRuntime». Регистрации нет: аккаунт MAX и есть вход.</p>
   </div>
   <div class="body">
@@ -650,19 +634,19 @@
         <div class="shot-caption"><b>1. Описывает бизнес</b><span>Одним сообщением, как рассказал бы другу: есть готовые примеры. Сайт и файлы — по желанию, не обязательны.</span></div>
       </div>
       <div>
-        <div class="phone" style="--pw:205px;"><img src="shot-owner-building.png" alt="Индикатор сборки AIRuntime" /></div>
-        <div class="shot-caption"><b>2. Видит, что идёт сборка</b><span>Индикатор и подсказка не закрывать приложение; если закрыть случайно, MAX переспросит.</span></div>
+        <div class="phone" style="--pw:205px;"><img src="shot-owner-building.png" alt="Индикатор сборки витрины" /></div>
+        <div class="shot-caption"><b>2. Видит, что идёт сборка</b><span>Модель придумывает дизайн и собирает витрину; если закрыть приложение случайно, MAX переспросит.</span></div>
       </div>
       <div>
-        <div class="phone" style="--pw:205px;"><img src="shot-owner-ready.png" alt="Готовый сервис со ссылкой и кнопкой Поделиться" /></div>
-        <div class="shot-caption"><b>3. Получает результат</b><span>«✓ AIRuntime готов»: ссылка, «Поделиться» в чаты MAX, «Посмотреть» глазами клиента.</span></div>
+        <div class="phone" style="--pw:205px;"><img src="shot-owner-ready.png" alt="Готовая витрина с обложкой и кнопкой Поделиться" /></div>
+        <div class="shot-caption"><b>3. Получает результат</b><span>Обложка витрины в её цветах, «Поделиться» в чаты MAX, «Открыть» глазами клиента; заявки и правка словами — во вкладках.</span></div>
       </div>
     </div>
   </div>
-  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">08</span></div>
+  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">07</span></div>
 </section>
 
-<!-- ======================= 9. SCENARIO: CUSTOMER ========================= -->
+<!-- ======================= 8. SCENARIO: CUSTOMER ========================= -->
 <section class="slide">
   <div class="slide-head">
     <span class="eyebrow">UX · основной сценарий, часть 2</span>
@@ -685,6 +669,29 @@
       </div>
     </div>
   </div>
+  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">08</span></div>
+</section>
+
+<!-- ======================= 9. DESIGN GALLERY ============================ -->
+<!-- The one thing a template builder cannot show: five briefs, five unrelated looks. -->
+<section class="slide">
+  <div class="slide-head">
+    <span class="eyebrow">UX · дизайн витрины</span>
+    <h2>Каждая витрина — со своим дизайном</h2>
+    <p>Модель работает как арт-директор: по описанию, сайту и фото выбирает палитру, шрифт, первый экран и вид каталога. Пять бизнесов — пять разных витрин, один движок.</p>
+  </div>
+  <div class="body">
+    <div class="gallery">
+      <div><div class="phone" style="--pw:176px;"><img src="shot-gallery-coffee.png" alt="Витрина кофейни" /></div><div class="shot-caption"><b>Кофейня</b><span>фото с сайта, меню карточками, бегущая строка</span></div></div>
+      <div><div class="phone dark" style="--pw:176px;"><img src="shot-gallery-barber.png" alt="Витрина барбершопа" /></div><div class="shot-caption"><b>Барбершоп</b><span>тёмная тема, плакатный шрифт, прайс как в меню</span></div></div>
+      <div><div class="phone" style="--pw:176px;"><img src="shot-gallery-tutor.png" alt="Витрина репетитора" /></div><div class="shot-caption"><b>Репетитор</b><span>журнальная вёрстка, программы по номерам</span></div></div>
+      <div><div class="phone" style="--pw:176px;"><img src="shot-gallery-nails.png" alt="Витрина мастера маникюра" /></div><div class="shot-caption"><b>Маникюр</b><span>мягкая пастель, плитки процедур</span></div></div>
+      <div><div class="phone" style="--pw:176px;"><img src="shot-gallery-lawyer.png" alt="Витрина юриста" /></div><div class="shot-caption"><b>Юрист</b><span>строгая антиква, одна кнопка заявки</span></div></div>
+    </div>
+    <div class="card accent" style="margin-top:14px; padding:12px 18px;">
+      <p style="font-size:14.5px;"><strong>Свобода без поломок:</strong> модель выбирает из закрытого словаря — 8 кириллических шрифтов, 5 композиций первого экрана, 6 видов каталога, фактуры — и сама составляет палитру; сервер проверяет контраст и отбрасывает нечитаемое. Кода модель не пишет, поэтому любая витрина остаётся удобной на телефоне.</p>
+    </div>
+  </div>
   <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">09</span></div>
 </section>
 
@@ -700,7 +707,7 @@
         <div class="msg">
           <div class="from">Бот · владельцу</div>
           <b>Новая заявка</b> · Автосервис на Лесной<br />
-          Диагностика подвески · Сегодня 14:00<br />
+          Диагностика подвески · Чт 25 сен, 14:00<br />
           Пётр Клиент, +7&nbsp;999&nbsp;000-11-22<br />
           <span class="q">«Mazda 6, стучит подвеска»</span>
           <div class="msg-btn">Открыть заявки</div>
@@ -709,8 +716,8 @@
       </div>
       <div class="arrow">→</div>
       <div>
-        <div class="lead-card"><img src="shot-owner-lead-card.png" alt="Заявка в кабинете владельца с кнопками Подтвердить и Отклонить" /></div>
-        <p class="cap">В кабинете — «Подтвердить» или «Отклонить» одной кнопкой</p>
+        <div class="lead-card"><img src="shot-owner-lead-card.png" alt="Заявка в кабинете владельца с кнопками Принять и Отклонить" /></div>
+        <p class="cap">В кабинете — «Принять» или «Отклонить» одной кнопкой; рядом — позвонить или написать клиенту в MAX</p>
       </div>
       <div class="arrow">→</div>
       <div>
@@ -718,7 +725,7 @@
           <div class="from">Бот · клиенту</div>
           <b>Запись подтверждена</b><br />
           Автосервис на Лесной<br />
-          Диагностика подвески · Сегодня 14:00
+          Диагностика подвески · Чт 25 сен, 14:00
           <div class="msg-btn">Открыть AIRuntime</div>
         </div>
         <p class="cap">Клиенту в MAX — туда же, где он записывался. При отказе — кнопка «Выбрать другое время»</p>
@@ -727,7 +734,7 @@
     <div class="card" style="margin-top:16px; padding:14px 18px;">
       <div class="states">
         <div><b>Загрузка</b><span>Скелетоны экрана и индикатор сборки страницы</span></div>
-        <div><b>Результат</b><span>«AIRuntime готов», «Заявка принята», статусы заявок</span></div>
+        <div><b>Результат</b><span>«Витрина готова», «Заявка принята», статусы заявок</span></div>
         <div><b>Ошибка</b><span>Понятный текст и «Повторить»; введённое не теряется</span></div>
         <div><b>Без тупиков</b><span>Каждое сообщение бота открывает нужный экран; в предпросмотре — «Назад»</span></div>
       </div>
@@ -790,7 +797,8 @@
         </ul></div>
       <div class="card"><h3><span class="tag should">SHOULD</span> сделано</h3>
         <ul style="margin-top:10px;">
-          <li>Правка одной фразой</li>
+          <li>Свой дизайн у каждой витрины</li>
+          <li>Правка словами: тексты, цены, стиль</li>
           <li>Скрыть, опубликовать, удалить</li>
           <li>«Поделиться» в чаты MAX</li>
           <li>Телефон из аккаунта MAX</li>
@@ -844,7 +852,7 @@
       <text class="grp" x="360" y="13">БЭКЕНД AIRUNTIME</text>
       <rect class="bx" x="360" y="26" width="250" height="66"/><text class="t" x="378" y="52">Вебхук</text><text class="s" x="378" y="74">секрет в пути, всегда 200</text>
       <rect class="bx" x="360" y="112" width="250" height="66"/><text class="t" x="378" y="138">API мини-аппа</text><text class="s" x="378" y="160">вход — подпись initData</text>
-      <rect class="bx" x="360" y="198" width="250" height="66"/><text class="t" x="378" y="224">Генератор сервиса</text><text class="s" x="378" y="246">LLM → валидируемый конфиг</text>
+      <rect class="bx" x="360" y="198" width="250" height="66"/><text class="t" x="378" y="224">Генератор сервиса</text><text class="s" x="378" y="246">LLM → контент + дизайн, валидация</text>
 
       <text class="grp" x="720" y="13">ХРАНЕНИЕ И ИНФРАСТРУКТУРА</text>
       <rect class="bx" x="720" y="26" width="230" height="66"/><text class="t" x="738" y="52">PostgreSQL</text><text class="s" x="738" y="74">владельцы, сервисы, заявки</text>
@@ -857,7 +865,7 @@
       <text class="lbl" x="262" y="52">обновления</text><text class="lbl" x="262" y="138">initData</text>
     </svg>
     <div class="cols c3" style="margin-top:16px;">
-      <div class="card"><h3>Сервис — это данные, а не код</h3><p>Модель заполняет схему, а не пишет программу: один мультитенантный мини-апп рендерит все сервисы. «Описал → клиент может записаться» занимает секунды, а кривое поле обрезает валидация.</p></div>
+      <div class="card"><h3>Витрина — это данные, а не код</h3><p>Модель заполняет схему и выбирает дизайн из закрытого словаря, но не пишет программу: один мультитенантный мини-апп рендерит все витрины. Кривое поле обрезает валидация, нечитаемую палитру сервер отбрасывает.</p></div>
       <div class="card"><h3>Бот — вход, мини-приложение — работа</h3><p>Как советует задание: чат-бот — для уведомлений и коротких действий, форма, каталог и список заявок — в мини-приложении. Первая версия с мастером в чате делала сервис из любого сообщения, мы её заменили.</p></div>
       <div class="card"><h3>Одно приложение, две роли</h3><p>Мини-приложение подключено к чат-боту и не живёт отдельно. Роль задаёт стартовый параметр: без него — кабинет владельца, со слагом сервиса — страница для клиента.</p></div>
     </div>
@@ -899,13 +907,13 @@
           <li>Все локальные компоненты — одной командой <code>docker compose up --build</code></li>
           <li>Версии зафиксированы: <code>requirements.txt</code> + <code>requirements.lock</code>, <code>package-lock.json</code></li>
           <li>README закрывает пункты задания по порядку, с таблицей проверки и ожидаемыми результатами</li>
-          <li>54 автотеста: подделка подписи, чужой токен, чужие сервисы, сквозной сценарий через HTTP</li>
+          <li>84 автотеста: подделка подписи, чужой токен, чужие сервисы, контраст палитры, сквозной сценарий через HTTP</li>
           <li>Сборка образов с нуля — около 4 минут (замер), лимит задания — 5</li>
         </ul>
       </div>
     </div>
     <div class="card accent" style="margin-top:16px;">
-      <p style="font-size:15px;"><strong>Проверено на проде:</strong> сервис из описания собирается за ~9 секунд с реальной моделью, правка — за ~3 секунды; сообщения бота с баннером и кнопками проходят валидацию MAX API.</p>
+      <p style="font-size:15px;"><strong>Проверено на проде:</strong> витрина из описания собирается реальной моделью за <span class="fill">[замер после деплоя]</span>; сообщения бота с баннером и кнопками проходят валидацию MAX API.</p>
     </div>
   </div>
   <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">14</span></div>
@@ -973,7 +981,7 @@
         </div>
         <div class="card">
           <h3>Демонстрационные данные</h3>
-          <p>«Автосервис на Лесной» и заявки на слайдах 8–10 — демо: не реальные организации и клиенты. Сервисы созданы через тот же продуктовый сценарий, а экраны сняты с подставленными демо-данными.</p>
+          <p>«Автосервис на Лесной», витрины со слайда 9 и заявки на слайдах 7–10 — демо: не реальные организации и клиенты. Экраны сняты с интерфейса мини-приложения на демо-данных.</p>
         </div>
       </div>
     </div>
@@ -981,7 +989,40 @@
   <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">16</span></div>
 </section>
 
-<!-- ======================= 17. SCALING: CORE ============================= -->
+<!-- ======================= 17. NICHES ==================================== -->
+<!-- Breadth goes here, not on the cover: the pilot stays narrow, the mechanism does not. -->
+<section class="slide cosmos">
+  <div class="slide-head">
+    <span class="eyebrow">Потенциал масштабирования · ниши</span>
+    <h2>Одна механика — много ниш</h2>
+    <p>Сейчас AIRuntime в MAX делает ровно два сценария — онлайн-запись и онлайн-заказ, плюс простую заявку. Для ниши меняется только описание: движок, дизайн и маршрут заявки те же.</p>
+  </div>
+  <div class="body">
+    <div class="cols c3" style="gap:16px;">
+      <div class="card accent">
+        <span class="pill pill-fact">Работает сейчас</span>
+        <h3 style="margin-top:10px;">Запись на время</h3>
+        <div class="niche"><span>барбершоп и салон</span><span>маникюр и брови</span><span>автосервис и шиномонтаж</span><span>репетитор</span><span>йога и фитнес-студия</span><span>массаж</span><span>фотограф</span><span>груминг и ветеринар</span><span>психолог</span></div>
+      </div>
+      <div class="card accent">
+        <span class="pill pill-fact">Работает сейчас</span>
+        <h3 style="margin-top:10px;">Заказ и заявка</h3>
+        <div class="niche"><span>кофейня и пекарня</span><span>кондитер на заказ</span><span>цветы</span><span>домашняя еда и ланчи</span><span>фермерские продукты</span><span>ремонт и отделка</span><span>клининг</span><span>юрист и бухгалтер</span><span>праздники и кейтеринг</span></div>
+      </div>
+      <div class="card">
+        <span class="pill pill-guess">Не в MVP — следующие типы</span>
+        <h3 style="margin-top:10px;">Что потребует доработки ядра</h3>
+        <div class="niche"><span>аренда по суткам с залогом</span><span>билеты на события</span><span>абонементы и пакеты</span><span>предоплата онлайн</span><span>доставка с оплатой</span><span>расписание сотрудников</span></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px;">
+      <p><strong>Честная граница:</strong> сегодня продукт доводит клиента до записи, заказа или заявки и возвращает владельцу решение в чат. Оплату, склад и график сотрудников не делает — это следующие типы сервиса, а не обещание MVP (слайд 12). Порядок, в котором добавляем ниши, — на слайдах 18–19.</p>
+    </div>
+  </div>
+  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">17</span></div>
+</section>
+
+<!-- ======================= 18. SCALING: CORE ============================= -->
 <section class="slide cosmos">
   <div class="slide-head">
     <span class="eyebrow">Потенциал масштабирования · ядро и переменная часть</span>
@@ -1012,13 +1053,13 @@
       </div>
     </div>
     <div class="card" style="margin-top:16px;">
-      <p><strong>Где ещё та же проблема — «клиент хочет записаться или заказать, а владелец отвечает вручную»:</strong> кафе и пекарни (предзаказ), аренда инвентаря и помещений, секции и студии (запись на занятия), ремонт и бытовые услуги (вызов мастера). Каждое направление использует готовый тип сервиса и меняет только переменную часть. Порядок — на следующем слайде.</p>
+      <p><strong>Та же проблема — «клиент хочет записаться или заказать, а владелец отвечает вручную»</strong> — есть в каждой нише со слайда 17. Каждое направление использует готовый тип сервиса и меняет только переменную часть. Порядок — на следующем слайде.</p>
     </div>
   </div>
-  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">17</span></div>
+  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">18</span></div>
 </section>
 
-<!-- ======================= 18. SCALING: ORDER ============================ -->
+<!-- ======================= 19. SCALING: ORDER ============================ -->
 <section class="slide">
   <div class="slide-head">
     <span class="eyebrow">Потенциал масштабирования · порядок тиражирования</span>
@@ -1028,7 +1069,7 @@
     <div class="road">
       <div class="card topline">
         <span class="step-n">1</span><h3>Пилот</h3>
-        <p class="where">СПб, Василеостровский район, квартал у ЖК «Самоцветы»: 5–10 владельческих точек услуг</p>
+        <p class="where">Санкт-Петербург: 5–10 владельцев микробизнеса услуг с записью на время</p>
         <dl>
           <dt>Адаптируем</dt><dd>ничего — ядро как есть</dd>
           <dt>Ресурсы</dt><dd>команда, домен с HTTPS, ключ LLM</dd>
@@ -1038,7 +1079,7 @@
       </div>
       <div class="card">
         <span class="step-n">2</span><h3>Соседние ниши</h3>
-        <p class="where">Тот же район: кафе, пекарни, магазины у дома</p>
+        <p class="where">Тот же город: кафе, пекарни, кондитеры, цветы</p>
         <dl>
           <dt>Адаптируем</dt><dd>тип «меню» уже есть; словарь и подсказки модели под общепит</dd>
           <dt>Ресурсы</dt><dd>те же; ограничиваемся предзаказом и самовывозом</dd>
@@ -1071,10 +1112,10 @@
       <p style="font-size:14.5px;"><strong>Горизонт:</strong> та же механика «одно сообщение → работающий сервис в MAX» подходит не только бизнесу — продуктовые команды проверяют гипотезы без разработки, люди делают небольшие сервисы для себя. Это и есть ядро AIRuntime, а запись для микробизнеса — первый вертикальный сценарий на нём.</p>
     </div>
   </div>
-  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">18</span></div>
+  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">19</span></div>
 </section>
 
-<!-- ======================= 19. PILOT ===================================== -->
+<!-- ======================= 20. PILOT ===================================== -->
 <section class="slide">
   <div class="slide-head">
     <span class="eyebrow">Сценарий пилотного запуска</span>
@@ -1082,21 +1123,21 @@
   </div>
   <div class="body">
     <div class="cols c3" style="gap:14px;">
-      <div class="card topline"><h3>Где и для кого</h3><p style="font-size:14.5px;">Санкт-Петербург, Василеостровский район — квартал у ЖК «Самоцветы» (Уральская ул., наб. реки Смоленки). 5–10 владельческих точек услуг, которые ведут запись в личных сообщениях.</p></div>
-      <div class="card"><h3>Почему здесь</h3><p style="font-size:14.5px;">Мы уже работаем в этом квартале: карта около 160 организаций по 2ГИС и Яндекс Картам и маршрут обхода (август 2026). Знаем, где решает владелец, а где — головной офис сети.</p></div>
+      <div class="card topline"><h3>Где и для кого</h3><p style="font-size:14.5px;">Санкт-Петербург. 5–10 владельцев микробизнеса услуг с записью на время — автосервис, барбершоп, мастер маникюра, — которые сейчас ведут запись в личных сообщениях.</p></div>
+      <div class="card"><h3>Почему так</h3><p style="font-size:14.5px;">Узкий сегмент, где владелец решает сам и сразу, а запись — ежедневная рутина. Команда встречается с каждым лично, собирает витрину вместе с ним и снимает базовую линию.</p></div>
       <div class="card"><h3>Как встроится в процесс</h3><p style="font-size:14.5px;">AIRuntime заменяет пересказ прайса и согласование времени. Приём, оплата и сама услуга остаются как были.</p></div>
       <div class="card"><h3>Кто участвует</h3><p style="font-size:14.5px;">Владелец создаёт сервис и подтверждает записи, клиенты записываются, команда сопровождает и снимает метрики. Внешние владельцы процесса не нужны.</p></div>
-      <div class="card"><h3>Каналы привлечения</h3><p style="font-size:14.5px;">Владельцев — лично, обходом: хозяин студии или кафе решает сам и сразу. Клиентов — ссылкой в переписке и QR-кодом на стойке.</p></div>
+      <div class="card"><h3>Каналы привлечения</h3><p style="font-size:14.5px;">Владельцев — личные встречи, знакомые мастерские и студии, чаты предпринимателей. Клиентов — ссылкой в переписке и QR-кодом на стойке.</p></div>
       <div class="card"><h3>Что понадобится и сроки</h3><p style="font-size:14.5px;">Профиль на «MAX для партнёров», домен с HTTPS, ключ LLM. Неделя 0 — отбор и базовая линия, недели 1–3 — пилот, неделя 4 — решение.</p></div>
     </div>
     <div class="card accent" style="margin-top:14px;">
-      <p style="font-size:15px;"><strong>Метрики пилота</strong> — доля доведённых записей, время до подтверждения, доля заявок вне рабочих часов, ручных сообщений на запись (слайд 11). <strong>Следующий шаг</strong> при успехе — соседние ниши того же района на готовом типе «меню» (слайд 18).</p>
+      <p style="font-size:15px;"><strong>Метрики пилота</strong> — доля доведённых записей, время до подтверждения, доля заявок вне рабочих часов, ручных сообщений на запись (слайд 11). <strong>Следующий шаг</strong> при успехе — соседние ниши того же города на готовом типе «меню» (слайд 19).</p>
     </div>
   </div>
-  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">19</span></div>
+  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">20</span></div>
 </section>
 
-<!-- ======================= 20. LIMITS & RISKS ============================ -->
+<!-- ======================= 21. LIMITS & RISKS ============================ -->
 <section class="slide">
   <div class="slide-head">
     <span class="eyebrow">Ограничения, риски, допущения</span>
@@ -1134,13 +1175,13 @@
       </div>
     </div>
     <div class="card accent topline" style="margin-top:16px;">
-      <p><strong>Что уже подтверждено:</strong> сквозной путь «описание → сервис → запись → заявка владельцу → ответ клиенту» проходит на проде целиком и покрыт 54 автотестами — включая подделку подписи, чужой токен, просроченные параметры и запись на услугу, которой в сервисе нет.</p>
+      <p><strong>Что уже подтверждено:</strong> сквозной путь «описание → сервис → запись → заявка владельцу → ответ клиенту» проходит на проде целиком и покрыт 84 автотестами — включая подделку подписи, чужой токен, просроченные параметры и запись на услугу, которой в сервисе нет.</p>
     </div>
   </div>
-  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">20</span></div>
+  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">21</span></div>
 </section>
 
-<!-- ======================= 21. SOURCES =================================== -->
+<!-- ======================= 22. SOURCES =================================== -->
 <section class="slide cosmos">
   <div class="slide-head">
     <span class="eyebrow">Источники</span>
@@ -1153,7 +1194,6 @@
         <ul style="margin-top:11px;">
           <li><strong>Задание трека «Эффективный бизнес»</strong> — постановка, критерии оценки, рекомендации, формат сдачи</li>
           <li><strong>ФНС России</strong> — Единый реестр субъектов МСП, июль 2026: 6,6 млн субъектов, 81,8% всех действующих юрлиц и ИП, рост 3,5% год к году (приведено по заданию трека)</li>
-          <li><strong>Разведка квартала</strong> у ЖК «Самоцветы», СПб, август 2026 — около 160 организаций по 2ГИС и Яндекс Картам, маршрут обхода: выбор пилотной площадки</li>
         </ul>
       </div>
       <div class="card">
@@ -1170,10 +1210,10 @@
       <p class="small" style="color:rgba(234,241,255,.74);">Документация MAX развивается: перед сдачей состав API и методов сверялся с актуальными разделами «API ботов», «MAX Bridge» и «Валидация данных» и с официальной спецификацией, а не с примерами из сторонних источников.</p>
     </div>
   </div>
-  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">21</span></div>
+  <div class="foot"><span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span><span class="foot-n">22</span></div>
 </section>
 
-<!-- ======================= 22. CLOSING =================================== -->
+<!-- ======================= 23. CLOSING =================================== -->
 <!-- Bookends the cover on the same background. Its one job is to hand the jury a way to
      try the product in the next ten seconds - hence the QR code, not a list of URLs. -->
 <section class="slide cover closing">
@@ -1189,7 +1229,7 @@
 
     <span class="eyebrow">Спасибо за внимание</span>
     <h1>Одно сообщение —<br />и запись уже в MAX</h1>
-    <p class="lead">Бот и мини-приложение работают прямо сейчас. Опишите бизнес одним сообщением — секунд через десять у клиентов будет страница записи, а у вас заявки в чате.</p>
+    <p class="lead">Бот и мини-приложение работают прямо сейчас. Опишите бизнес одним сообщением — у клиентов будет витрина со своим дизайном и записью, а у вас заявки в чате.</p>
 
     <dl class="links">
       <dt>Бот в MAX</dt><dd>max.ru/t403_hakaton_max_bot</dd>
@@ -1201,12 +1241,12 @@
   <div class="qr-card">
     <img src="qr-bot.png" alt="QR-код: чат-бот AIRuntime в MAX" />
     <b>Наведите камеру</b>
-    <span>Откроется бот в MAX — опишите свой бизнес и получите страницу записи</span>
+    <span>Откроется бот в MAX — опишите свой бизнес и получите свою витрину</span>
   </div>
 
   <div class="foot">
     <span class="foot-brand">AIRuntime <span class="foot-x">×</span> MAX</span>
-    <span class="foot-n">22</span>
+    <span class="foot-n">23</span>
   </div>
 </section>
 

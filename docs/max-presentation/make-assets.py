@@ -146,6 +146,11 @@ SCREENS = (
     "storefront",
     "booking",
     "customer-done",
+    "gallery-coffee",
+    "gallery-barber",
+    "gallery-tutor",
+    "gallery-nails",
+    "gallery-lawyer",
 )
 
 
