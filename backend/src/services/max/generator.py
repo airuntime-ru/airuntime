@@ -60,10 +60,18 @@ _SYSTEM_PROMPT = """Ты — генератор сервисов AIRuntime дл�
   "layout": "classic" | "editorial" | "cards" | "poster",
   "color_scheme": "light" | "dark",
   "heading_style": "sans" | "serif" | "display",
+  "design_concept": "короткое уникальное имя дизайн-концепции",
+  "nav_style": "tabs" | "pills" | "rail" | "none",
+  "hero_style": "split" | "fullbleed" | "editorial" | "typographic" | "collage",
+  "card_style": "image-top" | "horizontal" | "overlay" | "minimal",
+  "radius_style": "sharp" | "soft" | "round",
+  "density": "airy" | "balanced" | "compact",
+  "section_order": ["hero", "story", "catalog"],
   "contacts": {"phone": "", "address": "", "hours": ""},
   "items": [
     {"title": "название позиции", "description": "короткое пояснение или пустая строка",
-     "price_rub": 1500, "duration_min": 60}
+     "price_rub": 1500, "duration_min": 60, "category": "категория или пустая строка",
+     "image_url": "точный https URL фото из источника или пустая строка", "badge": "хит или пусто"}
   ],
   "slots": ["Вт 23 сен, 16:00", "Ср 24 сен, 18:00"],
   "cta_label": "текст кнопки действия",
@@ -97,6 +105,14 @@ editorial — премиальный, спокойный или авторски
 - color_scheme и heading_style должны следовать прямому пожеланию владельца, дизайну сайта \
 и референсам. Тёмную тему ставь только когда её явно просили или референс однозначно тёмный. \
 Для премиального/editorial допустим serif, для poster — display, для утилитарного — sans.
+- Работай как арт-директор нормального сайта, а не как раскрашиватель шаблона. Сначала придумай \
+design_concept, затем согласуй hero_style, card_style, nav_style, density, radius_style и порядок \
+секций в одну композицию. Не выбирай один и тот же набор для всех отраслей.
+- Если у позиций есть категории — обязательно сохрани их и выбери tabs, pills или rail. \
+`none` допустим только для одной категории или списка до 4 позиций.
+- Если источник дал `Фото: https://...`, скопируй точный URL в image_url соответствующей \
+позиции. Никогда не придумывай URL. Фото должно влиять на композицию: для сильных фото выбирай \
+image-top/overlay и визуальный hero; без фото — typographic/minimal, а не пустые серые блоки.
 - title — название вывески (бренд или как владелец назвал точку). Никогда не копируй \
 служебные подписи вроде «Описание владельца», «Сайт владельца», «Название страницы».
 - title и tagline — как вывеска, не канцелярия. Никаких «Качественные услуги», \
@@ -241,6 +257,8 @@ _PRICED_LINE = re.compile(
 _PRICED_INLINE = re.compile(
     r"([A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё0-9&«»\"'(). -]{1,40}?)\s+(\d{2,6})(?:\s*(?:₽|руб))?"
 )
+_SOURCE_ITEM = re.compile(r"^\s*-\s*\[([^]]+)]\s*(.+?)\s*[—–-]\s*\d[\d ]*\s*₽\s*$")
+_SOURCE_PHOTO = re.compile(r"^\s*Фото:\s*(https://\S+)\s*$")
 
 
 def _fallback_mood(prompt: str, kind: str) -> str:
@@ -411,6 +429,55 @@ def _dated_prompt(prompt: str) -> str:
     )
 
 
+def _catalog_key(title: str) -> str:
+    return re.sub(r"[^a-zа-яё0-9]+", " ", title.casefold()).strip()
+
+
+def _source_catalog(prompt: str) -> dict[str, tuple[str, str]]:
+    """Read the exact category/photo pairs extracted from the owner's site.
+
+    The model decides composition and copy. Asset provenance is deterministic: it cannot
+    invent a tracking URL, and it cannot accidentally lose the photos we already found.
+    """
+    result: dict[str, tuple[str, str]] = {}
+    pending: tuple[str, str] | None = None
+    for line in (prompt or "").splitlines():
+        item_match = _SOURCE_ITEM.match(line)
+        if item_match:
+            pending = (item_match.group(2).strip(), item_match.group(1).strip())
+            result[_catalog_key(pending[0])] = (pending[1], "")
+            continue
+        photo_match = _SOURCE_PHOTO.match(line)
+        if photo_match and pending:
+            title, category = pending
+            result[_catalog_key(title)] = (category, photo_match.group(1))
+    return result
+
+
+def _enrich_from_source(config: ServiceConfig, prompt: str) -> ServiceConfig:
+    source = _source_catalog(prompt)
+    if not source:
+        # With no verified source list, remote assets from a model reply are untrusted.
+        items = [item.model_copy(update={"image_url": ""}) for item in config.items]
+        return config.model_copy(update={"items": items})
+    items = []
+    for item in config.items:
+        match = source.get(_catalog_key(item.title))
+        if match:
+            category, image_url = match
+            items.append(
+                item.model_copy(
+                    update={
+                        "category": item.category or category,
+                        "image_url": image_url,
+                    }
+                )
+            )
+        else:
+            items.append(item.model_copy(update={"image_url": ""}))
+    return config.model_copy(update={"items": items})
+
+
 async def generate_config(
     prompt: str, *, images: list[ImageAttachment] | None = None
 ) -> tuple[ServiceConfig, bool]:
@@ -420,7 +487,7 @@ async def generate_config(
     )
     if config is None:
         return _fallback_config(prompt), False
-    return config, True
+    return _enrich_from_source(config, prompt), True
 
 
 async def apply_edit(config: ServiceConfig, instruction: str) -> tuple[ServiceConfig, bool]:
@@ -433,4 +500,9 @@ async def apply_edit(config: ServiceConfig, instruction: str) -> tuple[ServiceCo
     updated = await _config_from_model(_EDIT_SYSTEM_PROMPT, user_text, what="max_apply_edit")
     if updated is None:
         return config, False
-    return updated.model_copy(update={"hero_image": config.hero_image}), True
+    trusted_images = {item.image_url for item in config.items if item.image_url}
+    items = [
+        item if item.image_url in trusted_images else item.model_copy(update={"image_url": ""})
+        for item in updated.items
+    ]
+    return updated.model_copy(update={"hero_image": config.hero_image, "items": items}), True

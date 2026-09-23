@@ -426,12 +426,15 @@ class TestSiteBriefing:
             "</script>"
             '<script id="__NEXT_DATA__">'
             '{"props":{"pageProps":{"categories":[{"title":"Кофе",'
-            '"products":[{"title":"Раф","price":86000}]}]}}}'
+            '"products":[{"title":"Раф","price":86000,"images":[{"thumbnails":'
+            '[{"url":"https://img.example/raf.jpg","width":800}]}]}]}]}}}'
             "</script></head><body>unused</body></html>"
         )
         text = _extract_site(html, "https://coffeemania.ru")
         assert "Бренд: Кофемания" in text
         assert "Раф — 860 ₽" in text
+        assert "[Кофе]" in text
+        assert "Фото: https://img.example/raf.jpg" in text
         assert "+74951201203" in text
 
 
@@ -625,12 +628,37 @@ class TestServiceConfig:
                 "color_scheme": "system",
                 "heading_style": "url(javascript:alert(1))",
                 "hero_image": "javascript:alert(1)",
+                "nav_style": "javascript:",
+                "hero_style": "iframe",
+                "card_style": "script",
+                "radius_style": "100vw",
+                "density": "infinite",
+                "section_order": ["catalog", "unknown", "catalog"],
             }
         )
         assert config.layout == "classic"
         assert config.color_scheme == "light"
         assert config.heading_style == "sans"
         assert config.hero_image == ""
+        assert config.nav_style == "none"
+        assert config.hero_style == "split"
+        assert config.card_style == "image-top"
+        assert config.radius_style == "soft"
+        assert config.density == "balanced"
+        assert config.section_order == ["catalog", "hero", "story"]
+
+    def test_catalog_images_must_be_https(self) -> None:
+        config = ServiceConfig.model_validate(
+            {
+                "title": "Кафе",
+                "items": [
+                    {"title": "Раф", "image_url": "https://img.example/raf.jpg"},
+                    {"title": "Латте", "image_url": "javascript:alert(1)"},
+                ],
+            }
+        )
+        assert config.items[0].image_url == "https://img.example/raf.jpg"
+        assert config.items[1].image_url == ""
 
     def test_owner_image_can_be_rendered_but_remote_or_svg_cannot(self) -> None:
         config = ServiceConfig.model_validate(

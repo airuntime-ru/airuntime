@@ -145,24 +145,49 @@ def _json_ld_bits(html: str) -> list[str]:
     return parts
 
 
-def _collect_priced_products(obj: object, acc: list[tuple[str, int]], *, limit: int) -> None:
+def _product_image_url(product: dict[str, object]) -> str:
+    images = product.get("images")
+    if not isinstance(images, list) or not images or not isinstance(images[0], dict):
+        return ""
+    thumbnails = images[0].get("thumbnails")
+    if isinstance(thumbnails, list):
+        candidates = [thumb for thumb in thumbnails if isinstance(thumb, dict)]
+        candidates.sort(key=lambda thumb: int(thumb.get("width") or 0), reverse=True)
+        for thumb in candidates:
+            url = str(thumb.get("url") or "").strip()
+            if url.startswith("https://"):
+                return url
+    url = str(images[0].get("url") or "").strip()
+    return url if url.startswith("https://") else ""
+
+
+def _collect_priced_products(
+    obj: object,
+    acc: list[tuple[str, int, str, str]],
+    *,
+    limit: int,
+    category: str = "",
+) -> None:
     if len(acc) >= limit:
         return
     if isinstance(obj, dict):
         title = str(obj.get("title") or obj.get("name") or "").strip()
         price = obj.get("price")
         if title and isinstance(price, int | float) and float(price) > 0:
-            acc.append((title, _to_rub(int(price))))
+            acc.append((title, _to_rub(int(price)), category, _product_image_url(obj)))
             return
         for key in ("props", "pageProps", "categories", "products", "items", "dishes"):
             if key in obj:
-                _collect_priced_products(obj[key], acc, limit=limit)
+                child_category = category
+                if key == "products":
+                    child_category = title or category
+                _collect_priced_products(obj[key], acc, limit=limit, category=child_category)
                 if len(acc) >= limit:
                     return
         return
     if isinstance(obj, list):
         for child in obj:
-            _collect_priced_products(child, acc, limit=limit)
+            _collect_priced_products(child, acc, limit=limit, category=category)
             if len(acc) >= limit:
                 return
 
@@ -175,12 +200,49 @@ def _menu_from_next_data(html: str) -> str:
         data = json.loads(match.group(1))
     except json.JSONDecodeError:
         return ""
-    items: list[tuple[str, int]] = []
-    _collect_priced_products(data, items, limit=SITE_MENU_ITEMS)
-    if not items:
+    discovered: list[tuple[str, int, str, str]] = []
+    # Do not spend the whole briefing on the first category in a large restaurant site.
+    # Collect broadly, then round-robin the categories so a request for "coffee shop" can
+    # actually see Coffee, Desserts and Bakery even when Hot dishes appears first.
+    _collect_priced_products(data, discovered, limit=160)
+    if not discovered:
         return ""
-    lines = [f"- {title} — {price} ₽" for title, price in items]
+    by_category: dict[str, list[tuple[str, int, str, str]]] = {}
+    for item in discovered:
+        by_category.setdefault(item[2], []).append(item)
+    items: list[tuple[str, int, str, str]] = []
+    offset = 0
+    while len(items) < SITE_MENU_ITEMS:
+        added = False
+        for group in by_category.values():
+            if offset < len(group):
+                items.append(group[offset])
+                added = True
+                if len(items) >= SITE_MENU_ITEMS:
+                    break
+        if not added:
+            break
+        offset += 1
+    lines: list[str] = []
+    for title, price, category, image_url in items:
+        prefix = f"[{category}] " if category else ""
+        lines.append(f"- {prefix}{title} — {price} ₽")
+        if image_url:
+            lines.append(f"  Фото: {image_url}")
     return "Позиции с сайта:\n" + "\n".join(lines)
+
+
+def _first_catalog_image(html: str) -> str:
+    match = _NEXT_DATA.search(html)
+    if not match:
+        return ""
+    try:
+        data = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return ""
+    items: list[tuple[str, int, str, str]] = []
+    _collect_priced_products(data, items, limit=1)
+    return items[0][3] if items else ""
 
 
 def _extract_site(html: str, url: str) -> str:
@@ -245,9 +307,9 @@ def fetch_site_brief(url: str) -> str:
 def _site_image(html: str, page_url: str) -> ImageAttachment | None:
     """Fetch a public social/hero image with the same SSRF boundary as the page itself."""
     match = _META_IMAGE.search(html) or _META_IMAGE_REV.search(html)
-    if not match:
+    raw_url = match.group(1).strip() if match else _first_catalog_image(html)
+    if not raw_url:
         return None
-    raw_url = match.group(1).strip()
     image_url = urljoin(page_url, raw_url)
     parsed = urlparse(image_url)
     if (

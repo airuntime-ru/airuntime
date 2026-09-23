@@ -23,6 +23,11 @@ SERVICE_MOODS = ("calm", "warm", "bold", "minimal")
 SERVICE_LAYOUTS = ("classic", "editorial", "cards", "poster")
 SERVICE_COLOR_SCHEMES = ("light", "dark")
 SERVICE_HEADING_STYLES = ("sans", "serif", "display")
+SERVICE_NAV_STYLES = ("tabs", "pills", "rail", "none")
+SERVICE_HERO_STYLES = ("split", "fullbleed", "editorial", "typographic", "collage")
+SERVICE_CARD_STYLES = ("image-top", "horizontal", "overlay", "minimal")
+SERVICE_RADIUS_STYLES = ("sharp", "soft", "round")
+SERVICE_DENSITIES = ("airy", "balanced", "compact")
 
 MAX_ITEMS = 24
 MAX_SLOTS = 12
@@ -85,11 +90,20 @@ class ServiceItem(BaseModel):
     # float would only invite rounding noise in the customer-visible price.
     price_rub: int | None = Field(default=None, ge=0, le=10_000_000)
     duration_min: int | None = Field(default=None, ge=5, le=600)
+    category: str = Field(default="", max_length=60)
+    image_url: str = Field(default="", max_length=500)
+    badge: str = Field(default="", max_length=32)
 
-    @field_validator("title", "description", mode="before")
+    @field_validator("title", "description", "category", "badge", mode="before")
     @classmethod
     def _text(cls, value: object) -> str:
         return str(value or "").strip()
+
+    @field_validator("image_url", mode="before")
+    @classmethod
+    def _image_url(cls, value: object) -> str:
+        url = str(value or "").strip()
+        return url if re.match(r"^https://[^\s]+$", url) else ""
 
     @field_validator("duration_min", mode="before")
     @classmethod
@@ -129,6 +143,15 @@ class ServiceConfig(BaseModel):
     heading_style: str = "sans"
     # Owner-supplied image only. The generator never gets to invent or hot-link this URL.
     hero_image: str = Field(default="", max_length=1_400_000)
+    # A broad, safe design language. The model can combine these into hundreds of distinct
+    # compositions while checkout and MAX authentication remain platform-owned.
+    design_concept: str = Field(default="", max_length=100)
+    nav_style: str = "none"
+    hero_style: str = "split"
+    card_style: str = "image-top"
+    radius_style: str = "soft"
+    density: str = "balanced"
+    section_order: list[str] = Field(default_factory=lambda: ["hero", "story", "catalog"])
     contacts: ServiceContacts = Field(default_factory=ServiceContacts)
     items: list[ServiceItem] = Field(default_factory=list)
     # Human-readable slots ("Вт 23 сен, 16:00"). The owner's calendar parses them.
@@ -181,8 +204,59 @@ class ServiceConfig(BaseModel):
         allowed = re.match(r"^data:image/(?:jpeg|png|webp);base64,[A-Za-z0-9+/=]+$", image)
         return image if allowed else ""
 
+    @field_validator("nav_style", mode="before")
+    @classmethod
+    def _nav_style(cls, value: object) -> str:
+        style = str(value or "").strip().lower()
+        return style if style in SERVICE_NAV_STYLES else "none"
+
+    @field_validator("hero_style", mode="before")
+    @classmethod
+    def _hero_style(cls, value: object) -> str:
+        style = str(value or "").strip().lower()
+        return style if style in SERVICE_HERO_STYLES else "split"
+
+    @field_validator("card_style", mode="before")
+    @classmethod
+    def _card_style(cls, value: object) -> str:
+        style = str(value or "").strip().lower()
+        return style if style in SERVICE_CARD_STYLES else "image-top"
+
+    @field_validator("radius_style", mode="before")
+    @classmethod
+    def _radius_style(cls, value: object) -> str:
+        style = str(value or "").strip().lower()
+        return style if style in SERVICE_RADIUS_STYLES else "soft"
+
+    @field_validator("density", mode="before")
+    @classmethod
+    def _density(cls, value: object) -> str:
+        density = str(value or "").strip().lower()
+        return density if density in SERVICE_DENSITIES else "balanced"
+
+    @field_validator("section_order", mode="before")
+    @classmethod
+    def _section_order(cls, value: object) -> list[str]:
+        allowed = ("hero", "story", "catalog")
+        if not isinstance(value, list):
+            return list(allowed)
+        result: list[str] = []
+        for item in value:
+            name = str(item)
+            if name in allowed and name not in result:
+                result.append(name)
+        result.extend(item for item in allowed if item not in result)
+        return result[:3]
+
     @field_validator(
-        "title", "tagline", "about", "cta_label", "success_message", "comment_hint", mode="before"
+        "title",
+        "tagline",
+        "about",
+        "cta_label",
+        "success_message",
+        "comment_hint",
+        "design_concept",
+        mode="before",
     )
     @classmethod
     def _text(cls, value: object) -> str:

@@ -93,7 +93,10 @@ class Settings(BaseSettings):
     # a model for the Codex CLI, which the OpenAI-compatible proxy answers with
     # `Model '...' not found`. Named separately so the wizard cannot silently degrade to its
     # keyword fallback when the platform default moves. Must exist on OPENAI_BASE_URL.
-    max_wizard_model: str = "~anthropic/claude-haiku-latest"
+    # MAX storefronts are full customer-facing sites, not a throwaway chat completion.
+    # Use the same quality tier as regular AIRuntime generation; owners accepted the extra
+    # latency in exchange for art direction, information architecture and better copy.
+    max_wizard_model: str = "openai/gpt-5.6-sol"
     # Banner on the bot's welcome message. MAX downloads it from this URL itself, so it
     # must be public HTTPS. Empty = <frontend>/brand/max-welcome-v7.jpg; "-" = no banner.
     # The filename is the cache-buster: MAX reuses a previously fetched URL, so a new

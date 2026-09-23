@@ -15,6 +15,9 @@ export type ServiceItem = {
   description: string;
   price_rub: number | null;
   duration_min: number | null;
+  category: string;
+  image_url: string;
+  badge: string;
 };
 
 export type LeadStatus = "new" | "confirmed" | "declined" | "done";
@@ -39,6 +42,13 @@ export type ServiceConfig = {
   color_scheme: "light" | "dark";
   heading_style: "sans" | "serif" | "display";
   hero_image: string;
+  design_concept: string;
+  nav_style: "tabs" | "pills" | "rail" | "none";
+  hero_style: "split" | "fullbleed" | "editorial" | "typographic" | "collage";
+  card_style: "image-top" | "horizontal" | "overlay" | "minimal";
+  radius_style: "sharp" | "soft" | "round";
+  density: "airy" | "balanced" | "compact";
+  section_order: Array<"hero" | "story" | "catalog">;
   contacts: { phone: string; address: string; hours: string };
   items: ServiceItem[];
   slots: string[];

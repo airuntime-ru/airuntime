@@ -85,6 +85,7 @@ export function Storefront({ slug }: { slug: string }) {
   const [phoneManual, setPhoneManual] = useState(false);
   const [successText, setSuccessText] = useState("");
   const [history, setHistory] = useState<CustomerLead[]>([]);
+  const [activeCategory, setActiveCategory] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -127,6 +128,16 @@ export function Storefront({ slug }: { slug: string }) {
         : undefined,
     [config]
   );
+
+  const categories = useMemo(
+    () =>
+      Array.from(
+        new Set((config?.items || []).map((item) => item.category?.trim()).filter(Boolean))
+      ) as string[],
+    [config]
+  );
+
+  const effectiveCategory = categories.includes(activeCategory) ? activeCategory : "";
 
   const needsSlot = Boolean(config && config.kind === "booking" && config.slots.length > 0);
   const canSubmit =
@@ -210,6 +221,11 @@ export function Storefront({ slug }: { slug: string }) {
         data-scheme={config.color_scheme || "light"}
         data-layout={config.layout || "classic"}
         data-heading={config.heading_style || "sans"}
+        data-nav={config.nav_style || "none"}
+        data-hero={config.hero_style || "split"}
+        data-card={config.card_style || "minimal"}
+        data-radius={config.radius_style || "soft"}
+        data-density={config.density || "balanced"}
         style={accentStyle}
       >
         <div className="max-sheet max-success" role="status">
@@ -230,6 +246,19 @@ export function Storefront({ slug }: { slug: string }) {
 
   const busy = phase === "submitting";
   const chosen = config.items.find((item) => item.title === selectedItem) ?? null;
+  const visibleItems = effectiveCategory
+    ? config.items.filter((item) => item.category === effectiveCategory)
+    : config.items;
+  const heroImages = Array.from(
+    new Set([config.hero_image, ...config.items.map((item) => item.image_url)].filter(Boolean))
+  ).slice(0, config.hero_style === "collage" ? 3 : 1);
+  const sectionOrder = config.section_order?.length
+    ? config.section_order
+    : (["hero", "story", "catalog"] as const);
+  const sectionRank = (name: "hero" | "story" | "catalog") => {
+    const index = sectionOrder.indexOf(name);
+    return -3 + (index < 0 ? 3 : index);
+  };
   const meta = [config.contacts.address, config.contacts.hours, config.contacts.phone]
     .filter(Boolean)
     .join(" · ");
@@ -253,13 +282,22 @@ export function Storefront({ slug }: { slug: string }) {
       data-scheme={config.color_scheme || "light"}
       data-layout={config.layout || "classic"}
       data-heading={config.heading_style || "sans"}
+      data-nav={config.nav_style || "none"}
+      data-hero={config.hero_style || "split"}
+      data-card={config.card_style || "minimal"}
+      data-radius={config.radius_style || "soft"}
+      data-density={config.density || "balanced"}
       style={accentStyle}
     >
-      <header className="max-hero">
-        {config.hero_image ? (
-          // Owner uploads are validated data URLs; next/image cannot optimize inline data.
-          // eslint-disable-next-line @next/next/no-img-element
-          <img className="max-hero-image" src={config.hero_image} alt="" aria-hidden="true" />
+      <header className="max-hero" style={{ order: sectionRank("hero") }}>
+        {heroImages.length > 0 ? (
+          <div className="max-hero-media" aria-hidden="true">
+            {heroImages.map((image, index) => (
+              // Source images come from the owner's site and keep their original URL.
+              // eslint-disable-next-line @next/next/no-img-element
+              <img key={image} className="max-hero-image" src={image} alt="" data-index={index} />
+            ))}
+          </div>
         ) : null}
         <div className="max-hero-copy">
           <p className="max-hero-kicker">{kindKicker(config.kind)}</p>
@@ -269,15 +307,42 @@ export function Storefront({ slug }: { slug: string }) {
         </div>
       </header>
 
-      {config.about ? <p className="max-about">{config.about}</p> : null}
+      {config.about ? (
+        <p className="max-about" style={{ order: sectionRank("story") }}>
+          {config.about}
+        </p>
+      ) : null}
 
       {history.length > 0 ? <HistoryList leads={history} /> : null}
 
       {config.items.length > 0 ? (
-        <>
+        <section className="max-catalog-section" style={{ order: sectionRank("catalog") }}>
           <h2 className="max-section-title">{config.kind === "menu" ? "Меню" : "Услуги"}</h2>
+          {categories.length > 1 && config.nav_style !== "none" ? (
+            <nav className="max-category-nav" aria-label="Категории">
+              <button
+                type="button"
+                className="max-category"
+                aria-pressed={!effectiveCategory}
+                onClick={() => setActiveCategory("")}
+              >
+                Всё
+              </button>
+              {categories.map((category) => (
+                <button
+                  key={category}
+                  type="button"
+                  className="max-category"
+                  aria-pressed={effectiveCategory === category}
+                  onClick={() => setActiveCategory(category)}
+                >
+                  {category}
+                </button>
+              ))}
+            </nav>
+          ) : null}
           <ul className="max-list">
-            {config.items.map((item) => {
+            {visibleItems.map((item) => {
               const price = priceLabel(item);
               const duration = durationLabel(item);
               const note = item.description;
@@ -291,6 +356,13 @@ export function Storefront({ slug }: { slug: string }) {
                     onClick={() => setSelectedItem(item.title)}
                     disabled={busy}
                   >
+                    {item.image_url ? (
+                      <span className="max-option-media">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={item.image_url} alt="" loading="lazy" referrerPolicy="no-referrer" />
+                        {item.badge ? <span className="max-product-badge">{item.badge}</span> : null}
+                      </span>
+                    ) : null}
                     {/* A check mark, not just a border: on a small screen the selected row
                         has to be obvious at a glance. */}
                     <span className="max-radio" aria-hidden>
@@ -309,7 +381,7 @@ export function Storefront({ slug }: { slug: string }) {
               );
             })}
           </ul>
-        </>
+        </section>
       ) : null}
 
       {needsSlot && selectedItem ? (
