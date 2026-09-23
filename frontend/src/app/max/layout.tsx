@@ -49,7 +49,9 @@ const playfair = Playfair_Display({
 });
 const cormorant = Cormorant_Garamond({
   subsets: ["latin", "cyrillic"],
-  weight: ["500", "600", "700"],
+  // A single face is enough for display copy and avoids a Turbopack/next-font failure
+  // where a multi-weight Google font is emitted as an invalid multi-entry query.
+  weight: "600",
   display: "swap",
   preload: false,
   variable: "--max-font-cormorant",

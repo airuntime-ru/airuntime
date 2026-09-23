@@ -207,6 +207,21 @@ function looksLikeStub(service: OwnerService): boolean {
 
 type CatalogRow = { title: string; price: string };
 
+function catalogRows(service: OwnerService | undefined): CatalogRow[] {
+  return (service?.config.items ?? []).map((item) => ({
+    title: item.title,
+    price: item.price_rub != null ? String(item.price_rub) : "",
+  }));
+}
+
+function preferredService(services: OwnerService[], requestedSlug = ""): OwnerService | undefined {
+  return (
+    services.find((service) => service.slug === requestedSlug) ??
+    services.find((service) => service.new_leads > 0) ??
+    services[0]
+  );
+}
+
 function messageOf(cause: unknown, fallback: string): string {
   return cause instanceof Error && cause.message ? cause.message : fallback;
 }
@@ -254,8 +269,11 @@ export function OwnerPanel() {
 
   const apply = useCallback((result: { services: OwnerService[]; leads: Lead[] } | Error) => {
     if (!(result instanceof Error)) {
+      const selected = preferredService(result.services, readStoredSlug());
       setServices(result.services);
       setLeads(result.leads);
+      setSelectedSlug(selected?.slug ?? "");
+      setCatalog(catalogRows(selected));
       setPhase("ready");
       return;
     }
@@ -302,21 +320,6 @@ export function OwnerPanel() {
   }, [confirmDeleteSlug]);
 
   useEffect(() => {
-    if (services.length === 0) {
-      setSelectedSlug("");
-      return;
-    }
-    if (services.some((service) => service.slug === selectedSlug)) return;
-    const stored = readStoredSlug();
-    if (stored && services.some((service) => service.slug === stored)) {
-      setSelectedSlug(stored);
-      return;
-    }
-    const withNew = services.find((service) => service.new_leads > 0);
-    setSelectedSlug((withNew ?? services[0]).slug);
-  }, [services, selectedSlug]);
-
-  useEffect(() => {
     if (!selectedSlug) return;
     try {
       sessionStorage.setItem(SELECTED_SLUG_KEY, selectedSlug);
@@ -324,21 +327,6 @@ export function OwnerPanel() {
       // Private mode or a webview without storage — selection still lives in React state.
     }
   }, [selectedSlug]);
-
-  useEffect(() => {
-    const current = services.find((service) => service.slug === selectedSlug);
-    if (!current) {
-      setCatalog([]);
-      return;
-    }
-    setCatalog(
-      current.config.items.map((item) => ({
-        title: item.title,
-        price: item.price_rub != null ? String(item.price_rub) : "",
-      }))
-    );
-    setCatalogNote("");
-  }, [services, selectedSlug]);
 
   const onCreate = useCallback(async () => {
     const text = brief.trim();
@@ -358,6 +346,8 @@ export function OwnerPanel() {
       setServices((current) => [created, ...current]);
       setFreshSlug(created.slug);
       setSelectedSlug(created.slug);
+      setCatalog(catalogRows(created));
+      setCatalogNote("");
       setCalendarDay(null);
       setBrief("");
       setSiteUrl("");
@@ -399,6 +389,10 @@ export function OwnerPanel() {
         setServices((current) =>
           current.map((row) => (row.slug === service.slug ? { ...row, ...updated } : row))
         );
+        if (service.slug === selectedSlug) {
+          setCatalog(catalogRows(updated));
+          setCatalogNote("");
+        }
         if (updated.changed) {
           setEditingSlug("");
           setEditText("");
@@ -413,7 +407,7 @@ export function OwnerPanel() {
         setBusySlug("");
       }
     },
-    [editText]
+    [editText, selectedSlug]
   );
 
   const onSaveCatalog = useCallback(
@@ -473,15 +467,22 @@ export function OwnerPanel() {
       setBusySlug(service.slug);
       try {
         await deleteService(service.slug);
-        setServices((current) => current.filter((row) => row.slug !== service.slug));
+        const remaining = services.filter((row) => row.slug !== service.slug);
+        setServices(remaining);
         setLeads((current) => current.filter((lead) => lead.service_slug !== service.slug));
+        if (service.slug === selectedSlug) {
+          const replacement = preferredService(remaining);
+          setSelectedSlug(replacement?.slug ?? "");
+          setCatalog(catalogRows(replacement));
+          setCatalogNote("");
+        }
       } catch (cause: unknown) {
         setError(messageOf(cause, "Не удалось удалить AIRuntime"));
       } finally {
         setBusySlug("");
       }
     },
-    [confirmDeleteSlug]
+    [confirmDeleteSlug, selectedSlug, services]
   );
 
   const onCopy = useCallback(async (service: OwnerService) => {
@@ -1109,8 +1110,11 @@ export function OwnerPanel() {
         services={services}
         selectedSlug={selected.slug}
         onSelect={(slug) => {
-          if (slug === selectedSlug) return;
+          if (slug === selected.slug) return;
+          const next = services.find((service) => service.slug === slug);
           setSelectedSlug(slug);
+          setCatalog(catalogRows(next));
+          setCatalogNote("");
           setCalendarDay(null);
           setEditingSlug("");
           setConfirmDeleteSlug("");
