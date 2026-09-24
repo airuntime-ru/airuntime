@@ -156,7 +156,9 @@ async def open_page(browser, slug, state):
     await page.route("**/api/v1/**", api)
     await page.goto(BASE)
     await page.add_style_tag(content=HIDE_DEV)
-    await page.wait_for_timeout(2500)
+    # The first load of a dev server compiles for a while; wait for content, not a clock.
+    await page.wait_for_selector(".max-welcome, .max-cover, .max-hero", timeout=120_000)
+    await page.wait_for_timeout(800)
     await page.add_style_tag(content=HIDE_DEV)
     return ctx, page
 
