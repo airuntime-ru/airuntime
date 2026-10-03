@@ -1,4 +1,5 @@
 import { clearTokens, getAccessToken, getRefreshToken, setTokens } from "@/lib/auth";
+import { notifyCreditBalanceChanged } from "@/lib/credit-balance-events";
 
 const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
 
@@ -548,8 +549,8 @@ export function streamRepairDeployment(
   });
 }
 
-export async function getMe(): Promise<MeType> {
-  return requestJson<MeType>("/auth/me");
+export async function getMe(signal?: AbortSignal): Promise<MeType> {
+  return requestJson<MeType>("/auth/me", { cache: "no-store", signal });
 }
 
 export async function completeOnboarding(): Promise<MeType> {
@@ -704,7 +705,9 @@ export async function listPlans(): Promise<PlanType[]> {
 }
 
 export async function getBillingSummary(): Promise<BillingSummaryType> {
-  return requestJson<BillingSummaryType>("/billing/me");
+  const summary = await requestJson<BillingSummaryType>("/billing/me", { cache: "no-store" });
+  notifyCreditBalanceChanged();
+  return summary;
 }
 
 export async function createTopUp(credits: number): Promise<CreditTopUpType> {

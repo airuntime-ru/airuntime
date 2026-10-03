@@ -249,9 +249,11 @@ class ProductQualityReviewSkill(BaseSkill):
             usage_sink=usage_records.append,
         )
         if review is None:
-            review = ReviewResult(
-                verdict="revise",
-                major_issues=["independent product review call failed"],
+            return SkillResult(
+                status="failed",
+                summary="Independent product reviewer unavailable",
+                output={"infra_failure": True, "usage": aggregate_usage(usage_records)},
+                error="review_infrastructure_failed",
             )
         review = _quality_gate(review, missing_paths=missing_paths)
         needs_fix = review.verdict in ("revise", "blocked") or bool(review.critical_issues)

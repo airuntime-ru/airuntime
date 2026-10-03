@@ -113,6 +113,14 @@ class _FakeCancelDockerClient:
 
 
 class TestCancelCodexRunControlAction:
+    @pytest.fixture(autouse=True)
+    def mock_adapter_initialization(self, monkeypatch):
+        from src.services import docker_control_actions
+
+        monkeypatch.setattr(
+            docker_control_actions.DockerDeploymentAdapter, "__init__", lambda self: None
+        )
+
     def test_stops_the_matching_container(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from src.services import docker_control_actions
 

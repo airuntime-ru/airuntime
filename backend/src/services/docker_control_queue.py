@@ -96,6 +96,11 @@ def pop_control_job(timeout_seconds: int = 2) -> dict | None:
     return json.loads(payload)
 
 
+def requeue_control_job(job: dict) -> None:
+    """Preserve a popped job when the bounded Codex executor is at capacity."""
+    _redis().rpush(QUEUE_KEY, json.dumps(job))
+
+
 def push_control_result(job_id: str, result: dict) -> None:
     result_key = f"{RESULT_PREFIX}{job_id}"
     try:

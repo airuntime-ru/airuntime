@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { LogOut, Zap } from "lucide-react";
 
 import { Logo } from "@/components/brand/logo";
+import { GenerationNotifications } from "@/components/app/generation-notifications";
 import { cn } from "@/lib/cn";
 
 const nav = [
@@ -55,6 +56,7 @@ export function AppTopBar({ credits, onLogout }: { credits: number; onLogout: ()
         </nav>
 
         <div className="ml-auto flex items-center gap-2">
+          <GenerationNotifications />
           <Link
             href="/app/profile"
             title="Баланс кредитов"

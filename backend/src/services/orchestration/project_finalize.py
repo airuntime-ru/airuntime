@@ -72,7 +72,7 @@ def finalize_project_after_completed_run(
         return
 
     try:
-        create_deployment_for_project(db, project)
+        create_deployment_for_project(db, project, source_run_id=run.id)
     except RunningProjectLimitError as exc:
         project.status = "ready"
         note = (

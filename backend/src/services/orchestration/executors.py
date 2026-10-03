@@ -547,12 +547,16 @@ class SkillExecutor:
                 status=status,
                 summary=summary,
                 unresolved=review_issues[:10] if status != "completed" else [],
+                review_verdict=review_verdict,
+                review_critical_count=len(review.get("critical_issues") or []),
+                review_major_count=len(review.get("major_issues") or []),
+                review_infra_failure=bool(output.get("infra_failure")),
             ),
             usage=usage,
             build_result=output.get("build_result"),
             preview_result=output.get("preview"),
             runtime_health_result=output if skill_id == "runtime_health_check" else None,
-            error=result.error,
+            error="review_infrastructure_failed" if output.get("infra_failure") else result.error,
         )
 
 

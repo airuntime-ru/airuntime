@@ -159,6 +159,7 @@ class TestEmit:
     def test_publishes_to_a_live_subscriber_after_persisting(self, db: Session, run) -> None:
         sub = events_bus.get_event_bus().subscribe(str(run.id))
         events_bus.emit(db, run_id=run.id, event_type="run_created", payload={"a": 1})
+        db.commit()
         received = sub.queue.get_nowait()
         assert received["event_type"] == "run_created"
         assert received["payload"] == {"a": 1}
@@ -171,6 +172,7 @@ class TestEmit:
             envelope = events_bus.emit(db, run_id=run.id, event_type="not_a_real_type", payload={})
         assert "not_a_real_type" in caplog.text
         assert envelope["event_type"] == "not_a_real_type"
+        db.commit()
         assert sub.queue.get_nowait()["event_type"] == "not_a_real_type"
 
     def test_task_id_is_stringified_in_the_envelope(self, db: Session, run) -> None:
@@ -204,6 +206,7 @@ class TestStreamEventsReplay:
         events_bus.emit(db, run_id=run.id, event_type="planning_started", payload={"n": 2})
         events_bus.emit(db, run_id=run.id, event_type="run_completed", payload={"n": 3})
 
+        db.commit()
         received = [e async for e in events_bus.stream_events(db_factory, str(run.id), after_seq=0)]
         assert [e["event_type"] for e in received] == [
             "run_created",
@@ -219,6 +222,7 @@ class TestStreamEventsReplay:
         events_bus.emit(db, run_id=run.id, event_type="run_failed", payload={})
         events_bus.emit(db, run_id=run.id, event_type="run_created", payload={})  # must be ignored
 
+        db.commit()
         received = [e async for e in events_bus.stream_events(db_factory, str(run.id), after_seq=0)]
         assert [e["event_type"] for e in received] == ["run_failed"]
 
@@ -228,6 +232,7 @@ class TestStreamEventsReplay:
         second = events_bus.emit(db, run_id=run.id, event_type="planning_started", payload={})
         events_bus.emit(db, run_id=run.id, event_type="run_completed", payload={})
 
+        db.commit()
         received = [
             e
             async for e in events_bus.stream_events(
@@ -247,6 +252,7 @@ class TestStreamEventsLiveTail:
         await asyncio.sleep(0.05)  # let stream_events reach its subscribe() + queue.get()
         events_bus.emit(db, run_id=run.id, event_type="run_created", payload={"live": True})
 
+        db.commit()
         envelope = await asyncio.wait_for(first, timeout=2.0)
         assert envelope["event_type"] == "run_created"
         assert envelope["payload"] == {"live": True}
@@ -259,6 +265,7 @@ class TestStreamEventsLiveTail:
         task = asyncio.ensure_future(_collect(gen, 1))
         await asyncio.sleep(0.05)
         events_bus.emit(db, run_id=run.id, event_type="run_cancelled", payload={})
+        db.commit()
         await asyncio.wait_for(task, timeout=2.0)
 
         with pytest.raises(StopAsyncIteration):
@@ -272,6 +279,7 @@ class TestStreamEventsLiveTail:
         task = asyncio.ensure_future(gen.__anext__())
         await asyncio.sleep(0.05)
         events_bus.emit(db, run_id=run.id, event_type="run_created", payload={})
+        db.commit()
         await asyncio.wait_for(task, timeout=2.0)
 
         assert str(run.id) in events_bus._bus._subscribers
@@ -292,6 +300,7 @@ class TestStreamEventsReplayRace:
         concurrent engine task doing the same thing at the same real wall-clock moment."""
         events_bus.emit(db, run_id=run.id, event_type="run_created", payload={})
 
+        db.commit()
         original_list_since = repository_module.RunEventRepository.list_since
         emitted_concurrently = {"done": False}
 
@@ -300,11 +309,13 @@ class TestStreamEventsReplayRace:
             if not emitted_concurrently["done"]:
                 emitted_concurrently["done"] = True
                 events_bus.emit(db, run_id=run.id, event_type="run_completed", payload={})
+                db.commit()
             return rows
 
         monkeypatch.setattr(
             repository_module.RunEventRepository, "list_since", _list_since_with_concurrent_emit
         )
 
+        db.commit()
         received = [e async for e in events_bus.stream_events(db_factory, str(run.id), after_seq=0)]
         assert [e["event_type"] for e in received] == ["run_created", "run_completed"]

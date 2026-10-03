@@ -192,4 +192,24 @@ def build_judge_fix_planned_tasks(
             write_scope=WriteScope.NONE,
         )
     )
+    review_skills = list(
+        dict.fromkeys(
+            skill
+            for skill in suggested_skills
+            if skill in {"visual_preview_review", "product_quality_review", "accessibility_review"}
+        )
+    )
+    if review_skills:
+        template = planned.pop()
+        for index, skill in enumerate(review_skills):
+            planned.append(
+                template.model_copy(
+                    update={
+                        "local_id": template.local_id
+                        if index == 0
+                        else f"{template.local_id}_{index + 1}",
+                        "suggested_skills": [skill],
+                    }
+                )
+            )
     return planned

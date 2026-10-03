@@ -132,6 +132,8 @@ class GitTransactionManager:
         raw_logs: str | None = None,
         release_lease: bool = True,
     ) -> TransactionOutcome:
+        # Fence both commit and rollback: a stale executor must never touch a new owner's tree.
+        self.isolation.assert_owned(handle.acquired)
         duration_seconds = time.monotonic() - handle._started_at
         evidence = collect_task_evidence(
             workspace_root=handle.acquired.workspace_root,
@@ -153,7 +155,10 @@ class GitTransactionManager:
 
         accepted_sha: str | None = None
         committed = False
-        if validation_result.accepted:
+        if validation_result.accepted and handle.acquired.mode == "read_only":
+            committed = True
+            accepted_sha = handle.base_commit_sha
+        elif validation_result.accepted:
             message = format_commit_message(
                 run_id=handle.task.run_id,
                 task_id=handle.task.id,
@@ -198,5 +203,7 @@ class GitTransactionManager:
         """For a task that never got to `complete()` at all (e.g. cancellation mid-execution) -
         discard any partial changes and release the lease without attempting evidence
         collection or a commit."""
-        discard_uncommitted_changes(handle.acquired.workspace_root)
+        self.isolation.assert_owned(handle.acquired)
+        if handle.acquired.mode != "read_only":
+            discard_uncommitted_changes(handle.acquired.workspace_root)
         self.isolation.release(handle.acquired)

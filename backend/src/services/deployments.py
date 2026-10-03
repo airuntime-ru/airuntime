@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from sqlalchemy.orm import Session
 
 from src.db.models.deployment import Deployment
+from src.db.models.orchestration_run import OrchestrationRun
 from src.db.models.project import Project
 from src.services.deployment_queue import enqueue_deployment
 from src.services.project_runtime import assert_can_start_project, cancel_active_deployments
@@ -15,8 +16,22 @@ _LOG_TEXT_MAX = 200_000
 
 
 def create_deployment_for_project(
-    db: Session, project: Project, *, skip_auto_check: bool = False
+    db: Session, project: Project, *, skip_auto_check: bool = False, source_run_id=None
 ) -> Deployment:
+    if source_run_id is not None:
+        # A single queue item whether the background engine or the chat watcher arrives first.
+        run = (
+            db.query(OrchestrationRun)
+            .filter(OrchestrationRun.id == source_run_id)
+            .with_for_update()
+            .one()
+        )
+        if run.project_id != project.id:
+            raise ValueError("Deployment run belongs to another project")
+        existing = db.query(Deployment).filter(Deployment.source_run_id == source_run_id).first()
+        if existing is not None:
+            return existing
+    db.query(Project.id).filter(Project.id == project.id).with_for_update().one()
     assert_can_start_project(db, project.user_id, exclude_project_id=project.id)
     # One active build per project - otherwise users end up with multiple stuck "running" rows.
     cancel_active_deployments(db, project.id)
@@ -24,12 +39,11 @@ def create_deployment_for_project(
     # while a new build is in flight.
     project.status = "deploying"
     db.add(project)
-    db.commit()
-    db.refresh(project)
 
     now = datetime.now(UTC)
     deployment = Deployment(
         project_id=project.id,
+        source_run_id=source_run_id,
         status="queued",
         image_ref=None,
         container_id=None,

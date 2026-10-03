@@ -230,10 +230,6 @@ class TestHappyPath:
             "budget_updated",
             "task_validating",
             "task_completed",
-            "integration_started",
-            "build_started",
-            "deploy_started",
-            "runtime_verification_started",
             "run_completed",
         ]
 

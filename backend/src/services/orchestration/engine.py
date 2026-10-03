@@ -101,6 +101,7 @@ from src.services.orchestration.failure_policy import (
     evaluate_failure,
 )
 from src.services.orchestration.git_transaction import GitTransactionManager
+from src.services.orchestration.lease_heartbeat import LeaseHeartbeat, WorkspaceLeaseLost
 from src.services.orchestration.mcp import registry as mcp_registry
 from src.services.orchestration.planner import ExecutionPlan, generate_plan
 from src.services.orchestration.project_finalize import finalize_project_after_completed_run
@@ -601,7 +602,7 @@ async def _maybe_enqueue_judge_fix_from_completed_reviews(
         return []
 
     room = settings.orchestration_max_plan_tasks - len(plan_tasks)
-    if room < 1:
+    if room < 2:
         return []
 
     relevant_paths: list[str] = []
@@ -631,8 +632,10 @@ async def _maybe_enqueue_judge_fix_from_completed_reviews(
         relevant_paths=relevant_paths,
         suggested_skills=suggested_skills,
         round_number=judge_fix_round_count(plan_tasks) + 1,
-        include_followup_qa=room >= 2,
+        include_followup_qa=True,
     )
+    if len(planned_tasks) > room:
+        return []  # A fix must leave enough budget to recheck every affected review.
     created = await _append_planned_tasks(
         db,
         run=run,
@@ -723,44 +726,46 @@ async def _persist_new_plan(
     return plan
 
 
+def _final_review_quality(tasks: list[AgentTask]) -> str:
+    latest: dict[str, dict] = {}
+    for task in sorted(tasks, key=lambda t: t.sequence):
+        if task.role in _QA_JUDGE_ROLES and task.status == "completed":
+            latest[task.skill_id or task.local_id] = parse_task_result_json(task.result_json)
+    warnings = any(t.role in _QA_JUDGE_ROLES and t.status == "skipped" for t in tasks)
+    for result in latest.values():
+        if result.get("review_infra_failure"):
+            return "blocked"
+        verdict = result.get("review_verdict") or verdict_from_task_result(result)
+        if (
+            verdict == "blocked"
+            or result.get("review_critical_count", 0)
+            or result.get("review_major_count", 0)
+        ):
+            return "blocked"
+        warnings |= verdict == "revise" or bool(result.get("unresolved"))
+    return "warnings" if warnings else "pass"
+
+
 def _walk_run_to_completed(db: Session, run: OrchestrationRun) -> None:
-    """status.py's RUN_TRANSITIONS only reaches "completed" via
-    running -> validating -> integrating -> building -> deploying -> verifying_runtime, by
-    design: a run is not really "done" until the project has actually been built, deployed, and
-    runtime-checked (mirroring chat.py's own existing verify/deploy/runtime-check phases for the
-    non-orchestrated turn path). All planned tasks being individually accepted (each already
-    build/preview/runtime-validated per its own contract's validation_steps) means there is
-    nothing left for a SEPARATE run-level build/deploy pass to add in THIS cut, so these
-    intermediate states are walked through immediately - real deployment triggering (subdomain
-    allocation, `create_deployment_for_project`, the deploy-wait polling loop) stays the CALLER's
-    responsibility (chat.py wiring), exactly as it already is for the non-orchestrated path,
-    rather than engine.py reaching into that project-wide subsystem itself."""
+    """Complete accepted generation tasks; publication outcomes are recorded by the worker."""
     run_repo = OrchestrationRunRepository(db)
-    # Completion pipeline is legal from `running`. A run that finished its last task while
-    # still in planning/replanning/waiting_for_user would otherwise raise IllegalStatusTransition
-    # here and become an `internal_error`.
     if run.status in ("planning", "replanning", "waiting_for_user"):
         run_repo.transition(run, "running")
-    # Each phase gets its own event so the run's durable log (and the UI replaying it) shows the
-    # same phases the run status walks through, instead of jumping straight from the last task
-    # to run_completed with no trace of why.
-    phase_events = {
-        "integrating": "integration_started",
-        "building": "build_started",
-        "deploying": "deploy_started",
-        "verifying_runtime": "runtime_verification_started",
-    }
     for status in ("validating", "integrating", "building", "deploying", "verifying_runtime"):
-        if run.status == status:
-            continue
-        run_repo.transition(run, status)
-        event_type = phase_events.get(status)
-        if event_type is not None:
-            events_bus.emit(db, run_id=run.id, event_type=event_type, payload={})
-    workspace_root = project_workspace_dir(run.project_id)
-    final_sha = project_git.current_head_sha(workspace_root)
+        if run.status != status:
+            run_repo.transition(run, status)
+    final_sha = project_git.current_head_sha(project_workspace_dir(run.project_id))
     run_repo.transition(run, "completed", final_commit_sha=final_sha)
-    events_bus.emit(db, run_id=run.id, event_type="run_completed", payload={})
+    events_bus.emit(
+        db,
+        run_id=run.id,
+        event_type="run_completed",
+        payload={
+            "scope": "generation",
+            "deployment_pending": True,
+            "quality": "warnings" if run.error_code == "quality_warnings" else "pass",
+        },
+    )
 
 
 async def _ensure_planned(
@@ -857,6 +862,7 @@ def _fail_task_after_unhandled_error(
     run boundary hid the real exception and killed unrelated in-flight work.
     """
     message = _format_engine_error(exc)
+    error_code = "workspace_lease_lost" if isinstance(exc, WorkspaceLeaseLost) else "internal_error"
     db = db_factory()
     try:
         task = AgentTaskRepository(db).get(task_id)
@@ -870,7 +876,7 @@ def _fail_task_after_unhandled_error(
             AgentTaskRepository(db).transition(
                 task,
                 "failed",
-                error_code="internal_error",
+                error_code=error_code,
                 error_message=message,
             )
             events_bus.emit(
@@ -878,7 +884,7 @@ def _fail_task_after_unhandled_error(
                 run_id=run_id,
                 task_id=task.id,
                 event_type="task_failed",
-                payload={"reason": "internal_error", "error": message},
+                payload={"reason": error_code, "error": message},
             )
             db.commit()
     except Exception:  # noqa: BLE001 - failure-marking itself must never raise into the gather
@@ -968,6 +974,7 @@ async def _run_one_task(
     loop_detector: LoopDetector,
     budget: BudgetTracker,
     replanning_enabled: bool,
+    lease_heartbeat: LeaseHeartbeat | None = None,
 ) -> _TaskAttemptOutcome:
     task_repo = AgentTaskRepository(db)
     workspace_root = project_workspace_dir(project.id)
@@ -1099,6 +1106,10 @@ async def _run_one_task(
             await asyncio.sleep(_LEASE_CONTENTION_POLL_SECONDS)
             waited += _LEASE_CONTENTION_POLL_SECONDS
 
+        db.commit()  # Publish the acquired lease before independent heartbeat transactions.
+        if lease_heartbeat is not None:
+            lease_heartbeat.watch(handle.acquired)
+
         executor = _build_executor(task.execution_kind, db=db, mcp_repo=McpServerRepository(db))
         if executor is None:
             await asyncio.to_thread(git_txn.abort, handle)
@@ -1147,6 +1158,7 @@ async def _run_one_task(
         except Exception:
             try:
                 await asyncio.to_thread(git_txn.abort, handle)
+                db.commit()  # Release ownership durably before marking failure in a fresh session.
             except Exception:  # noqa: BLE001 - lease TTL is the fallback if abort also fails
                 logger.exception("run_orchestration: failed to abort git txn for task %s", task.id)
             raise
@@ -1282,9 +1294,13 @@ async def _run_one_task(
         except Exception:
             try:
                 await asyncio.to_thread(git_txn.abort, handle)
+                db.commit()  # Release ownership durably before marking failure in a fresh session.
             except Exception:  # noqa: BLE001 - lease TTL is the fallback if abort also fails
                 logger.exception("run_orchestration: failed to abort git txn for task %s", task.id)
             raise
+
+        if lease_heartbeat is not None:
+            lease_heartbeat.unwatch(handle.acquired)
 
         task_repo.transition(
             task,
@@ -1303,6 +1319,24 @@ async def _run_one_task(
             payload={"local_id": task.local_id, "accepted": outcome.validation_result.accepted},
         )
         db.commit()
+
+        if task.role in _QA_JUDGE_ROLES and agent_result.error == "review_infrastructure_failed":
+            task_repo.transition(
+                task,
+                "failed",
+                attempt=task.attempt + 1,
+                error_code="review_infrastructure_failed",
+                error_message="Независимая проверка недоступна. Файлы сохранены; публикация остановлена.",
+            )
+            events_bus.emit(
+                db,
+                run_id=run.id,
+                task_id=task.id,
+                event_type="task_failed",
+                payload={"reason": "review_infrastructure_failed"},
+            )
+            db.commit()
+            return _TaskAttemptOutcome("failed")
 
         if outcome.committed and outcome.validation_result.accepted:
             task_repo.transition(
@@ -1489,25 +1523,30 @@ async def _run_task_wave_member(
             # rows the caller's own session saw. Fail safe rather than crash the whole wave.
             return task_id, _TaskAttemptOutcome("failed"), None
         try:
-            outcome = await _run_one_task(
-                db,
-                run=run,
-                project=project,
-                task=task,
-                plan=plan,
-                context_engine=ContextEngine(db),
-                isolation=WorkspaceIsolationManager(db),
-                provider_name=provider_name,
-                model=model,
-                api_key=api_key,
-                run_images=run_images,
-                cancellation=cancellation,
-                loop_detector=loop_detector,
-                budget=budget,
-                replanning_enabled=replanning_enabled,
-            )
+            async with LeaseHeartbeat(
+                db_factory, cancellation, settings.orchestration_run_lease_ttl_seconds
+            ) as heartbeat:
+                outcome = await _run_one_task(
+                    db,
+                    run=run,
+                    project=project,
+                    task=task,
+                    plan=plan,
+                    context_engine=ContextEngine(db),
+                    isolation=WorkspaceIsolationManager(db),
+                    provider_name=provider_name,
+                    model=model,
+                    api_key=api_key,
+                    run_images=run_images,
+                    cancellation=cancellation,
+                    loop_detector=loop_detector,
+                    budget=budget,
+                    replanning_enabled=replanning_enabled,
+                    lease_heartbeat=heartbeat,
+                )
             return task_id, outcome, task.evidence_json
         except Exception as exc:  # noqa: BLE001 - one task crash must not fail the whole run
+            db.rollback()
             logger.exception(
                 "run_orchestration: unhandled error in task %s of run %s", task_id, run_id
             )
@@ -1518,7 +1557,8 @@ async def _run_task_wave_member(
                     task_id=task_id,
                     run_id=run_id,
                     exc=exc,
-                    replanning_enabled=replanning_enabled,
+                    replanning_enabled=replanning_enabled
+                    and not isinstance(exc, WorkspaceLeaseLost),
                 ),
                 None,
             )
@@ -1870,7 +1910,18 @@ async def _run_orchestration_inner(
                 failed = [t for t in plan_tasks if t.status == "failed"]
                 if failed:
                     OrchestrationRunRepository(db).transition(
-                        run, "failed", error_message=f"{len(failed)} task(s) failed"
+                        run,
+                        "failed",
+                        error_message=f"{len(failed)} task(s) failed",
+                        error_code=next(
+                            (
+                                t.error_code
+                                for t in failed
+                                if t.error_code
+                                in {"review_infrastructure_failed", "workspace_lease_lost"}
+                            ),
+                            "task_failed",
+                        ),
                     )
                     events_bus.emit(
                         db,
@@ -1879,6 +1930,25 @@ async def _run_orchestration_inner(
                         payload={"failed_local_ids": [t.local_id for t in failed]},
                     )
                 else:
+                    quality = _final_review_quality(plan_tasks)
+                    if quality == "blocked":
+                        OrchestrationRunRepository(db).transition(
+                            run,
+                            "failed",
+                            error_code="quality_gate_failed",
+                            error_message="После исправлений остались блокирующие замечания QA. Файлы сохранены; публикация остановлена.",
+                        )
+                        events_bus.emit(
+                            db,
+                            run_id=run.id,
+                            event_type="run_failed",
+                            payload={"reason": "quality_gate_failed"},
+                        )
+                        db.commit()
+                        return
+                    if quality == "warnings":
+                        run.error_code = "quality_warnings"
+                        run.error_message = "Проверка завершена с неблокирующими замечаниями."
                     _walk_run_to_completed(db, run)
                     project_row = (
                         db.query(Project).filter(Project.id == run.project_id).one_or_none()

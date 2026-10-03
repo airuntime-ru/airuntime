@@ -15,6 +15,12 @@ class Deployment(Base):
     project_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
+    source_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("orchestration_runs.id", ondelete="SET NULL"),
+        nullable=True,
+        unique=True,
+    )
     status: Mapped[str] = mapped_column(String(32), default="queued", nullable=False)
     image_ref: Mapped[str | None] = mapped_column(String(512), nullable=True)
     container_id: Mapped[str | None] = mapped_column(String(255), nullable=True)

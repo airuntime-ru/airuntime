@@ -443,10 +443,7 @@ class WorkspaceLeaseRepository:
 
 
 class RunEventRepository:
-    """Append-only. `append()` assigns the next `seq` from `MAX(seq)+1` scoped to `run_id` -
-    safe because only the single active engine loop for a given run appends events (enforced by
-    the run's own execution lease upstream in engine.py), so there is no concurrent writer to
-    race against within one run."""
+    """Append-only events. A run row lock serializes allocation of MAX(seq)+1."""
 
     def __init__(self, db: Session) -> None:
         self.db = db
@@ -459,6 +456,10 @@ class RunEventRepository:
         payload_json: str,
         task_id: uuid.UUID | str | None = None,
     ) -> RunEvent:
+        # Serialize writers of this run, including concurrent read-only wave members.
+        self.db.query(OrchestrationRun.id).filter(
+            OrchestrationRun.id == run_id
+        ).with_for_update().one()
         next_seq = (
             self.db.query(func.coalesce(func.max(RunEvent.seq), 0))
             .filter(RunEvent.run_id == run_id)
@@ -470,6 +471,7 @@ class RunEventRepository:
             seq=int(next_seq or 0) + 1,
             event_type=event_type,
             payload_json=payload_json,
+            created_at=datetime.now(UTC),
         )
         self.db.add(event)
         self.db.flush()

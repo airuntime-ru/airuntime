@@ -12,6 +12,7 @@ import { PageLoader } from "@/components/ui/loader";
 import { completeOnboarding, getMe, logout, refreshSession } from "@/lib/api";
 import { getAccessToken, setAccessToken } from "@/lib/auth";
 import { cn } from "@/lib/cn";
+import { CREDIT_BALANCE_CHANGED_EVENT } from "@/lib/credit-balance-events";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -56,6 +57,53 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     };
     void verifySession();
   }, [router]);
+
+  useEffect(() => {
+    if (isChecking) return;
+
+    let active = true;
+    let refreshing = false;
+    let refreshQueued = false;
+    const controller = new AbortController();
+    const isVisible = () => document.visibilityState !== "hidden";
+
+    const refreshCredits = async () => {
+      if (!active || !isVisible()) return;
+      if (refreshing) {
+        // A charge can finish while an earlier balance request is still in flight.
+        refreshQueued = true;
+        return;
+      }
+      refreshing = true;
+      do {
+        refreshQueued = false;
+        try {
+          const me = await getMe(controller.signal);
+          if (active) setCredits(me.credits_balance);
+        } catch {
+          // Keep the last known balance during transient failures; retry on the next tick.
+        }
+      } while (refreshQueued && active && isVisible());
+      refreshing = false;
+    };
+
+    const refresh = () => { void refreshCredits(); };
+    refresh();
+    const timer = window.setInterval(refresh, 15_000);
+    window.addEventListener(CREDIT_BALANCE_CHANGED_EVENT, refresh);
+    window.addEventListener("focus", refresh);
+    window.addEventListener("online", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      active = false;
+      controller.abort();
+      window.clearInterval(timer);
+      window.removeEventListener(CREDIT_BALANCE_CHANGED_EVENT, refresh);
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("online", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [isChecking, pathname]);
 
   const onLogout = async () => {
     await logout();

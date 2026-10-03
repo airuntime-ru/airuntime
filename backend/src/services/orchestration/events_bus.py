@@ -21,6 +21,7 @@ import logging
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
+from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from src.services.orchestration.repository import RunEventRepository
@@ -54,8 +55,14 @@ EVENT_TYPES = frozenset(
         "waiting_for_user",
         "integration_started",
         "build_started",
+        "build_completed",
+        "build_failed",
         "deploy_started",
+        "deploy_completed",
+        "deploy_failed",
         "runtime_verification_started",
+        "runtime_verification_completed",
+        "runtime_verification_failed",
         "run_completed",
         "run_failed",
         "run_cancelled",
@@ -68,10 +75,14 @@ TERMINAL_EVENT_TYPES = frozenset({"run_completed", "run_failed", "run_cancelled"
 
 
 class _RunSubscription:
-    __slots__ = ("queue",)
+    __slots__ = ("queue", "loop")
 
     def __init__(self) -> None:
         self.queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        try:
+            self.loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self.loop = None
 
 
 class EventBus:
@@ -92,11 +103,35 @@ class EventBus:
             self._subscribers.pop(run_id, None)
 
     def publish(self, run_id: str, envelope: dict[str, Any]) -> None:
-        for sub in self._subscribers.get(run_id, ()):
-            sub.queue.put_nowait(envelope)
+        for sub in tuple(self._subscribers.get(run_id, ())):
+            if sub.loop is not None:
+                sub.loop.call_soon_threadsafe(sub.queue.put_nowait, envelope)
+            else:
+                sub.queue.put_nowait(envelope)
 
 
 _bus = EventBus()
+
+
+@event.listens_for(Session, "after_commit")
+def _publish_committed(db: Session) -> None:
+    if db.in_nested_transaction():
+        return
+    for _, run_id, envelope in db.info.pop("orchestration_events", []):
+        _bus.publish(run_id, envelope)
+
+
+@event.listens_for(Session, "after_soft_rollback")
+def _discard_rolled_back(db: Session, previous_transaction) -> None:
+    def rolled_back(tx) -> bool:
+        while tx is not None:
+            if tx is previous_transaction:
+                return True
+            tx = tx.parent
+        return False
+
+    pending = db.info.get("orchestration_events", [])
+    db.info["orchestration_events"] = [item for item in pending if not rolled_back(item[0])]
 
 
 def get_event_bus() -> EventBus:
@@ -123,7 +158,8 @@ def emit(
         "payload": payload,
         "task_id": str(task_id) if task_id else None,
     }
-    _bus.publish(str(run_id), envelope)
+    transaction = db.get_nested_transaction() or db.get_transaction()
+    db.info.setdefault("orchestration_events", []).append((transaction, str(run_id), envelope))
     return envelope
 
 
@@ -165,12 +201,25 @@ async def stream_events(
             db.close()
 
         while True:
-            envelope = await sub.queue.get()
-            if envelope["seq"] <= last_seq:
-                continue  # already covered by the backlog replay above
-            last_seq = envelope["seq"]
-            yield envelope
-            if envelope["event_type"] in TERMINAL_EVENT_TYPES:
-                return
+            try:
+                await asyncio.wait_for(sub.queue.get(), timeout=1.0)
+            except TimeoutError:
+                pass
+            # Replay in sequence from committed rows; also works across backend replicas.
+            db = db_factory()
+            try:
+                rows = RunEventRepository(db).list_since(run_id, after_seq=last_seq)
+                for row in rows:
+                    last_seq = row.seq
+                    yield {
+                        "seq": row.seq,
+                        "event_type": row.event_type,
+                        "payload": json.loads(row.payload_json),
+                        "task_id": str(row.task_id) if row.task_id else None,
+                    }
+                    if row.event_type in TERMINAL_EVENT_TYPES:
+                        return
+            finally:
+                db.close()
     finally:
         _bus.unsubscribe(run_id, sub)

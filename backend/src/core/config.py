@@ -115,6 +115,8 @@ class Settings(BaseSettings):
     # timeout made that quality setting self-defeating on harder prompts, so allow five minutes.
     codex_simple_timeout_seconds: int = 300
     codex_reasoning_effort: Literal["none", "low", "medium", "high", "xhigh", "max"] = "max"
+    codex_simple_reasoning_effort: Literal["low", "medium", "high", "xhigh", "max"] = "high"
+    codex_max_concurrent_jobs: int = 2
     codex_memory_limit: str = "2g"
     codex_cpu_limit: str = "2.0"
     # Docker network the per-turn Codex container joins - needed so it can resolve

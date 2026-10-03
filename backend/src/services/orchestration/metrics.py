@@ -17,6 +17,7 @@ it is safe to expose to an admin/debug view (spec: "Добавь admin/debug vie
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
@@ -25,7 +26,9 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from src.db.models.agent_task import AgentTask
+from src.db.models.deployment import Deployment
 from src.db.models.orchestration_run import OrchestrationRun
+from src.db.models.run_event import RunEvent
 from src.db.models.workspace_lease import WorkspaceLease
 
 # A run still non-terminal this long after it started has no plausible legitimate reason to be
@@ -65,6 +68,10 @@ class OrchestrationMetrics:
     skill_match_rate: float | None = None
     mcp_error_rate: float | None = None
     repeated_failure_loops: int = 0
+    qa_reviews_total: int = 0
+    qa_reviews_passed: int = 0
+    qa_infrastructure_failures: int = 0
+    qa_pass_rate: float | None = None
     workspace_lease_conflicts: int = 0
 
     average_credits_per_successful_run: float | None = None
@@ -213,12 +220,49 @@ def collect_metrics(
     skill_tasks = metrics.tasks_by_execution_kind.get("skill", 0)
     metrics.skill_match_rate = _rate(skill_tasks, metrics.tasks_total)
 
-    # These event names only mark immediate run-status transitions. Real build,
-    # deployment and runtime outcomes are checked elsewhere, so a run_completed
-    # count cannot serve as the success numerator for any of these rates.
-    # task_failed includes failures unrelated to MCP calls, so it cannot be used
-    # as an MCP error numerator either. Leave the field unset until call outcomes
-    # are recorded separately.
+    outcomes = dict(
+        db.execute(
+            select(RunEvent.event_type, func.count())
+            .join(OrchestrationRun, OrchestrationRun.id == RunEvent.run_id)
+            .where(*run_scope)
+            .group_by(RunEvent.event_type)
+        ).all()
+    )
+    for phase, target in (
+        ("build", "build_success_rate"),
+        ("runtime_verification", "runtime_verification_success_rate"),
+    ):
+        passed = outcomes.get(f"{phase}_completed", 0)
+        setattr(metrics, target, _rate(passed, passed + outcomes.get(f"{phase}_failed", 0)))
+    deployments = dict(
+        db.execute(
+            select(Deployment.status, func.count())
+            .join(OrchestrationRun, OrchestrationRun.id == Deployment.source_run_id)
+            .where(*run_scope)
+            .group_by(Deployment.status)
+        ).all()
+    )
+    metrics.deploy_success_rate = _rate(
+        deployments.get("completed", 0),
+        deployments.get("completed", 0) + deployments.get("failed", 0),
+    )
+    review_rows = db.execute(
+        select(AgentTask.result_json, AgentTask.error_code)
+        .join(OrchestrationRun, OrchestrationRun.id == AgentTask.run_id)
+        .where(
+            *run_scope,
+            AgentTask.role == "qa_reviewer",
+            AgentTask.status.in_(("completed", "failed")),
+        )
+    ).all()
+    for raw, error_code in review_rows:
+        metrics.qa_reviews_total += 1
+        result = json.loads(raw or "{}")
+        if error_code == "review_infrastructure_failed" or result.get("review_infra_failure"):
+            metrics.qa_infrastructure_failures += 1
+        elif result.get("review_verdict") == "pass" and not result.get("unresolved"):
+            metrics.qa_reviews_passed += 1
+    metrics.qa_pass_rate = _rate(metrics.qa_reviews_passed, metrics.qa_reviews_total)
 
     # A run that failed with a loop-detector verdict - the "we are going in circles" signal that
     # matters most when tuning failure policy.

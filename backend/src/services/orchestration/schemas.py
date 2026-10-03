@@ -496,6 +496,10 @@ class TaskResult(BaseModel):
     risks: list[str] = Field(default_factory=list)
     unresolved: list[str] = Field(default_factory=list)
     recommended_next_action: str | None = None
+    review_verdict: Literal["pass", "revise", "blocked"] | None = None
+    review_critical_count: int = 0
+    review_major_count: int = 0
+    review_infra_failure: bool = False
 
 
 class TaskEvidence(BaseModel):

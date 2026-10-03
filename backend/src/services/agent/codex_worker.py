@@ -37,6 +37,7 @@ from __future__ import annotations
 import json
 import logging
 import shlex
+import time
 import uuid
 from collections.abc import Iterator
 from pathlib import PurePosixPath
@@ -183,9 +184,12 @@ def _build_argv(job: dict, *, model: str, remapped_cwd: str | None) -> list[str]
     ]
     if remapped_cwd:
         argv += ["--cd", remapped_cwd]
+    if job.get("output_schema"):
+        argv += ["--output-schema", "/tmp/airuntime-output-schema.json"]
     for image_path in job.get("image_paths") or []:
         argv += ["--image", str(image_path)]
-    argv.append(str(job.get("prompt") or ""))
+    # --image accepts multiple values; terminate options before the positional prompt.
+    argv += ["--", str(job.get("prompt") or "")]
     return argv
 
 
@@ -201,7 +205,7 @@ def _remap_under_workspace(path_str: str, old_root: str) -> str:
 
 
 def _login_and_exec_command(
-    argv: list[str], *, base_url: str | None | object = _UNSET
+    argv: list[str], *, base_url: str | None | object = _UNSET, output_schema: dict | None = None
 ) -> list[str]:
     """`codex exec` does not read OPENAI_API_KEY itself - confirmed against a real run, which
     401'd until this was added. Auth is a separate step that persists to ~/.codex/auth.json
@@ -218,6 +222,13 @@ def _login_and_exec_command(
     instead and skip login; Codex sends the env key as Bearer to the proxy.
     """
     exec_cmd = shlex.join(argv)
+    schema_prefix = (
+        "printf %s "
+        + shlex.quote(json.dumps(output_schema))
+        + " > /tmp/airuntime-output-schema.json; "
+        if output_schema
+        else ""
+    )
     config = _codex_config_toml(base_url)
     if config is not None:
         script = (
@@ -226,14 +237,14 @@ def _login_and_exec_command(
             "AIRUNTIME_CODEX_EOF\n"
             f"exec {exec_cmd}"
         )
-        return ["sh", "-c", script]
+        return ["sh", "-c", schema_prefix + script]
     login = 'printf "%s" "$OPENAI_API_KEY" | codex login --with-api-key'
     script = (
         f"if ! {login} >/tmp/codex-login.log 2>&1; then "
         f"cat /tmp/codex-login.log >&2; exit {_LOGIN_FAILED_EXIT}; "
         f"fi; exec {exec_cmd}"
     )
-    return ["sh", "-c", script]
+    return ["sh", "-c", schema_prefix + script]
 
 
 def _container_env(
@@ -343,7 +354,9 @@ def iter_codex_events(job: dict) -> Iterator[dict]:
         argv = _build_argv(
             {**job, "image_paths": effective_images}, model=model, remapped_cwd=effective_cwd
         )
-        command = _login_and_exec_command(argv, base_url=base_url)
+        command = _login_and_exec_command(
+            argv, base_url=base_url, output_schema=job.get("output_schema")
+        )
 
         container_name = f"airuntime-codex-{job.get('job_id') or uuid.uuid4().hex[:12]}"
         try:
@@ -414,6 +427,14 @@ def iter_codex_events(job: dict) -> Iterator[dict]:
             detail = container.logs(stdout=False, stderr=True).decode("utf-8", errors="replace")
             yield {"type": "infra_error", "message": f"Codex login failed: {detail.strip()[:500]}"}
         elif exit_code not in (0, None):
+            from src.services.prompt_guard import redact_secrets
+
+            detail = redact_secrets(
+                container.logs(stdout=False, stderr=True, tail=20).decode(
+                    "utf-8", errors="replace"
+                )[-2000:]
+            )
+            logger.warning("Codex job=%s exit=%s stderr=%s", job.get("job_id"), exit_code, detail)
             yield {"type": "infra_error", "message": f"codex exec exited with code {exit_code}"}
     except (DockerException, APIError) as exc:
         logger.warning("Codex run: Docker error: %s", exc)
@@ -438,7 +459,23 @@ def execute_codex_run(job: dict) -> None:
     r = _redis()
     key = _events_key(run_id)
     try:
+        if job.get("deadline_epoch") and time.time() >= job["deadline_epoch"]:
+            r.rpush(
+                key, json.dumps({"type": "infra_error", "message": "Codex job expired in queue"})
+            )
+            logger.warning("Codex job=%s expired before execution", run_id)
+            return
         for payload in iter_codex_events(job):
+            kind = payload.get("type")
+            if kind in {"infra_error", "turn.failed", "turn.completed"}:
+                logger.log(
+                    logging.INFO if kind == "turn.completed" else logging.WARNING,
+                    "Codex job=%s correlation=%s project=%s terminal=%s",
+                    run_id,
+                    job.get("correlation_id"),
+                    job.get("project_id"),
+                    kind,
+                )
             r.rpush(key, json.dumps(payload))
             r.expire(key, _EVENTS_TTL_SECONDS)
     finally:

@@ -384,10 +384,12 @@ async def _follow_repair_redeploy(
 
 
 def _queue_deployment_or_notify_limit(
-    db: Session, project: Project
+    db: Session, project: Project, *, source_run_id=None
 ) -> tuple[Deployment | None, str | None]:
     try:
-        deployment = create_deployment_for_project(db, project)
+        deployment = create_deployment_for_project(
+            db, project, **({"source_run_id": source_run_id} if source_run_id is not None else {})
+        )
         return deployment, None
     except RunningProjectLimitError as exc:
         project.status = "ready"
@@ -408,9 +410,12 @@ async def _stream_chat_deploy(
     has_website: bool,
     has_bot: bool,
     append_visible,
+    source_run_id=None,
 ):
     """Queue + wait for deploy using the same create_deployment_for_project as the Deployments tab."""
-    deployment, limit_message = _queue_deployment_or_notify_limit(db, project)
+    deployment, limit_message = _queue_deployment_or_notify_limit(
+        db, project, source_run_id=source_run_id
+    )
     db.commit()
     if limit_message:
         yield _sse_status("limit", limit_message, "error")
@@ -828,6 +833,10 @@ async def _orchestration_event_source(
     run = OrchestrationRunRepository(db).get(run_id)
 
     if terminal_event_type == "run_completed":
+        if run and run.error_code == "quality_warnings":
+            yield append_visible(
+                "\n\nПроверка завершена с неблокирующими замечаниями QA. Продолжаю публикацию с предупреждениями."
+            )
         # Deployability matches the Deployments tab (Dockerfile / agent code on disk).
         # ensure_required_files is advisory here — a hard stop made chat refuse to queue while
         # the same tree deployed fine from «Деплои».
@@ -903,6 +912,7 @@ async def _orchestration_event_source(
                     has_website=has_website,
                     has_bot=has_bot,
                     append_visible=append_visible,
+                    source_run_id=run_id,
                 ):
                     yield item
             else:
@@ -911,7 +921,11 @@ async def _orchestration_event_source(
         detail = (run.error_message or "").strip() if run else ""
         friendly = _friendly_run_failure(detail)
         artifact_path = project_dir(project.id)
-        has_code = _workspace_is_deployable(project, artifact_path)
+        has_code = _workspace_is_deployable(project, artifact_path) and (
+            not run
+            or run.error_code
+            not in {"quality_gate_failed", "review_infrastructure_failed", "workspace_lease_lost"}
+        )
         if has_code:
             # Persist whatever is on disk so «Файлы»/Versions light up even when auto-QA failed.
             await asyncio.to_thread(

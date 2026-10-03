@@ -124,6 +124,7 @@ export default function ProjectChatPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const projectId = params.id;
+  const requestedChatId = searchParams.get("chat");
   const [chats, setChats] = useState<ChatType[]>([]);
   const [chatId, setChatId] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -243,7 +244,7 @@ export default function ProjectChatPage() {
           rows = [chat];
         }
         setChats(rows);
-        setChatId(rows[0].id);
+        setChatId(rows.find((chat) => chat.id === requestedChatId)?.id ?? rows[0].id);
         setMobilePanel("chat");
         setStickToBottom(true);
       } catch (err) {
@@ -253,7 +254,7 @@ export default function ProjectChatPage() {
       }
     };
     void bootstrap();
-  }, [projectId]);
+  }, [projectId, requestedChatId]);
 
   useEffect(() => {
     const loadMessages = async () => {
@@ -305,6 +306,7 @@ export default function ProjectChatPage() {
     const chat = await createChat(projectId);
     setChats((prev) => [chat, ...prev]);
     setChatId(chat.id);
+    router.replace(`/app/projects/${projectId}/chat?chat=${encodeURIComponent(chat.id)}`, { scroll: false });
     setMessages([]);
     messagesRef.current = [];
     setPendingFiles([]);
@@ -376,6 +378,7 @@ export default function ProjectChatPage() {
     await startChatTurn({
       projectId,
       chatId,
+      chatTitle: chats.find((chat) => chat.id === chatId)?.title,
       userMessage,
       attachments,
       displayUserContent,
@@ -401,6 +404,7 @@ export default function ProjectChatPage() {
     await startRepairTurn({
       projectId,
       chatId,
+      chatTitle: chats.find((chat) => chat.id === chatId)?.title,
       userNote: note,
       seedMessages: seed,
       streamRequest: (signal) =>
@@ -420,7 +424,7 @@ export default function ProjectChatPage() {
     repairStartedRef.current = true;
     const errorLog = takePendingRepair(projectId);
     if (fromUrl) {
-      router.replace(`/app/projects/${projectId}/chat`, { scroll: false });
+      router.replace(`/app/projects/${projectId}/chat?chat=${encodeURIComponent(chatId)}`, { scroll: false });
     }
     void runRepairTurn(errorLog);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -557,6 +561,7 @@ export default function ProjectChatPage() {
                 className="min-w-0 flex-1 truncate text-left text-sm"
                 onClick={() => {
                   setChatId(chat.id);
+                  router.replace(`/app/projects/${projectId}/chat?chat=${encodeURIComponent(chat.id)}`, { scroll: false });
                   setMobilePanel("chat");
                   setStickToBottom(true);
                 }}

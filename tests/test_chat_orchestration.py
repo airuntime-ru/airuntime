@@ -64,7 +64,7 @@ def _secret_result(key: str) -> AgentExecutionResult:
     )
 
 
-def _fake_live_deployment(db, project):
+def _fake_live_deployment(db, project, *, source_run_id=None):
     from datetime import UTC, datetime
 
     from src.db.models.deployment import Deployment
@@ -72,15 +72,19 @@ def _fake_live_deployment(db, project):
     project.status = "live"
     if not project.deployment_url:
         project.deployment_url = "https://example.airuntime.ru"
-    deployment = Deployment(
-        project_id=project.id,
-        status="completed",
-        image_ref="test:latest",
-        container_id="ctr-test",
-        logs_ref=None,
-        started_at=datetime.now(UTC),
-        finished_at=datetime.now(UTC),
+    deployment = (
+        db.query(Deployment).filter_by(source_run_id=source_run_id).first()
+        if source_run_id is not None
+        else None
     )
+    if deployment is None:
+        deployment = Deployment(
+            project_id=project.id, source_run_id=source_run_id, started_at=datetime.now(UTC)
+        )
+    deployment.status = "completed"
+    deployment.image_ref = "test:latest"
+    deployment.container_id = "ctr-test"
+    deployment.finished_at = datetime.now(UTC)
     db.add(project)
     db.add(deployment)
     db.commit()

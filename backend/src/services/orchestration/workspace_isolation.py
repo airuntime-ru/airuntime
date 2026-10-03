@@ -132,6 +132,28 @@ class WorkspaceIsolationManager:
         if acquired.lease is not None:
             self.leases.renew(acquired.lease, ttl_seconds=ttl_seconds)
 
+    def assert_owned(self, acquired: AcquiredWorkspace) -> None:
+        if acquired.lease is None:
+            return
+        from datetime import UTC, datetime
+
+        from src.db.models.workspace_lease import WorkspaceLease
+        from src.services.orchestration.lease_heartbeat import WorkspaceLeaseLost
+
+        owned = (
+            self.db.query(WorkspaceLease.id)
+            .filter(
+                WorkspaceLease.id == acquired.lease.id,
+                WorkspaceLease.holder == acquired.lease.holder,
+                WorkspaceLease.released_at.is_(None),
+                WorkspaceLease.expires_at > datetime.now(UTC),
+            )
+            .with_for_update()
+            .first()
+        )
+        if owned is None:
+            raise WorkspaceLeaseLost("Workspace lease expired or was replaced")
+
     def release(self, acquired: AcquiredWorkspace, *, remove_worktree: bool = False) -> None:
         """`remove_worktree=False` by default: after an isolated task finishes, its worktree
         must still exist for IntegrationAgent to merge - only remove it (via

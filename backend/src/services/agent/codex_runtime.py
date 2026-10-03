@@ -179,6 +179,7 @@ async def _submit_run(
     job_id: str | None = None,
     allow_docker: bool = True,
     reasoning_effort: str | None = None,
+    output_schema: dict | None = None,
     api_key: str | None = None,
     openai_base_url: Any = _UNSET,
 ) -> str:
@@ -198,8 +199,10 @@ async def _submit_run(
         "prompt": prompt,
         "image_paths": image_paths,
         "timeout_seconds": timeout_seconds,
+        "deadline_epoch": time.time() + timeout_seconds,
         "allow_docker": allow_docker,
         "reasoning_effort": reasoning_effort,
+        "output_schema": output_schema,
     }
     if api_key:
         job["api_key"] = api_key
@@ -238,15 +241,13 @@ async def _stream_events(
     while True:
         if cancellation is not None and cancellation.is_cancelled:
             logger.info("Codex run %s cancelled - requesting container stop", run_id)
-            if project_id is not None:
-                await cancel_codex_run(project_id=project_id, correlation_id=run_id)
+            await cancel_codex_run(project_id=project_id or "", correlation_id=run_id)
             yield {"type": "cancelled", "message": cancellation.reason or "Run cancelled by user"}
             return
         now = time.monotonic()
         if now > deadline:
             logger.warning("Codex run %s timed out after %ds", run_id, timeout_seconds)
-            if project_id is not None:
-                await cancel_codex_run(project_id=project_id, correlation_id=run_id)
+            await cancel_codex_run(project_id=project_id or "", correlation_id=run_id)
             yield {"type": "infra_error", "message": "Codex run timed out"}
             return
         popped = await asyncio.to_thread(r.blpop, key, _REDIS_POLL_SECONDS)
@@ -257,8 +258,7 @@ async def _stream_events(
                     run_id,
                     _MAX_IDLE_SECONDS,
                 )
-                if project_id is not None:
-                    await cancel_codex_run(project_id=project_id, correlation_id=run_id)
+                await cancel_codex_run(project_id=project_id or "", correlation_id=run_id)
                 yield {
                     "type": "infra_error",
                     "message": "Codex produced no output for a while (worker/container may be down)",
@@ -698,6 +698,8 @@ async def codex_simple_complete(
     project_id: str | None = None,
     api_key: str | None = None,
     provider_name: str | None = None,
+    reasoning_effort: str | None = None,
+    output_schema: dict | None = None,
     openai_base_url: Any = _UNSET,
 ) -> str:
     """One-shot text completion via Codex for the lightweight non-coding call sites (chat title/
@@ -724,10 +726,13 @@ async def codex_simple_complete(
             image_paths=image_paths,
             timeout_seconds=effective_timeout,
             allow_docker=False,
+            reasoning_effort=reasoning_effort or settings.codex_simple_reasoning_effort,
+            output_schema=output_schema,
             api_key=api_key,
             openai_base_url=endpoint,
         )
     except Exception:  # noqa: BLE001 - Redis being down must never break chat/moderation
+        logger.exception("Codex simple completion submission failed project=%s", project_id)
         _cleanup_paths(image_paths)
         return ""
 
@@ -736,6 +741,7 @@ async def codex_simple_complete(
         async for payload in _stream_events(run_id, timeout_seconds=effective_timeout):
             kind = payload.get("type")
             if kind in ("turn.failed", "infra_error"):
+                logger.warning("Codex simple completion job=%s terminal=%s", run_id, kind)
                 return ""
             if kind == "turn.completed":
                 usage = payload.get("usage")
@@ -746,6 +752,7 @@ async def codex_simple_complete(
                 if isinstance(event, TextDelta):
                     text_parts.append(event.text)
     except Exception:  # noqa: BLE001
+        logger.exception("Codex simple completion stream failed job=%s", run_id)
         return ""
     finally:
         _cleanup_paths(image_paths)

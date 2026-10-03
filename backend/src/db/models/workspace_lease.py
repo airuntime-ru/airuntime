@@ -25,9 +25,8 @@ class WorkspaceLease(Base):
     unique index - many can be active at once, each with its own worktree_path/branch_name.
 
     A lease is also a TTL: `expires_at` bounds how long a crashed holder can block others (a
-    stale lease past `expires_at` is treated as free by acquire logic), independent of whether
-    the holder process is still alive - this is what makes the system restart-safe without a
-    heartbeat mechanism.
+    stale lease past `expires_at` is treated as free by acquire logic), while a live task renews it through an independent heartbeat transaction. Commit and rollback
+    check ownership again so an expired executor cannot change a new owner's workspace.
     """
 
     __tablename__ = "workspace_leases"

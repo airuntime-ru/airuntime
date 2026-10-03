@@ -35,6 +35,7 @@ from src.services.docker_control_actions import run_control_action
 from src.services.docker_control_queue import (
     pop_control_job,
     push_control_result,
+    requeue_control_job,
     worker_inline_docker,
 )
 from src.services.email import send_branded_email
@@ -54,6 +55,20 @@ BILLING_SWEEP_INTERVAL_SECONDS = 300
 STALE_SWEEP_INTERVAL_SECONDS = 60
 IMAGE_SWEEP_INTERVAL_SECONDS = 3600
 RUNTIME_SWEEP_INTERVAL_SECONDS = 300
+_codex_slots = threading.BoundedSemaphore(max(1, settings.codex_max_concurrent_jobs))
+
+
+def _deployment_event(db: Session, deployment: Deployment, event_type: str) -> None:
+    if deployment.source_run_id is None:
+        return
+    from src.services.orchestration.events_bus import emit
+
+    emit(
+        db,
+        run_id=deployment.source_run_id,
+        event_type=event_type,
+        payload={"deployment_id": str(deployment.id)},
+    )
 
 
 def process_billing_sweep() -> None:
@@ -104,10 +119,26 @@ def _spawn_codex_run(job: dict) -> None:
     # popping other control/deployment jobs instead of stalling behind it. Not routed through
     # run_control_action: that returns one dict for a Redis RPC result key nobody polls here -
     # codex_run's caller (agent/codex_runtime.py) polls a live events list instead.
+    if not _codex_slots.acquire(blocking=False):
+        requeue_control_job(job)
+        time.sleep(0.1)
+        return
+
+    def run_bounded() -> None:
+        try:
+            _run_codex_job(job)
+        finally:
+            _codex_slots.release()
+
     logger.info("Codex job queued on worker thread id=%s", job.get("job_id"))
-    threading.Thread(
-        target=_run_codex_job, args=(job,), daemon=True, name=f"codex-{job.get('job_id', '')[:12]}"
-    ).start()
+    try:
+        threading.Thread(
+            target=run_bounded, daemon=True, name=f"codex-{job.get('job_id', '')[:12]}"
+        ).start()
+    except Exception:
+        _codex_slots.release()
+        requeue_control_job(job)
+        raise
 
 
 def process_control_job(job: dict) -> None:
@@ -152,6 +183,8 @@ def _process_job_body(db: Session, job: dict) -> None:
             return
 
         deployment.status = "running"
+        job["_failure_phase"] = "build"
+        _deployment_event(db, deployment, "build_started")
         deployment.started_at = datetime.now(UTC)
         append_deployment_log(deployment, "Запуск сборки…\n")
         db.add(deployment)
@@ -167,6 +200,7 @@ def _process_job_body(db: Session, job: dict) -> None:
                 db.rollback()
 
         image_ref, environment = build_project_image(db, project, on_log=_on_build_log)
+        _deployment_event(db, deployment, "build_completed")
         append_deployment_log(deployment, "\nОбраз собран. Запускаю контейнер…\n")
         db.add(deployment)
         db.commit()
@@ -195,6 +229,9 @@ def _process_job_body(db: Session, job: dict) -> None:
             ensure_service_containers(adapter.client, str(project.id), services)
             environment.update(build_connection_env(db, project))
 
+        job["_failure_phase"] = "deploy"
+        _deployment_event(db, deployment, "deploy_started")
+        db.commit()
         result = adapter.deploy(
             DeployRequest(
                 project_id=str(project.id),
@@ -206,6 +243,9 @@ def _process_job_body(db: Session, job: dict) -> None:
             )
         )
 
+        _deployment_event(db, deployment, "deploy_completed")
+        job["_failure_phase"] = "runtime_verification"
+        _deployment_event(db, deployment, "runtime_verification_started")
         # Confirm the process stays up after start - "docker run succeeded" is not enough
         # (bots/sites often crash on first import or missing env within a few seconds).
         append_deployment_log(deployment, "Контейнер создан. Проверяю, что процесс не падает…\n")
@@ -225,6 +265,7 @@ def _process_job_body(db: Session, job: dict) -> None:
             )
 
         append_deployment_log(deployment, "Контейнер стабилен после старта.\n")
+        _deployment_event(db, deployment, "runtime_verification_completed")
         deployment.status = "completed"
         deployment.container_id = result["container_id"]
         deployment.logs_ref = result["logs_ref"]
@@ -325,6 +366,7 @@ def _mark_deployment_failed(db: Session, job: dict, exc: BaseException) -> None:
     full_error = str(exc)
     try:
         deployment.status = "failed"
+        _deployment_event(db, deployment, f"{job.get('_failure_phase', 'deploy')}_failed")
         store_deployment_error(deployment, full_error)
         deployment.finished_at = datetime.now(UTC)
         project = db.get(Project, job.get("project_id"))

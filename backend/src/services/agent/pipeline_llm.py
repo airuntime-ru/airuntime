@@ -87,6 +87,7 @@ async def _raw_complete(
     codex_workspace_root: str | Path | None = None,
     codex_project_id: str | None = None,
     usage_sink: Callable[[dict[str, Any]], None] | None = None,
+    output_schema: dict | None = None,
 ) -> str:
     if provider_name in CODEX_ELIGIBLE_PROVIDERS:
         usable_images = images if images and codex_workspace_root is not None else None
@@ -107,6 +108,7 @@ async def _raw_complete(
             project_id=codex_project_id if usable_images else None,
             api_key=api_key,
             provider_name=provider_name,
+            output_schema=output_schema,
         )
 
     provider = get_agent_provider(provider_name)
@@ -157,7 +159,26 @@ async def complete_structured(
     openai/Codex path accepts them only together with a screenshot-only workspace; otherwise
     they are deliberately omitted and the omission is logged."""
     prompt = system_prompt + _JSON_ONLY_SUFFIX
+    # Review has a closed schema, unlike arbitrary tool parameters in execution plans.
+    output_schema = (
+        response_model.model_json_schema() if response_model.__name__ == "ReviewResult" else None
+    )
+    if output_schema is not None:
+
+        def close_objects(node):
+            if isinstance(node, dict):
+                if node.get("type") == "object":
+                    node["additionalProperties"] = False
+                    node["required"] = list(node.get("properties", {}))
+                for value in node.values():
+                    close_objects(value)
+            elif isinstance(node, list):
+                for value in node:
+                    close_objects(value)
+
+        close_objects(output_schema)
     raw = await _raw_complete(
+        output_schema=output_schema,
         provider_name=provider_name,
         model=model,
         api_key=api_key,
@@ -196,6 +217,7 @@ async def complete_structured(
         "Верни ТОЛЬКО исправленный JSON-объект по требуемой схеме."
     )
     raw_retry = await _raw_complete(
+        output_schema=output_schema,
         provider_name=provider_name,
         model=model,
         api_key=api_key,

@@ -8,6 +8,8 @@
  */
 
 import { describeDisconnectedError, type OutOfCreditsDetail } from "@/lib/api";
+import { notifyCreditBalanceChanged } from "@/lib/credit-balance-events";
+import { notifyGenerationFinished } from "@/lib/generation-notifications";
 
 export type AgentStatus = {
   phase: string;
@@ -349,6 +351,7 @@ type StreamHandlers = {
   onStart: (session: InternalSession) => void;
   createRequest: (signal: AbortSignal) => Promise<Response>;
   doneLabel: string;
+  chatTitle?: string;
   /** When stream ends on phase=deploy, mark done (repair) instead of leaving spinner. */
   completeDeployPhase?: boolean;
 };
@@ -451,6 +454,7 @@ async function runStreamLoop(projectId: string, chatId: string, handlers: Stream
   };
 
   let pendingChunk = "";
+  let cancelled = false;
   const flushAssistantChunks = () => {
     chunkFlushTimer = 0;
     if (!pendingChunk || !session.messages?.length) {
@@ -542,8 +546,9 @@ async function runStreamLoop(projectId: string, chatId: string, handlers: Stream
       }
     }
   } catch (err) {
-    const aborted = err instanceof DOMException && err.name === "AbortError";
+    const aborted = controller.signal.aborted || (err instanceof DOMException && err.name === "AbortError");
     if (aborted) {
+      cancelled = true;
       applyStatus({ phase: "done", label: "Остановлено пользователем", state: "done" });
       if (session.messages?.length) {
         const last = session.messages[session.messages.length - 1];
@@ -581,14 +586,32 @@ async function runStreamLoop(projectId: string, chatId: string, handlers: Stream
     }
     session.isLeader = false;
     session.loading = false;
+    const turnStartedAt = session.turnStartedAt;
     session.turnStartedAt = null;
     syncSession({ immediateBroadcast: true });
+    notifyCreditBalanceChanged();
+    if (!cancelled && !controller.signal.aborted) {
+      const status = session.agentStatus;
+      const success = status?.phase === "done" && status.state === "done";
+      const attention = status?.state === "waiting" || status?.phase === "needs_configuration";
+      const title = success ? "Генерация завершена" : attention ? "Нужно ваше действие" : "Генерация прервана";
+      const body = success ? "Ответ агента готов. Можно продолжить работу." : attention ? status?.label ?? "Откройте диалог, чтобы продолжить." : "Откройте диалог, чтобы проверить результат и продолжить.";
+      notifyGenerationFinished({
+        id: `${projectId}:${chatId}:${turnStartedAt}`,
+        projectId,
+        chatId,
+        title,
+        body: handlers.chatTitle ? `${handlers.chatTitle}: ${body}` : body,
+        outcome: success ? "success" : attention ? "attention" : "error",
+      });
+    }
   }
 }
 
 export async function startChatTurn(options: {
   projectId: string;
   chatId: string;
+  chatTitle?: string;
   userMessage: string;
   attachments: ChatFileAttachment[];
   displayUserContent: string;
@@ -599,6 +622,7 @@ export async function startChatTurn(options: {
   const { projectId, chatId } = options;
   await runStreamLoop(projectId, chatId, {
     doneLabel: "Изменения сохранены",
+    chatTitle: options.chatTitle,
     onStart: (session) => {
       session.agentStatus = {
         phase: "thinking",
@@ -625,6 +649,7 @@ export async function startChatTurn(options: {
 export async function startRepairTurn(options: {
   projectId: string;
   chatId: string;
+  chatTitle?: string;
   userNote: string;
   seedMessages: ChatMessage[];
   streamRequest: (signal: AbortSignal) => Promise<Response>;
@@ -632,6 +657,7 @@ export async function startRepairTurn(options: {
   const { projectId, chatId } = options;
   await runStreamLoop(projectId, chatId, {
     doneLabel: "Проверка завершена",
+    chatTitle: options.chatTitle,
     completeDeployPhase: true,
     onStart: (session) => {
       session.agentStatus = {

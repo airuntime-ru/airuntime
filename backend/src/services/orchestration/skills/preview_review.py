@@ -236,8 +236,15 @@ class _PreviewReviewSkillBase(BaseSkill):
             usage_sink=usage_records.append,
         )
         if review is None:
-            review = gated or ReviewResult(
-                verdict="revise", major_issues=["review call failed - treating as needs-revision"]
+            return SkillResult(
+                status="failed",
+                summary="Independent visual reviewer unavailable",
+                output={
+                    "preview": preview.model_dump(),
+                    "infra_failure": True,
+                    "usage": aggregate_usage(usage_records),
+                },
+                error="review_infrastructure_failed",
             )
         elif gated is not None:
             # Deterministic findings are merged into, never overridden by, the LLM verdict -
